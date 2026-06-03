@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -123,5 +125,106 @@ func TestIsRunningFalseForStalePID(t *testing.T) {
 	}
 	if alive {
 		t.Error("stale PID should not be reported alive")
+	}
+}
+
+func TestConcurrentWriteOnlyOneSucceeds(t *testing.T) {
+	// Two concurrent Write calls to a fresh path: since the existing live PID
+	// (this test process) occupies the file once written, the second must fail
+	// with "already running".
+	p := tmpPath(t)
+
+	const n = 8
+	var wg sync.WaitGroup
+	var successes int32
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			if err := Write(p); err == nil {
+				atomic.AddInt32(&successes, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// The first writer wins; subsequent writers see our own live PID and fail.
+	if got := atomic.LoadInt32(&successes); got != 1 {
+		t.Errorf("concurrent Write successes = %d, want exactly 1", got)
+	}
+}
+
+func TestWriteLockedReturnsValidLock(t *testing.T) {
+	p := tmpPath(t)
+	lock, err := WriteLocked(p)
+	if err != nil {
+		t.Fatalf("WriteLocked: %v", err)
+	}
+	if lock == nil {
+		t.Fatal("WriteLocked returned nil lock")
+	}
+	// The pidfile should now hold our PID.
+	pid, err := Read(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid != os.Getpid() {
+		t.Errorf("pid = %d, want %d", pid, os.Getpid())
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Errorf("Unlock: %v", err)
+	}
+}
+
+func TestLockBlocksSecondAcquire(t *testing.T) {
+	p := tmpPath(t)
+	first, err := Lock(p)
+	if err != nil {
+		t.Fatalf("first Lock: %v", err)
+	}
+	if _, err := Lock(p); err == nil {
+		t.Error("second Lock should fail while first is held")
+	}
+	if err := first.Unlock(); err != nil {
+		t.Errorf("Unlock: %v", err)
+	}
+	// After release, a new lock should be acquirable.
+	second, err := Lock(p)
+	if err != nil {
+		t.Fatalf("Lock after release should succeed: %v", err)
+	}
+	_ = second.Unlock()
+}
+
+func TestUnlockIsSafeToCallOnce(t *testing.T) {
+	p := tmpPath(t)
+	lock, err := Lock(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Errorf("Unlock: %v", err)
+	}
+	// Lock file should be gone after Unlock.
+	if _, err := os.Stat(lockPath(p)); !os.IsNotExist(err) {
+		t.Errorf("lock file should be removed after Unlock, stat err = %v", err)
+	}
+}
+
+func TestStaleFileCleanedUpAndRewritten(t *testing.T) {
+	p := tmpPath(t)
+	// Seed a stale (dead) PID.
+	if err := os.WriteFile(p, []byte("2147483600\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(p); err != nil {
+		t.Fatalf("Write over stale file: %v", err)
+	}
+	pid, err := Read(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid != os.Getpid() {
+		t.Errorf("after stale cleanup pid = %d, want %d", pid, os.Getpid())
 	}
 }
