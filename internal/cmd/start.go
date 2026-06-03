@@ -50,6 +50,10 @@ func runStart(ctx context.Context, pidfile string) error {
 	cfgMgr.RegisterReload(mgr)
 
 	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
+	// Windows-safe control plane: POST /internal/reload and /internal/shutdown
+	// stand in for SIGHUP/SIGTERM, which Windows lacks.
+	apiSrv.SetReloadFunc(cfgMgr.Reload)
+	apiSrv.SetShutdownFunc(mgr.Shutdown)
 	apiSrv.Start()
 	mgr.OnShutdown("api", func(ctx context.Context) error {
 		return apiSrv.Shutdown(ctx)

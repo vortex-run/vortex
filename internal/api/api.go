@@ -24,7 +24,20 @@ type Server struct {
 	log       *slog.Logger
 	version   string
 	startTime time.Time
+
+	// reloadFunc re-reads and re-validates config; set via SetReloadFunc.
+	reloadFunc func() error
+	// shutdownFunc triggers a graceful shutdown; set via SetShutdownFunc.
+	shutdownFunc func()
 }
+
+// SetReloadFunc registers the callback invoked by POST /internal/reload. It
+// should re-read and re-validate the config and return an error if invalid.
+func (s *Server) SetReloadFunc(fn func() error) { s.reloadFunc = fn }
+
+// SetShutdownFunc registers the callback invoked by POST /internal/shutdown to
+// begin a graceful shutdown.
+func (s *Server) SetShutdownFunc(fn func()) { s.shutdownFunc = fn }
 
 // New constructs a management Server. holder supplies the live config so
 // /health always reports the currently active hash, including after a reload.
@@ -40,6 +53,8 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("POST /internal/reload", s.handleInternalReload)
+	mux.HandleFunc("POST /internal/shutdown", s.handleInternalShutdown)
 	s.srv = &http.Server{
 		Addr:              addr,
 		Handler:           mux,
