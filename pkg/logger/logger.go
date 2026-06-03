@@ -9,6 +9,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -23,6 +24,21 @@ const (
 	FormatJSON Format = iota
 	// FormatText emits human-readable key=value lines. Use for local dev.
 	FormatText
+)
+
+// Sink selects where log records are written.
+type Sink string
+
+const (
+	// SinkAuto writes to the systemd journal when running as a service,
+	// otherwise to stdout.
+	SinkAuto Sink = "auto"
+	// SinkStdout writes to standard output.
+	SinkStdout Sink = "stdout"
+	// SinkStderr writes to standard error.
+	SinkStderr Sink = "stderr"
+	// SinkFile writes to the file named by Config.Path.
+	SinkFile Sink = "file"
 )
 
 // correlationKeyType is an unexported context key type so no other package can
@@ -41,20 +57,36 @@ type Config struct {
 	Level slog.Level
 	// Format selects JSON or text output. Defaults to FormatJSON.
 	Format Format
-	// Output is where records are written. Defaults to os.Stdout.
+	// Output is where records are written. When nil, the Sink selects the
+	// destination. An explicit Output overrides Sink (used by tests).
 	Output io.Writer
 	// AddSource includes source file:line in each record when true.
 	AddSource bool
+	// Sink selects the output destination when Output is nil. Defaults to
+	// SinkAuto, which uses the systemd journal under a service or stdout
+	// otherwise.
+	Sink Sink
+	// Path is the log file path when Sink is SinkFile.
+	Path string
 }
 
 // New builds a *slog.Logger from cfg. It installs a handler that automatically
 // promotes a correlation ID stored in the record's context to a top-level
 // attribute, so callers never have to thread it through manually.
+//
+// When Output is nil and Sink is SinkAuto on a systemd host, a journal-native
+// handler is used (priority-prefixed lines on stderr for journalctl). Otherwise
+// the configured Format (text/JSON) is written to the resolved sink.
 func New(cfg Config) *slog.Logger {
-	out := cfg.Output
-	if out == nil {
-		out = os.Stdout
+	// Journal path: only when no explicit Output is given, Sink is auto, and we
+	// detect journald. The journal handler emits correlation_id itself.
+	if cfg.Output == nil && (cfg.Sink == "" || cfg.Sink == SinkAuto) && IsJournald() {
+		if jh := NewJournalHandler(cfg.Level); jh != nil {
+			return slog.New(jh)
+		}
 	}
+
+	out := resolveSink(cfg)
 
 	opts := &slog.HandlerOptions{
 		Level:     cfg.Level,
@@ -70,6 +102,30 @@ func New(cfg Config) *slog.Logger {
 	}
 
 	return slog.New(&correlationHandler{inner: base})
+}
+
+// resolveSink returns the io.Writer for cfg: an explicit Output wins, otherwise
+// the Sink selects stdout/stderr/file. A file sink that cannot be opened logs
+// the failure to stderr and falls back to stderr so logging never aborts boot.
+func resolveSink(cfg Config) io.Writer {
+	if cfg.Output != nil {
+		return cfg.Output
+	}
+	switch cfg.Sink {
+	case SinkStderr:
+		return os.Stderr
+	case SinkFile:
+		f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "logger: cannot open log file %q: %v; falling back to stderr\n", cfg.Path, err)
+			return os.Stderr
+		}
+		return f
+	case SinkStdout, SinkAuto, "":
+		return os.Stdout
+	default:
+		return os.Stdout
+	}
 }
 
 // ParseLevel converts a config string ("debug", "info", "warn", "error") into a
