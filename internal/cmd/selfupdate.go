@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,9 +16,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vortex-run/vortex/internal/update"
 )
 
 // githubRepo is the source repository for VORTEX releases.
@@ -27,18 +27,6 @@ const githubRepo = "vortex-run/vortex"
 
 // errSelfUpdate signals a self-update failure whose detail was already printed.
 var errSelfUpdate = errors.New("self-update failed")
-
-// ghRelease and ghAsset model the subset of the GitHub releases API we need.
-type ghRelease struct {
-	Tag    string    `json:"tag_name"`
-	Assets []ghAsset `json:"assets"`
-}
-
-type ghAsset struct {
-	Name string `json:"name"`
-	URL  string `json:"browser_download_url"`
-	Size int64  `json:"size"`
-}
 
 // newSelfUpdateCommand builds `vortex self-update`.
 func newSelfUpdateCommand() *cobra.Command {
@@ -61,10 +49,10 @@ func newSelfUpdateCommand() *cobra.Command {
 
 func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	out := cmd.OutOrStdout()
-	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-	defer cancel()
+	update.SetUserAgent("vortex/" + version)
+	ctx := cmd.Context()
 
-	rel, err := fetchLatestRelease(ctx)
+	rel, err := update.FetchLatestRelease(ctx, githubRepo)
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 		return errSelfUpdate
@@ -81,10 +69,9 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 		return nil
 	}
 
-	assetName := assetFileName(runtime.GOOS, runtime.GOARCH)
-	asset := findAsset(rel, assetName)
-	if asset == nil {
-		fmt.Fprintf(cmd.OutOrStderr(), "error: no release asset %q for this platform\n", assetName)
+	asset, err := update.AssetForPlatform(rel, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 		return errSelfUpdate
 	}
 
@@ -98,7 +85,7 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	}
 
 	// Fetch and parse checksums.txt for this asset.
-	sums, err := fetchChecksums(ctx, rel)
+	sums, err := update.FetchChecksums(ctx, rel)
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 		return errSelfUpdate
@@ -119,7 +106,7 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	defer func() { _ = os.Remove(tmpName) }()
 
 	fmt.Fprintf(out, "Downloading %s ", asset.Name)
-	if err := downloadVerify(ctx, asset.URL, tmpName, wantSHA, out); err != nil {
+	if err := downloadVerify(ctx, asset.DownloadURL, tmpName, wantSHA, out); err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "\nerror: %v\n", err)
 		return errSelfUpdate
 	}
@@ -161,24 +148,6 @@ func sameVersion(a, b string) bool {
 	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
-// assetFileName returns the release archive name for a platform.
-func assetFileName(goos, goarch string) string {
-	ext := "tar.gz"
-	if goos == "windows" {
-		ext = "zip"
-	}
-	return fmt.Sprintf("vortex_%s_%s.%s", goos, goarch, ext)
-}
-
-func findAsset(rel *ghRelease, name string) *ghAsset {
-	for i := range rel.Assets {
-		if rel.Assets[i].Name == name {
-			return &rel.Assets[i]
-		}
-	}
-	return nil
-}
-
 // confirmed reads a line and reports whether it is an affirmative y/yes.
 func confirmed(r io.Reader) bool {
 	s := bufio.NewScanner(r)
@@ -200,55 +169,6 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	}
 	req.Header.Set("User-Agent", "vortex/"+version)
 	return http.DefaultClient.Do(req)
-}
-
-func fetchLatestRelease(ctx context.Context) (*ghRelease, error) {
-	url := "https://api.github.com/repos/" + githubRepo + "/releases/latest"
-	resp, err := httpGet(ctx, url)
-	if err != nil {
-		return nil, fmt.Errorf("fetching latest release: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
-	}
-	var rel ghRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return nil, fmt.Errorf("parsing release JSON: %w", err)
-	}
-	return &rel, nil
-}
-
-func fetchChecksums(ctx context.Context, rel *ghRelease) (map[string]string, error) {
-	asset := findAsset(rel, "checksums.txt")
-	if asset == nil {
-		return nil, errors.New("release has no checksums.txt asset")
-	}
-	resp, err := httpGet(ctx, asset.URL)
-	if err != nil {
-		return nil, fmt.Errorf("downloading checksums.txt: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("checksums.txt download returned %s", resp.Status)
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return parseChecksums(string(b)), nil
-}
-
-// parseChecksums turns "<hex>  <filename>" lines into a filename→hash map.
-func parseChecksums(s string) map[string]string {
-	m := make(map[string]string)
-	for _, line := range strings.Split(s, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 {
-			m[fields[1]] = fields[0]
-		}
-	}
-	return m
 }
 
 // downloadVerify streams url to dest and checks its SHA-256, printing a dot per
