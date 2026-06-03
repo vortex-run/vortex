@@ -7,47 +7,25 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"github.com/vortex-run/vortex/internal/update"
 )
 
 // swapBinary atomically replaces the running binary at self with newBin on
-// Unix: the current binary is moved aside to self+".bak", newBin is copied into
-// place and made executable, then the new binary is verified by running it with
-// --version. On verification failure the .bak is restored.
+// Unix using update.AtomicReplace (which keeps a .bak), then verifies the new
+// binary by running it with --version. On verification failure it rolls back
+// from the .bak; on success it removes the .bak.
 func swapBinary(newBin, self, newVersion string, out io.Writer) error {
-	bak := self + ".bak"
-	if err := os.Rename(self, bak); err != nil {
-		return fmt.Errorf("moving current binary aside: %w", err)
-	}
-
-	if err := copyFile(newBin, self, 0o755); err != nil {
-		_ = os.Rename(bak, self) // restore
-		return fmt.Errorf("installing new binary: %w", err)
+	if err := update.AtomicReplace(newBin, self); err != nil {
+		return err
 	}
 
 	if err := exec.Command(self, "--version").Run(); err != nil {
-		_ = os.Remove(self)
-		_ = os.Rename(bak, self)
+		_ = update.Rollback(self)
 		return fmt.Errorf("new binary failed verification, rolled back to previous version: %w", err)
 	}
 
-	_ = os.Remove(bak)
+	_ = os.Remove(self + ".bak")
 	fmt.Fprintf(out, "VORTEX updated to %s\n", newVersion)
 	return nil
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
 }

@@ -1,14 +1,6 @@
 package cmd
 
-import (
-	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 func TestSelfUpdateRegisters(t *testing.T) {
 	if newSelfUpdateCommand().Use != "self-update" {
@@ -42,18 +34,5 @@ func TestSameVersion(t *testing.T) {
 	}
 }
 
-func TestDownloadVerifyChecksumMismatchRemovesFile(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("the actual payload"))
-	}))
-	defer srv.Close()
-
-	dest := filepath.Join(t.TempDir(), "dl.bin")
-	err := downloadVerify(context.Background(), srv.URL, dest, "0000deadbeef", io.Discard)
-	if err == nil {
-		t.Fatal("expected checksum mismatch error")
-	}
-	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
-		t.Errorf("dest file should be removed on mismatch, stat err = %v", statErr)
-	}
-}
+// Note: download/SHA-256/extract behaviour is covered in internal/update
+// (download_test.go). This file covers only the command surface.
