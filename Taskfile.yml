@@ -69,6 +69,29 @@ tasks:
     cmds:
       - '"{{.BIN}}" check --config vortex.cue'
 
+  service:install:
+    desc: Install VORTEX as a system service (requires root on Linux)
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" service install'
+
+  service:uninstall:
+    desc: Remove VORTEX system service
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" service uninstall'
+
+  service:generate:
+    desc: Print the systemd unit file to stdout
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" service generate --format systemd'
+
+  install:
+    desc: Run the installer script (Linux/macOS only)
+    cmds:
+      - bash scripts/install.sh
+
   test:
     desc: Run all tests (race detector when a C compiler is available)
     vars:
