@@ -121,6 +121,16 @@ tasks:
       - git tag -a {{.VERSION}} -m "Release {{.VERSION}}"
       - git push origin {{.VERSION}}
 
+  update:check:
+    desc: Check if a newer VORTEX release is available
+    cmds:
+      - '"{{.BIN}}" self-update --check'
+
+  update:
+    desc: Update VORTEX to the latest release
+    cmds:
+      - '"{{.BIN}}" self-update --yes'
+
   test:
     desc: Run all tests (race detector when a C compiler is available)
     vars:
