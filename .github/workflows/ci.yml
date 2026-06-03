@@ -64,3 +64,18 @@ jobs:
           # The prebuilt binaries are compiled with an older Go and refuse to
           # lint a module that targets a newer `go` version (exit code 3).
           install-mode: goinstall
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    needs: [test] # only run once unit tests pass
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Run integration tests
+        run: go test -v -tags integration -timeout 120s ./integration/...
