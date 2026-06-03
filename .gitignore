@@ -33,6 +33,11 @@ go.work.sum
 # Local config overrides — never commit real secrets (Non-Negotiable Rule #2)
 *.local.cue
 
+# Runtime pidfiles/locks written by `vortex start`
+vortex.pid
+*.pid
+*.pid.lock
+
 # env file
 .env
 
