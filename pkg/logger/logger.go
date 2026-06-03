@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 )
 
 // Format selects the encoding used for log records.
@@ -68,6 +69,9 @@ type Config struct {
 	Sink Sink
 	// Path is the log file path when Sink is SinkFile.
 	Path string
+	// Sampling enables windowed sampling of Debug/Info records (Warn/Error
+	// always pass). Enable in production when a route processes >10k req/s.
+	Sampling bool
 }
 
 // New builds a *slog.Logger from cfg. It installs a handler that automatically
@@ -82,7 +86,7 @@ func New(cfg Config) *slog.Logger {
 	// detect journald. The journal handler emits correlation_id itself.
 	if cfg.Output == nil && (cfg.Sink == "" || cfg.Sink == SinkAuto) && IsJournald() {
 		if jh := NewJournalHandler(cfg.Level); jh != nil {
-			return slog.New(jh)
+			return slog.New(applySampling(jh, cfg))
 		}
 	}
 
@@ -101,7 +105,16 @@ func New(cfg Config) *slog.Logger {
 		base = slog.NewJSONHandler(out, opts)
 	}
 
-	return slog.New(&correlationHandler{inner: base})
+	return slog.New(applySampling(&correlationHandler{inner: base}, cfg))
+}
+
+// applySampling wraps h with a SamplingHandler when cfg.Sampling is set, using
+// production defaults (Tick=1s, First=10, Thereafter=100).
+func applySampling(h slog.Handler, cfg Config) slog.Handler {
+	if !cfg.Sampling {
+		return h
+	}
+	return NewSamplingHandler(h, SamplingConfig{Tick: time.Second, First: 10, Thereafter: 100})
 }
 
 // resolveSink returns the io.Writer for cfg: an explicit Output wins, otherwise
