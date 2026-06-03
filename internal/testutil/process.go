@@ -39,12 +39,7 @@ func BuildBinary(t *testing.T) string {
 	}
 	bin := filepath.Join(dir, name)
 
-	// repoRoot: this file lives at <root>/internal/testutil, so the module root
-	// is two directories up.
-	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatalf("resolving repo root: %v", err)
-	}
+	repoRoot := moduleRoot(t)
 
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
 	cmd.Dir = repoRoot
@@ -53,6 +48,26 @@ func BuildBinary(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.Remove(bin) })
 	return bin
+}
+
+// moduleRoot walks up from the test's working directory until it finds the
+// directory containing go.mod, returning its absolute path.
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not locate go.mod above %s", dir)
+		}
+		dir = parent
+	}
 }
 
 // VortexProcess is a running vortex server under test.
