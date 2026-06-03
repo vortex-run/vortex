@@ -17,8 +17,17 @@ import (
 	"time"
 )
 
+// ErrNoReleases is returned by FetchLatestRelease when the repository has no
+// published releases yet (the GitHub API answers 404). It is informational
+// rather than a failure — callers should treat it as "nothing to update to".
+var ErrNoReleases = errors.New("no releases published yet")
+
 // userAgent is sent on every GitHub request; GitHub requires a User-Agent.
 var userAgent = "vortex/dev"
+
+// apiBaseURL is the GitHub API root. It is a var (not a const) so tests can
+// point FetchLatestRelease at a local httptest server.
+var apiBaseURL = "https://api.github.com"
 
 // SetUserAgent sets the User-Agent string sent to GitHub (e.g. the build
 // version). Safe to call once at startup.
@@ -71,12 +80,15 @@ func FetchLatestRelease(ctx context.Context, repo string) (*Release, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	url := apiBaseURL + "/repos/" + repo + "/releases/latest"
 	resp, err := httpGet(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("fetching latest release: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, ErrNoReleases
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
 	}

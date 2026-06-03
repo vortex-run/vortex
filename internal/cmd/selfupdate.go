@@ -46,6 +46,11 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	ctx := cmd.Context()
 
 	rel, err := update.FetchLatestRelease(ctx, githubRepo)
+	if errors.Is(err, update.ErrNoReleases) {
+		fmt.Fprintf(out, "No releases published yet for %s.\n", githubRepo)
+		fmt.Fprintln(out, "Create a release by running: task tag VERSION=v0.1.0")
+		return nil
+	}
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 		return errSelfUpdate

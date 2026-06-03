@@ -1,6 +1,28 @@
 package update
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestFetchLatestReleaseNoReleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	old := apiBaseURL
+	apiBaseURL = srv.URL
+	t.Cleanup(func() { apiBaseURL = old })
+
+	_, err := FetchLatestRelease(context.Background(), "vortex-run/vortex")
+	if !errors.Is(err, ErrNoReleases) {
+		t.Fatalf("expected ErrNoReleases for 404, got %v", err)
+	}
+}
 
 func sampleRelease() *Release {
 	return &Release{
