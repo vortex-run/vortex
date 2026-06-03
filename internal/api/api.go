@@ -60,6 +60,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /ready", s.handleReady)
 	mux.HandleFunc("POST /internal/reload", s.handleInternalReload)
 	mux.HandleFunc("POST /internal/shutdown", s.handleInternalShutdown)
 	s.srv = &http.Server{
@@ -124,6 +125,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		s.log.Error("encoding health response", "err", err)
+	}
+}
+
+// handleReady is a readiness probe. The management server only begins serving
+// once boot has completed, so reaching this handler means VORTEX is ready; it
+// returns 200 with a small JSON body. (As subsystems gain their own readiness
+// gates in later milestones, this will aggregate them.)
+func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ready": true}); err != nil {
+		s.log.Error("encoding ready response", "err", err)
 	}
 }
 

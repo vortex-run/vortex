@@ -128,6 +128,14 @@ func (p *VortexProcess) Stop(t *testing.T) {
 	p.stopped = true
 }
 
+// MarkStopped records that the process has already exited (e.g. via the
+// /internal/shutdown endpoint) so the cleanup hook does not try to kill it.
+func (p *VortexProcess) MarkStopped() {
+	p.stopped = true
+	// Reap the child so it does not linger as a zombie.
+	go func() { _, _ = p.Cmd.Process.Wait() }()
+}
+
 // Health fetches and parses GET /health, returning the JSON body as a map.
 func (p *VortexProcess) Health(t *testing.T) map[string]any {
 	t.Helper()
