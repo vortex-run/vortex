@@ -52,7 +52,6 @@ func NewRootCommand() *cobra.Command {
 		Use:           "vortex",
 		Short:         "VORTEX — one binary. any server. fully autonomous.",
 		Long:          "VORTEX is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
-		Version:       fmt.Sprintf("%s (commit %s, built %s, %s/%s, %s)", version, commit, date, runtime.GOOS, runtime.GOARCH, runtime.Version()),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Initialise the logger from the global flags before any subcommand
@@ -78,6 +77,8 @@ func NewRootCommand() *cobra.Command {
 	pf.StringVar(&flags.configPath, "config", config.DefaultPath, "path to vortex.cue")
 	pf.StringVar(&flags.logLevel, "log-level", "info", "log level: debug|info|warn|error")
 	pf.BoolVar(&flags.jsonLog, "json", false, "emit logs as JSON instead of human-readable text")
+
+	root.AddCommand(newVersionCommand())
 
 	return root
 }
