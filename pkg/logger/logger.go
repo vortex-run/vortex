@@ -42,14 +42,8 @@ const (
 	SinkFile Sink = "file"
 )
 
-// correlationKeyType is an unexported context key type so no other package can
-// collide with our context value.
-type correlationKeyType struct{}
-
-var correlationKey correlationKeyType
-
 // correlationField is the structured-log attribute key under which the
-// correlation ID is recorded.
+// correlation ID is recorded. The context key and helpers live in context.go.
 const correlationField = "correlation_id"
 
 // Config configures a Logger.
@@ -155,21 +149,6 @@ func ParseLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// WithCorrelationID returns a copy of ctx carrying the given correlation ID.
-// Any record logged with that context (via Logger.InfoContext etc.) will
-// include the ID automatically.
-func WithCorrelationID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, correlationKey, id)
-}
-
-// CorrelationID extracts the correlation ID from ctx, or "" if none is set.
-func CorrelationID(ctx context.Context) string {
-	if id, ok := ctx.Value(correlationKey).(string); ok {
-		return id
-	}
-	return ""
 }
 
 // correlationHandler wraps another slog.Handler and injects the context's
