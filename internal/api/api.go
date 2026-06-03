@@ -19,10 +19,11 @@ const DefaultAddr = ":9090"
 
 // Server is the management HTTP server.
 type Server struct {
-	srv     *http.Server
-	holder  *config.Holder
-	log     *slog.Logger
-	version string
+	srv       *http.Server
+	holder    *config.Holder
+	log       *slog.Logger
+	version   string
+	startTime time.Time
 }
 
 // New constructs a management Server. holder supplies the live config so
@@ -32,9 +33,10 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		addr = DefaultAddr
 	}
 	s := &Server{
-		holder:  holder,
-		log:     log,
-		version: version,
+		holder:    holder,
+		log:       log,
+		version:   version,
+		startTime: time.Now(),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -55,6 +57,7 @@ type healthResponse struct {
 	Version     string `json:"version"`
 	ConfigHash  string `json:"config_hash"`
 	ClusterName string `json:"cluster_name"`
+	Uptime      string `json:"uptime"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -64,6 +67,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		Version:     s.version,
 		ConfigHash:  cfg.Hash(),
 		ClusterName: cfg.Cluster.Name,
+		Uptime:      time.Since(s.startTime).Round(time.Second).String(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {

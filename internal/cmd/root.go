@@ -80,6 +80,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newCheckCommand())
 	root.AddCommand(newStartCommand())
 	root.AddCommand(newStopCommand())
+	root.AddCommand(newStatusCommand())
 
 	return root
 }
@@ -90,7 +91,7 @@ func Execute() {
 		// Some subcommands (e.g. check) already print their own detailed,
 		// user-facing diagnostics and signal failure via a sentinel; in that
 		// case exit non-zero without an extra generic log line.
-		if errors.Is(err, errCheckFailed) {
+		if errors.Is(err, errCheckFailed) || errors.Is(err, errNotRunning) {
 			os.Exit(1)
 		}
 		// PersistentPreRunE may not have run on early parse errors; guard nil.
