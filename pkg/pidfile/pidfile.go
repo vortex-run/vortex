@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Write records the current process ID in the file at path, creating parent
@@ -37,9 +38,43 @@ func Write(path string) error {
 		return err
 	}
 
-	// File exists: decide whether it is live or stale.
-	if alive, pid, rerr := IsRunning(path); rerr == nil && alive {
-		return fmt.Errorf("vortex is already running (pid %d)", pid)
+	// The file exists. Deciding whether it is a live owner or a stale leftover
+	// is a read-modify-write that must be serialized: take the exclusive lock so
+	// concurrent writers (goroutines or processes) cannot both clean up and
+	// rewrite. If the lock is contended, another writer is acting now — treat
+	// this as "someone else owns it".
+	lock, lerr := Lock(path)
+	if lerr != nil {
+		if pid, rerr := Read(path); rerr == nil {
+			return fmt.Errorf("vortex is already running (pid %d)", pid)
+		}
+		return fmt.Errorf("pidfile %s is contended: %w", path, lerr)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	// Re-attempt the atomic create under the lock: the previous holder may have
+	// already finished and released, or the file may now be stale.
+	if err := writeExcl(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+
+	// A racing winner may have created the exclusive marker but not yet renamed
+	// the PID content into place; a parse failure here can be transient, so give
+	// the content a brief moment to appear before concluding the file is stale.
+	for attempt := 0; attempt < 50; attempt++ {
+		alive, pid, rerr := IsRunning(path)
+		if rerr == nil {
+			if alive {
+				return fmt.Errorf("vortex is already running (pid %d)", pid)
+			}
+			break // readable and dead → genuinely stale
+		}
+		if errors.Is(rerr, os.ErrNotExist) {
+			break // winner's content never landed; safe to claim
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	// Stale (dead PID, unreadable, or invalid): remove and retry once.
@@ -52,16 +87,36 @@ func Write(path string) error {
 	return nil
 }
 
-// writeExcl atomically creates path and writes the current PID. It returns an
-// error wrapping os.ErrExist if the file already exists.
+// writeExcl claims path for this process and writes the current PID, ensuring
+// the pidfile is never observed empty by a racing reader. It first creates an
+// exclusive marker at path (O_CREATE|O_EXCL) to win the claim atomically — this
+// returns an error wrapping os.ErrExist if another writer already holds it —
+// then writes the PID to a temp file and renames it over path, so the content
+// appears atomically and fully.
 func writeExcl(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.WriteString(strconv.Itoa(os.Getpid()) + "\n"); err != nil {
+	_ = f.Close()
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".vortex-pid-*")
+	if err != nil {
+		return fmt.Errorf("creating temp pidfile: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.WriteString(strconv.Itoa(os.Getpid()) + "\n"); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("writing pidfile %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("closing temp pidfile: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("finalizing pidfile %s: %w", path, err)
 	}
 	return nil
 }
