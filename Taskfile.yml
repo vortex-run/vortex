@@ -16,11 +16,14 @@ vars:
     sh: git rev-parse --short HEAD 2>/dev/null || echo "none"
   DATE:
     sh: '{{if eq OS "windows"}}powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")"{{else}}date -u +%Y-%m-%dT%H:%M:%SZ{{end}}'
+  # Version metadata is stamped into the internal/cmd package, where the root
+  # command lives (the entrypoint main package no longer holds these vars).
+  MOD: github.com/vortex-run/vortex/internal/cmd
   LDFLAGS: >-
     -s -w
-    -X main.version={{.VERSION}}
-    -X main.commit={{.COMMIT}}
-    -X main.date={{.DATE}}
+    -X {{.MOD}}.version={{.VERSION}}
+    -X {{.MOD}}.commit={{.COMMIT}}
+    -X {{.MOD}}.date={{.DATE}}
 
 tasks:
   default:
