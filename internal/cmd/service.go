@@ -145,6 +145,11 @@ func newServiceGenerateCommand() *cobra.Command {
 				f = service.DetectInitSystem()
 			}
 			out := cmd.OutOrStdout()
+			// "logrotate" is not an init system but a valid generate target.
+			if format == "logrotate" {
+				fmt.Fprint(out, service.GenerateLogrotate(service.DefaultLogrotateConfig()))
+				return nil
+			}
 			switch f {
 			case service.InitOpenRC:
 				fmt.Fprint(out, service.GenerateOpenRC(service.DefaultOpenRCConfig(exec, conf)))
@@ -158,7 +163,7 @@ func newServiceGenerateCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&format, "format", "", "unit format: systemd|openrc (default: auto-detect)")
+	c.Flags().StringVar(&format, "format", "", "output format: systemd|openrc|logrotate (default: auto-detect init system)")
 	c.Flags().StringVar(&execPath, "exec-path", "", "path to the vortex binary (default: this binary)")
 	c.Flags().StringVar(&configPath, "config-path", "", "path to vortex.cue (default: the --config value)")
 	return c
