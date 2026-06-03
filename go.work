@@ -1,0 +1,9 @@
+go 1.26
+
+// VORTEX Go workspace.
+//
+// The whole platform compiles into a single binary (Non-Negotiable Rule #1),
+// so for now there is exactly one module rooted at the repository root. As the
+// build plan progresses (e.g. the Go plugin SDK in M6.3), additional modules
+// such as ./plugins/sdk-go may be added here with their own `use` directives.
+use .

@@ -1,0 +1,30 @@
+# golangci-lint configuration for VORTEX.
+#
+# Conservative, high-signal linter set for the M1.1 foundation. As the codebase
+# grows we tighten this rather than loosen it. Aligned with golangci-lint v1.x.
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # standard go vet analyzers
+    - ineffassign   # ineffectual assignments
+    - staticcheck   # comprehensive static analysis
+    - unused        # unused code
+    - gofmt         # formatting
+    - goimports     # import grouping/formatting
+    - misspell      # common misspellings
+    - revive        # style/lint replacement for golint
+    - unconvert     # redundant type conversions
+    - bodyclose     # HTTP response bodies closed
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Allow dot-less, short names and relaxed checks in test files.
+    - path: _test\.go
+      linters:
+        - errcheck

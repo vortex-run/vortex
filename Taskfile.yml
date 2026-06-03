@@ -1,0 +1,87 @@
+# Taskfile for VORTEX — https://taskfile.dev
+#
+# The README mandates Taskfile (not Makefile) for build commands. Run `task`
+# with no args to list available tasks, or `task <name>` to run one.
+version: "3"
+
+vars:
+  # Output binary name; .exe is appended automatically on Windows by Go, but we
+  # set BIN explicitly so paths are predictable across platforms.
+  BIN: '{{if eq OS "windows"}}bin/vortex.exe{{else}}bin/vortex{{end}}'
+  PKG: ./cmd/vortex
+  # Version metadata stamped into the binary via -ldflags.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev"
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "none"
+  DATE:
+    sh: '{{if eq OS "windows"}}powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")"{{else}}date -u +%Y-%m-%dT%H:%M:%SZ{{end}}'
+  LDFLAGS: >-
+    -s -w
+    -X main.version={{.VERSION}}
+    -X main.commit={{.COMMIT}}
+    -X main.date={{.DATE}}
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Compile the single vortex binary
+    cmds:
+      - go build -trimpath -ldflags "{{.LDFLAGS}}" -o "{{.BIN}}" {{.PKG}}
+    sources:
+      - "**/*.go"
+      - go.mod
+    generates:
+      - "{{.BIN}}"
+
+  run:
+    desc: Build and run vortex (pass args after --, e.g. task run -- --version)
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" {{.CLI_ARGS}}'
+
+  test:
+    desc: Run all tests (race detector when a C compiler is available)
+    vars:
+      # The race detector needs cgo, which needs a C compiler. Most Linux/macOS
+      # dev and CI machines have one; a stock Windows box often does not. Detect
+      # it and enable -race only when usable, so `task test` never fails purely
+      # for lack of a C toolchain. CI runs the race detector unconditionally.
+      HAS_CC:
+        sh: '{{if eq OS "windows"}}powershell -NoProfile -Command "if (Get-Command gcc,clang,cc -ErrorAction SilentlyContinue) {''yes''} else {''no''}"{{else}}command -v cc gcc clang >/dev/null 2>&1 && echo yes || echo no{{end}}'
+    cmds:
+      - cmd: '{{if eq .HAS_CC "yes"}}go test -race -count=1 ./...{{else}}go test -count=1 ./...{{end}}'
+
+  test:race:
+    desc: Run all tests with the race detector (requires a C compiler / cgo)
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -race -count=1 ./...
+
+  lint:
+    desc: Run golangci-lint over the whole module
+    cmds:
+      - golangci-lint run ./...
+
+  vet:
+    desc: Run go vet (fast static checks, no external tools)
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Tidy and verify module dependencies
+    cmds:
+      - go mod tidy
+      - go mod verify
+
+  clean:
+    desc: Remove build artifacts and caches
+    cmds:
+      - '{{if eq OS "windows"}}powershell -NoProfile -Command "Remove-Item -Recurse -Force bin -ErrorAction SilentlyContinue"{{else}}rm -rf bin{{end}}'
+      - go clean -cache -testcache

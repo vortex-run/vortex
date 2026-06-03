@@ -20,9 +20,18 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# Go workspace: go.work IS committed (README requires it). The local sum is not.
 go.work.sum
+
+# Build output directory
+/bin/
+/dist/
+
+# Task runner local cache
+/.task/
+
+# Local config overrides — never commit real secrets (Non-Negotiable Rule #2)
+*.local.cue
 
 # env file
 .env
