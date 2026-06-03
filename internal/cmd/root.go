@@ -11,6 +11,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -79,6 +80,7 @@ func NewRootCommand() *cobra.Command {
 	pf.BoolVar(&flags.jsonLog, "json", false, "emit logs as JSON instead of human-readable text")
 
 	root.AddCommand(newVersionCommand())
+	root.AddCommand(newCheckCommand())
 
 	return root
 }
@@ -86,6 +88,12 @@ func NewRootCommand() *cobra.Command {
 // Execute runs the root command and exits the process with an appropriate code.
 func Execute() {
 	if err := NewRootCommand().Execute(); err != nil {
+		// Some subcommands (e.g. check) already print their own detailed,
+		// user-facing diagnostics and signal failure via a sentinel; in that
+		// case exit non-zero without an extra generic log line.
+		if errors.Is(err, errCheckFailed) {
+			os.Exit(1)
+		}
 		// PersistentPreRunE may not have run on early parse errors; guard nil.
 		if log != nil {
 			log.Error("vortex exited with error", "err", err)
