@@ -1,0 +1,86 @@
+# GoReleaser configuration for VORTEX (build plan M1.6).
+#
+# Produces static, single-binary releases for every supported platform and
+# publishes them with SHA-256 checksums and an auto-generated changelog on each
+# v* tag. CGO is disabled so the binaries are fully static and cross-compile
+# cleanly. Run `goreleaser check` to validate, `goreleaser release --snapshot
+# --clean` to build all platforms locally without publishing.
+#
+# Artifact signing (cosign) is intentionally deferred to M19 (security audit),
+# so there is no `signs:` block yet.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: vortex
+    main: ./cmd/vortex
+    binary: vortex
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/vortex-run/vortex/internal/cmd.version={{.Version}}
+      - -X github.com/vortex-run/vortex/internal/cmd.commit={{.Commit}}
+      - -X github.com/vortex-run/vortex/internal/cmd.date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    name_template: >-
+      vortex_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - vortex.cue
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: "New features"
+      regexp: "^feat"
+      order: 0
+    - title: "Bug fixes"
+      regexp: "^fix"
+      order: 1
+    - title: "Other"
+      order: 999
+
+release:
+  github:
+    owner: vortex-run
+    name: vortex
+  draft: false
+  prerelease: auto
+  name_template: "VORTEX {{.Tag}}"
