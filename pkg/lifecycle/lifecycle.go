@@ -38,7 +38,10 @@ type Manager struct {
 	shutdowns []namedHook
 	reloads   []namedHook
 
-	done chan struct{} // closed once Run returns
+	done     chan struct{} // closed once Run returns
+	stopCh   chan struct{} // closed by Shutdown to unblock Run
+	stopOnce sync.Once
+	running  bool // true while Run is blocking on signals
 }
 
 type namedHook struct {
@@ -65,6 +68,7 @@ func New(cfg Config) *Manager {
 		log:     cfg.Logger,
 		timeout: timeout,
 		done:    make(chan struct{}),
+		stopCh:  make(chan struct{}),
 	}
 }
 
@@ -90,6 +94,10 @@ func (m *Manager) OnReload(name string, fn Hook) {
 func (m *Manager) Run(ctx context.Context) {
 	defer close(m.done)
 
+	m.mu.Lock()
+	m.running = true
+	m.mu.Unlock()
+
 	sigCh := make(chan os.Signal, 1)
 	notifyShutdown(sigCh)
 	notifyReload(sigCh)
@@ -99,6 +107,12 @@ func (m *Manager) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			m.log.Info("context cancelled, shutting down")
+			m.runShutdown()
+			return
+		case <-m.stopCh:
+			// Shutdown() was called programmatically (e.g. the Windows
+			// /internal/shutdown path).
+			m.log.Info("programmatic shutdown requested")
 			m.runShutdown()
 			return
 		case sig := <-sigCh:
@@ -120,10 +134,24 @@ func (m *Manager) Reload() {
 	m.runReload()
 }
 
-// Shutdown triggers the shutdown hooks programmatically without waiting for a
-// signal. Safe to call at most once.
+// Shutdown initiates a graceful shutdown programmatically (e.g. from the
+// Windows /internal/shutdown endpoint, which has no SIGTERM to send). If Run is
+// currently blocking, Shutdown signals it to unblock and run the shutdown hooks
+// itself; otherwise (no Run active, as in unit tests) Shutdown runs the hooks
+// directly. Safe to call multiple times.
 func (m *Manager) Shutdown() {
-	m.runShutdown()
+	m.mu.Lock()
+	running := m.running
+	m.mu.Unlock()
+
+	if running {
+		m.stopOnce.Do(func() { close(m.stopCh) })
+		return
+	}
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+		m.runShutdown()
+	})
 }
 
 // Done returns a channel closed once Run has finished its shutdown sequence.
