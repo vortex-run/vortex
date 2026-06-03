@@ -103,6 +103,24 @@ tasks:
           echo "No log file found. Run: task start"
         fi
 
+  snapshot:
+    desc: Build snapshot release locally (all platforms, no publish)
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release:check:
+    desc: Validate .goreleaser.yaml config
+    cmds:
+      - goreleaser check
+
+  tag:
+    desc: "Create and push a release tag (usage: task tag VERSION=v0.1.0)"
+    requires:
+      vars: [VERSION]
+    cmds:
+      - git tag -a {{.VERSION}} -m "Release {{.VERSION}}"
+      - git push origin {{.VERSION}}
+
   test:
     desc: Run all tests (race detector when a C compiler is available)
     vars:
