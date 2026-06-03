@@ -10,18 +10,14 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"runtime"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/api"
 	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
@@ -68,9 +64,10 @@ func NewRootCommand() *cobra.Command {
 			})
 			return nil
 		},
-		// With no subcommand, boot VORTEX.
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return boot()
+		// With no subcommand, boot VORTEX using the default pidfile — the same
+		// path as `vortex start`.
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runStart(cmd.Context(), "vortex.pid")
 		},
 	}
 
@@ -81,6 +78,7 @@ func NewRootCommand() *cobra.Command {
 
 	root.AddCommand(newVersionCommand())
 	root.AddCommand(newCheckCommand())
+	root.AddCommand(newStartCommand())
 
 	return root
 }
@@ -102,46 +100,4 @@ func Execute() {
 		}
 		os.Exit(1)
 	}
-}
-
-// boot loads config, starts the management API, wires hot-reload, and blocks
-// until a shutdown signal. This is the behaviour previously in main.run().
-func boot() error {
-	log.Info("vortex starting",
-		"version", version,
-		"commit", commit,
-		"go", runtime.Version(),
-		"os", runtime.GOOS,
-		"arch", runtime.GOARCH,
-	)
-
-	cfgMgr, err := config.NewManager(flags.configPath, log)
-	if err != nil {
-		return fmt.Errorf("config invalid, refusing to start: %w", err)
-	}
-	cfg := cfgMgr.Current()
-	log.Info("config loaded",
-		"cluster", cfg.Cluster.Name,
-		"routes", len(cfg.Routes),
-		"hash", cfg.Hash(),
-	)
-	// Re-derive the logger using the config's log level now that it is known.
-	format := logger.FormatText
-	if flags.jsonLog {
-		format = logger.FormatJSON
-	}
-	log = logger.New(logger.Config{Level: logger.ParseLevel(cfg.Observability.LogLevel), Format: format})
-
-	mgr := lifecycle.New(lifecycle.Config{Logger: log})
-	cfgMgr.RegisterReload(mgr)
-
-	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
-	apiSrv.Start()
-	mgr.OnShutdown("api", func(ctx context.Context) error {
-		return apiSrv.Shutdown(ctx)
-	})
-
-	log.Info("vortex boot complete", "api_addr", apiSrv.Addr())
-	mgr.Run(context.Background())
-	return nil
 }

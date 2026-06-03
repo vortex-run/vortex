@@ -1,6 +1,16 @@
 package cmd
 
-import "testing"
+import (
+	"io"
+	"log/slog"
+	"testing"
+)
+
+// ensureTestLogger initialises the package-level logger for tests that call
+// command logic directly (bypassing PersistentPreRunE). Output is discarded.
+func ensureTestLogger() {
+	log = slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 func TestNewRootCommandInitialises(t *testing.T) {
 	root := NewRootCommand()
