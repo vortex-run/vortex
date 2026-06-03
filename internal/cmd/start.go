@@ -62,12 +62,19 @@ func runStart(ctx context.Context, pidfile string) error {
 		return os.Remove(pidfile)
 	})
 
-	// Re-derive the logger using the config's log level now that it is known.
+	// Re-derive the logger from the loaded config now that observability
+	// settings (level, sink, file, sampling) are known.
 	format := logger.FormatText
 	if flags.jsonLog {
 		format = logger.FormatJSON
 	}
-	log = logger.New(logger.Config{Level: logger.ParseLevel(cfg.Observability.LogLevel), Format: format})
+	log = logger.New(logger.Config{
+		Level:    logger.ParseLevel(cfg.Observability.LogLevel),
+		Format:   format,
+		Sink:     logger.Sink(cfg.Observability.LogSink),
+		Path:     cfg.Observability.LogFile,
+		Sampling: cfg.Observability.LogSampling,
+	})
 
 	log.Info("VORTEX started",
 		"version", version,

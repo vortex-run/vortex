@@ -108,6 +108,21 @@ package vortex
 	tracing:        bool | *false
 	trace_endpoint: string | *""
 	log_level:      "debug" | "info" | "warn" | "error" | *"info"
+
+	// Logging output and rotation (M1.5).
+	log_sink:     "auto" | "stdout" | "stderr" | "file" | *"auto"
+	log_file:     string | *"/var/log/vortex/vortex.log"
+	log_sampling: bool | *false
+	log_rotate:   #LogRotate
+}
+
+// #LogRotate configures file-based log rotation (used when log_sink is "file").
+#LogRotate: {
+	enabled:      bool | *true
+	max_size_mb:  int & >=1 & <=10000 | *100
+	max_age_days: int & >=1 | *7
+	max_backups:  int & >=1 | *5
+	compress:     bool | *true
 }
 
 // #Duration is a Go time.Duration string, e.g. "10s", "500ms", "30s", "1m".

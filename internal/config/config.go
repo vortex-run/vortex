@@ -105,10 +105,23 @@ type Secrets struct {
 
 // Observability mirrors #Observability.
 type Observability struct {
-	MetricsPath   string `json:"metrics_path"`
-	Tracing       bool   `json:"tracing"`
-	TraceEndpoint string `json:"trace_endpoint"`
-	LogLevel      string `json:"log_level"`
+	MetricsPath   string    `json:"metrics_path"`
+	Tracing       bool      `json:"tracing"`
+	TraceEndpoint string    `json:"trace_endpoint"`
+	LogLevel      string    `json:"log_level"`
+	LogSink       string    `json:"log_sink"`
+	LogFile       string    `json:"log_file"`
+	LogSampling   bool      `json:"log_sampling"`
+	LogRotate     LogRotate `json:"log_rotate"`
+}
+
+// LogRotate mirrors #LogRotate.
+type LogRotate struct {
+	Enabled    bool `json:"enabled"`
+	MaxSizeMB  int  `json:"max_size_mb"`
+	MaxAgeDays int  `json:"max_age_days"`
+	MaxBackups int  `json:"max_backups"`
+	Compress   bool `json:"compress"`
 }
 
 // Hash returns the SHA-256 hex digest of this config's canonical encoding.

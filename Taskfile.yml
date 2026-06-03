@@ -92,6 +92,17 @@ tasks:
     cmds:
       - bash scripts/install.sh
 
+  logs:
+    desc: Tail VORTEX logs (journald if available, else file)
+    cmds:
+      - |
+        if command -v journalctl >/dev/null 2>&1; then
+          journalctl -u vortex -f --output=short-precise
+        else
+          tail -f /var/log/vortex/vortex.log 2>/dev/null ||
+          echo "No log file found. Run: task start"
+        fi
+
   test:
     desc: Run all tests (race detector when a C compiler is available)
     vars:
