@@ -155,6 +155,17 @@ tasks:
     cmds:
       - go test -race -count=1 ./...
 
+  test:integration:
+    desc: Run integration tests (starts a real vortex process)
+    cmds:
+      - go test -v -tags integration -timeout 120s ./integration/...
+
+  test:all:
+    desc: Run unit tests + integration tests
+    cmds:
+      - task: test
+      - task: test:integration
+
   lint:
     desc: Run golangci-lint over the whole module
     cmds:
