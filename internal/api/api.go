@@ -6,16 +6,23 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/pkg/logger"
 )
 
 // DefaultAddr is the management server's default listen address.
 const DefaultAddr = ":9090"
+
+// correlationHeader is the request/response header carrying the correlation ID
+// that ties together all log lines emitted while handling one request.
+const correlationHeader = "X-Correlation-ID"
 
 // Server is the management HTTP server.
 type Server struct {
@@ -57,10 +64,40 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.HandleFunc("POST /internal/shutdown", s.handleInternalShutdown)
 	s.srv = &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           s.correlationMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+// correlationMiddleware ensures every request carries a correlation ID. It
+// reuses an incoming X-Correlation-ID header when present (so a caller's ID
+// flows through the system) or generates a fresh 32-char hex ID otherwise. The
+// ID is echoed back in the response header — set before the wrapped handler can
+// write anything — and stored in the request context so downstream logging
+// (via pkg/logger) automatically tags log lines with it.
+func (s *Server) correlationMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get(correlationHeader)
+		if id == "" {
+			id = newCorrelationID()
+		}
+		// Must be set before the handler writes the body or status.
+		w.Header().Set(correlationHeader, id)
+		ctx := logger.WithCorrelationID(r.Context(), id)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// newCorrelationID returns a 32-character hex string (16 random bytes). If the
+// system RNG fails (effectively never), it falls back to a timestamp-derived
+// value so a request is never left without an ID.
+func newCorrelationID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return hex.EncodeToString([]byte(time.Now().Format("20060102150405.000000")))[:32]
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Addr returns the configured listen address.
