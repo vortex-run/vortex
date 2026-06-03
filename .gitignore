@@ -36,6 +36,9 @@ go.work.sum
 # env file
 .env
 
+# Local AI assistant context (kept out of the repo by request)
+CLAUDE.md
+
 # Editor/IDE
 # .idea/
 # .vscode/

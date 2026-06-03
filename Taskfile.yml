@@ -57,6 +57,11 @@ tasks:
     cmds:
       - cmd: '{{if eq .HAS_CC "yes"}}go test -race -count=1 ./...{{else}}go test -count=1 ./...{{end}}'
 
+  reload:
+    desc: Signal a running vortex to hot-reload its config (SIGHUP on Unix)
+    cmds:
+      - cmd: '{{if eq OS "windows"}}powershell -NoProfile -Command "Write-Host ''Windows has no SIGHUP. Use the vortex reload CLI (M1.3) or restart. Reload logic is covered by tests: go test ./internal/config/ ./internal/api/'' "{{else}}pkill -SIGHUP -x vortex && echo "SIGHUP sent to vortex"{{end}}'
+
   test:race:
     desc: Run all tests with the race detector (requires a C compiler / cgo)
     env:
