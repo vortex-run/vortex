@@ -60,3 +60,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64.8
+          # Build golangci-lint from source with the job's Go 1.26 toolchain.
+          # The prebuilt binaries are compiled with an older Go and refuse to
+          # lint a module that targets a newer `go` version (exit code 3).
+          install-mode: goinstall
