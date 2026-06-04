@@ -143,6 +143,15 @@ func (t *SessionTable) sweep() {
 // ActiveCount returns the number of live sessions.
 func (t *SessionTable) ActiveCount() int { return int(t.active.Load()) }
 
+// CloseAll deletes and closes every session. It is used on listener shutdown to
+// unblock reply pumps (which are reading on the per-session backend conns).
+func (t *SessionTable) CloseAll() {
+	t.sessions.Range(func(key, _ any) bool {
+		t.Delete(key.(string))
+		return true
+	})
+}
+
 // Stats returns a snapshot of table counters.
 func (t *SessionTable) Stats() SessionStats {
 	return SessionStats{

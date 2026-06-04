@@ -53,8 +53,18 @@ type UDPListener struct {
 	bufSize int
 	dropped atomic.Int64
 
-	conn *net.UDPConn
-	wg   sync.WaitGroup
+	conn      *net.UDPConn
+	boundAddr atomic.Pointer[string] // race-free bound address for callers/tests
+	wg        sync.WaitGroup
+}
+
+// LocalAddr returns the bound UDP address once Listen has bound the socket, or
+// "" before then. Safe for concurrent use.
+func (l *UDPListener) LocalAddr() string {
+	if p := l.boundAddr.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 // NewListener validates cfg and constructs a UDPListener.
@@ -110,6 +120,8 @@ func (l *UDPListener) Listen(ctx context.Context) error {
 		return err
 	}
 	l.conn = conn
+	bound := conn.LocalAddr().String()
+	l.boundAddr.Store(&bound)
 
 	l.table.StartCleanup(ctx)
 	if l.limiter != nil {
@@ -141,7 +153,10 @@ func (l *UDPListener) Listen(ctx context.Context) error {
 		l.handlePacket(ctx, conn, clientAddr, buf[:n])
 	}
 
-	l.wg.Wait() // wait for reply pumps to drain
+	// Close all sessions so reply pumps blocked on backend reads unblock, then
+	// wait for them to drain.
+	l.table.CloseAll()
+	l.wg.Wait()
 	l.log.Info("udp route stopped", "listen", l.cfg.ListenAddr)
 	return nil
 }
