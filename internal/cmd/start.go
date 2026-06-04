@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -58,8 +59,10 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
 	// Windows-safe control plane: POST /internal/reload and /internal/shutdown
-	// stand in for SIGHUP/SIGTERM, which Windows lacks.
-	apiSrv.SetReloadFunc(cfgMgr.Reload)
+	// stand in for SIGHUP/SIGTERM, which Windows lacks. Reload goes through the
+	// lifecycle so ALL reload hooks fire (config swap + proxy rebuild), not just
+	// the config swap.
+	apiSrv.SetReloadFunc(func() error { mgr.Reload(); return nil })
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
 	apiSrv.Start()
 	mgr.OnShutdown("api", func(ctx context.Context) error {
@@ -98,31 +101,26 @@ func runStart(ctx context.Context, pidfile string) error {
 	})
 	mgr.OnShutdown("tcp-pool", func(context.Context) error { return pool.Close() })
 
-	proxyMgr, err := proxy.NewManager(proxy.ManagerConfig{
-		Config:  cfg,
-		TLS:     tlsMgr,
-		TCPPool: pool,
-		Logger:  log,
-	})
-	if err != nil {
+	// The data plane is held behind a swappable holder so config reload can
+	// rebuild all listeners against the new route set.
+	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, log: log}
+	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
+	mgr.OnShutdown("proxy", func(c context.Context) error { return dp.stop(c) })
 
-	// Run the data plane under the lifecycle ctx; stop it on shutdown.
-	proxyCtx, proxyCancel := context.WithCancel(ctx)
-	go func() {
-		if perr := proxyMgr.Start(proxyCtx); perr != nil {
-			log.Error("proxy manager stopped with error", "err", perr)
+	// On config reload, rebuild the data plane from the new config. This hook
+	// runs after the config-swap hook registered by RegisterReload above.
+	mgr.OnReload("proxy", func(context.Context) error {
+		if rerr := dp.rebuild(cfgMgr.Holder()); rerr != nil {
+			log.Error("proxy rebuild after reload failed, keeping previous routes", "err", rerr)
 		}
-	}()
-	mgr.OnShutdown("proxy", func(c context.Context) error {
-		proxyCancel()
-		return proxyMgr.Stop(c)
+		return nil
 	})
 
-	// Surface live route stats on /health.
+	// Surface live route stats on /health from whichever manager is current.
 	apiSrv.SetRouteStats(func() []api.RouteHealth {
-		stats := proxyMgr.Stats()
+		stats := dp.stats()
 		out := make([]api.RouteHealth, len(stats))
 		for i, s := range stats {
 			out[i] = api.RouteHealth{Name: s.Name, Protocol: s.Protocol, Listen: s.Listen, Active: s.Active}
@@ -145,6 +143,76 @@ func runStart(ctx context.Context, pidfile string) error {
 	mgr.Run(ctx)
 	log.Info("VORTEX stopped cleanly")
 	return nil
+}
+
+// dataPlane holds the currently-running proxy.Manager and rebuilds it on config
+// reload. It is safe for concurrent stats reads and reload-driven rebuilds.
+type dataPlane struct {
+	ctx  context.Context
+	pool *tcp.Pool
+	tls  *vtls.Manager
+	log  *slog.Logger
+
+	mu      sync.Mutex
+	current *proxy.Manager
+	cancel  context.CancelFunc
+}
+
+// rebuild constructs a proxy.Manager from the current config and starts it,
+// stopping any previously-running manager. On a build error the previous
+// manager is left running and the error is returned.
+func (d *dataPlane) rebuild(holder *config.Holder) error {
+	cfg := holder.Get()
+	mgr, err := proxy.NewManager(proxy.ManagerConfig{
+		Config: cfg, TLS: d.tls, TCPPool: d.pool, Logger: d.log,
+	})
+	if err != nil {
+		return err
+	}
+
+	runCtx, cancel := context.WithCancel(d.ctx)
+	go func() {
+		if perr := mgr.Start(runCtx); perr != nil {
+			d.log.Error("proxy manager stopped with error", "err", perr)
+		}
+	}()
+
+	d.mu.Lock()
+	prev, prevCancel := d.current, d.cancel
+	d.current, d.cancel = mgr, cancel
+	d.mu.Unlock()
+
+	// Stop the previous manager (if any) now that the new one is running.
+	if prev != nil {
+		prevCancel()
+		_ = prev.Stop(context.Background())
+	}
+	return nil
+}
+
+// stop cancels and stops the current manager.
+func (d *dataPlane) stop(ctx context.Context) error {
+	d.mu.Lock()
+	mgr, cancel := d.current, d.cancel
+	d.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if mgr != nil {
+		return mgr.Stop(ctx)
+	}
+	return nil
+}
+
+// stats returns the current manager's route stats.
+func (d *dataPlane) stats() []proxy.RouteStats {
+	d.mu.Lock()
+	mgr := d.current
+	d.mu.Unlock()
+	if mgr == nil {
+		return nil
+	}
+	return mgr.Stats()
 }
 
 // buildTLSManager creates a vtls.Manager when any route needs TLS (https/h3),
