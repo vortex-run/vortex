@@ -36,7 +36,23 @@ type Server struct {
 	reloadFunc func() error
 	// shutdownFunc triggers a graceful shutdown; set via SetShutdownFunc.
 	shutdownFunc func()
+	// routeStats returns per-route health; set via SetRouteStats. Kept as a
+	// callback returning api-owned RouteHealth so this package need not import
+	// the full proxy stack.
+	routeStats func() []RouteHealth
 }
+
+// RouteHealth is one route's health summary in the /health response.
+type RouteHealth struct {
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Listen   string `json:"listen"`
+	Active   int64  `json:"active"`
+}
+
+// SetRouteStats registers a callback supplying live per-route stats for the
+// /health response. start.go wires this to the proxy manager after it starts.
+func (s *Server) SetRouteStats(fn func() []RouteHealth) { s.routeStats = fn }
 
 // SetReloadFunc registers the callback invoked by POST /internal/reload. It
 // should re-read and re-validate the config and return an error if invalid.
@@ -106,11 +122,12 @@ func (s *Server) Addr() string { return s.srv.Addr }
 
 // healthResponse is the JSON body returned by /health.
 type healthResponse struct {
-	Status      string `json:"status"`
-	Version     string `json:"version"`
-	ConfigHash  string `json:"config_hash"`
-	ClusterName string `json:"cluster_name"`
-	Uptime      string `json:"uptime"`
+	Status      string        `json:"status"`
+	Version     string        `json:"version"`
+	ConfigHash  string        `json:"config_hash"`
+	ClusterName string        `json:"cluster_name"`
+	Uptime      string        `json:"uptime"`
+	Routes      []RouteHealth `json:"routes,omitempty"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -121,6 +138,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		ConfigHash:  cfg.Hash(),
 		ClusterName: cfg.Cluster.Name,
 		Uptime:      time.Since(s.startTime).Round(time.Second).String(),
+	}
+	if s.routeStats != nil {
+		resp.Routes = s.routeStats()
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
