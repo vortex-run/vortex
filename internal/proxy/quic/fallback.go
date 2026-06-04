@@ -51,13 +51,23 @@ func NewDualStack(cfg DualStackConfig) (*DualStack, error) {
 		cfg.Logger = slog.Default()
 	}
 
+	// The TCP (net/http) and QUIC (quic-go) servers each mutate their
+	// *tls.Config during setup (e.g. NextProtos, session state). They must NOT
+	// share one instance or the race detector flags concurrent access, so give
+	// each its own clone.
+	var quicTLS, tcpTLS *tls.Config
+	if cfg.TLSConfig != nil {
+		quicTLS = cfg.TLSConfig.Clone()
+		tcpTLS = cfg.TLSConfig.Clone()
+	}
+
 	// Fill QUIC sub-config from the shared fields where unset.
 	qcfg := cfg.QUICConfig
 	if qcfg.Addr == "" {
 		qcfg.Addr = cfg.Addr
 	}
 	if qcfg.TLSConfig == nil {
-		qcfg.TLSConfig = cfg.TLSConfig
+		qcfg.TLSConfig = quicTLS
 	}
 	if qcfg.Router == nil {
 		qcfg.Router = cfg.Router
@@ -76,7 +86,7 @@ func NewDualStack(cfg DualStackConfig) (*DualStack, error) {
 	tcpRouter.Handle("/*", tcpHandler) // catch-all; per-route matching done by inner router
 	d.tcp = proxyhttp.NewServer(proxyhttp.ServerConfig{
 		Addr:      cfg.Addr,
-		TLSConfig: cfg.TLSConfig,
+		TLSConfig: tcpTLS,
 		Router:    tcpRouter,
 	})
 	return d, nil
