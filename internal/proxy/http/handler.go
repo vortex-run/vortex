@@ -173,28 +173,28 @@ func (h *Handler) writeResponse(w http.ResponseWriter, resp *http.Response) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-// streamBody copies the body to w, flushing every flushInterval so streaming
-// responses (SSE, chunked) reach the client incrementally.
+// streamBody copies the body to w incrementally, flushing as data arrives so
+// streaming responses (SSE, chunked) reach the client without buffering. All
+// writes and flushes happen on this single goroutine — the http.ResponseWriter
+// is not safe for concurrent Write/Flush, so we must not copy in a background
+// goroutine while flushing here.
 func (h *Handler) streamBody(w http.ResponseWriter, body io.Reader) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		_, _ = io.Copy(w, body)
 		return
 	}
-	ticker := time.NewTicker(h.flushInterval)
-	defer ticker.Stop()
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(w, body)
-		close(done)
-	}()
+	buf := make([]byte, 32*1024)
 	for {
-		select {
-		case <-ticker.C:
-			flusher.Flush()
-		case <-done:
-			flusher.Flush()
-			return
+		n, err := body.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			flusher.Flush() // push each chunk to the client as it arrives
+		}
+		if err != nil {
+			return // io.EOF or read error: done streaming
 		}
 	}
 }
