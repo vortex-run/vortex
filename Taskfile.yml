@@ -166,6 +166,11 @@ tasks:
       - task: test
       - task: test:integration
 
+  proxy:bench:
+    desc: Benchmark TCP tunnel throughput (run for M2.7 decision)
+    cmds:
+      - go test -bench=BenchmarkTunnel -benchtime=30s -benchmem ./internal/proxy/tcp/...
+
   lint:
     desc: Run golangci-lint over the whole module
     cmds:
