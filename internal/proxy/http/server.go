@@ -1,6 +1,7 @@
 package proxyhttp
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"net"
@@ -167,4 +168,21 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 		w.wroteHeader = true
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+// Hijack forwards to the underlying ResponseWriter's Hijacker so WebSocket
+// upgrades (which hijack the connection) work through the instrumented server.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
+}
+
+// Flush forwards to the underlying Flusher so streaming responses still flush.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
