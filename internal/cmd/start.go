@@ -16,6 +16,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/api"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	"github.com/vortex-run/vortex/internal/secrets"
@@ -93,6 +94,19 @@ func runStart(ctx context.Context, pidfile string) error {
 		return fmt.Errorf("initialising secrets: %w", err)
 	}
 
+	// --- policy: OPA authorization engine (opt-in via VORTEX_POLICY_DIR) -----
+	policyEngine, err := buildPolicyEngine(log)
+	if err != nil {
+		return fmt.Errorf("initialising policy engine: %w", err)
+	}
+	// Hot-reload policy on SIGHUP / POST /internal/reload alongside the config.
+	mgr.OnReload("policy", func(context.Context) error {
+		if rerr := policyEngine.Reload(ctx); rerr != nil {
+			log.Error("policy reload failed, keeping previous policy", "err", rerr)
+		}
+		return nil
+	})
+
 	// --- data plane: TLS manager, connection pool, proxy manager -----------
 
 	tlsMgr, err := buildTLSManager(cfg, log)
@@ -117,7 +131,7 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// The data plane is held behind a swappable holder so config reload can
 	// rebuild all listeners against the new route set.
-	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, log: log}
+	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine, log: log}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
@@ -162,11 +176,12 @@ func runStart(ctx context.Context, pidfile string) error {
 // dataPlane holds the currently-running proxy.Manager and rebuilds it on config
 // reload. It is safe for concurrent stats reads and reload-driven rebuilds.
 type dataPlane struct {
-	ctx  context.Context
-	pool *tcp.Pool
-	tls  *vtls.Manager
-	mtls *vtls.MTLSConfig
-	log  *slog.Logger
+	ctx    context.Context
+	pool   *tcp.Pool
+	tls    *vtls.Manager
+	mtls   *vtls.MTLSConfig
+	policy *policy.Engine
+	log    *slog.Logger
 
 	mu      sync.Mutex
 	current *proxy.Manager
@@ -179,7 +194,8 @@ type dataPlane struct {
 func (d *dataPlane) rebuild(holder *config.Holder) error {
 	cfg := holder.Get()
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
-		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls, Logger: d.log,
+		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
+		PolicyEngine: d.policy, Logger: d.log,
 	})
 	if err != nil {
 		return err
@@ -312,6 +328,23 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 		"store", storePath,
 	)
 	return mc, nil
+}
+
+// buildPolicyEngine constructs the OPA policy engine. Policy enforcement is
+// opt-in: when VORTEX_POLICY_DIR is unset the engine compiles the built-in
+// allow-all policy, so a fresh install proxies all requests. A directory with
+// .rego files enables real enforcement.
+func buildPolicyEngine(log *slog.Logger) (*policy.Engine, error) {
+	policyDir := os.Getenv("VORTEX_POLICY_DIR")
+	engine, err := policy.NewEngine(policy.EngineConfig{
+		PolicyDir: policyDir,
+		QueryPath: "data.vortex.allow",
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.Info("policy engine loaded", "policy_dir", policyDir, "default", engine.UsingDefault())
+	return engine, nil
 }
 
 // loadSecrets validates the declared secret keys, opens the secret store, warns

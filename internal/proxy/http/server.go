@@ -20,12 +20,16 @@ const (
 
 // ServerConfig configures the internet-facing HTTP/HTTPS server.
 type ServerConfig struct {
-	Addr         string
-	TLSConfig    *tls.Config // nil = plain HTTP
-	Router       *Router
-	ReadTimeout  time.Duration // default 30s
-	WriteTimeout time.Duration // default 30s
-	IdleTimeout  time.Duration // default 90s
+	Addr      string
+	TLSConfig *tls.Config // nil = plain HTTP
+	Router    *Router
+	// PolicyMiddleware, when non-nil, wraps the router so every request is
+	// evaluated against the authorization policy before reaching a route. A nil
+	// value (the default) means no policy enforcement.
+	PolicyMiddleware func(http.Handler) http.Handler
+	ReadTimeout      time.Duration // default 30s
+	WriteTimeout     time.Duration // default 30s
+	IdleTimeout      time.Duration // default 90s
 }
 
 // ServerStats is a snapshot of server-level counters.
@@ -57,10 +61,17 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.IdleTimeout = defaultIdleTimeout
 	}
 
+	// Apply policy enforcement (if configured) closest to the router, then
+	// instrument the whole chain for connection/error stats.
+	var handler http.Handler = cfg.Router
+	if cfg.PolicyMiddleware != nil {
+		handler = cfg.PolicyMiddleware(handler)
+	}
+
 	s := &Server{}
 	s.srv = &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      s.instrument(cfg.Router),
+		Handler:      s.instrument(handler),
 		TLSConfig:    cfg.TLSConfig,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,

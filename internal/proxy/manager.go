@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/policy"
 	proxygateway "github.com/vortex-run/vortex/internal/proxy/gateway"
 	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
 	proxyquic "github.com/vortex-run/vortex/internal/proxy/quic"
@@ -37,6 +39,9 @@ type ManagerConfig struct {
 	// MTLSConfig provides the mTLS server config for routes with mtls:true. May
 	// be nil when no route uses mTLS.
 	MTLSConfig *vtls.MTLSConfig
+	// PolicyEngine enforces an authorization policy on every L7 (HTTP/HTTPS)
+	// request. May be nil, in which case no policy enforcement is applied.
+	PolicyEngine *policy.Engine
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -194,6 +199,9 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 	router.Handle(routePattern(rc), gw)
 
 	srvCfg := proxyhttp.ServerConfig{Addr: listenAddr(rc.Listen), Router: router}
+	if m.cfg.PolicyEngine != nil {
+		srvCfg.PolicyMiddleware = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
+	}
 	if useTLS {
 		if m.cfg.TLS == nil {
 			return nil, errors.New("https route requires a TLS manager")
@@ -214,6 +222,20 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 			return s.ActiveConns, s.TotalReqs
 		},
 	}, nil
+}
+
+// routePolicyMiddleware returns a middleware that stamps the route name into
+// the request context (so policies can match input.route) and then enforces the
+// engine's policy.
+func routePolicyMiddleware(engine *policy.Engine, routeName string) func(http.Handler) http.Handler {
+	enforce := policy.NewMiddleware(engine)
+	return func(next http.Handler) http.Handler {
+		policed := enforce(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(policy.SetRouteName(r.Context(), routeName))
+			policed.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (m *Manager) buildH3(rc config.Route) (*route, error) {
