@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -65,7 +66,10 @@ func (s *APIKeyStore) Issue(userID, orgID string, roles []Role, desc string, ttl
 	// directly instead of bcrypt-comparing against every stored key.
 	secret := id + "." + hex.EncodeToString(secretBytes)
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcryptCost)
+	// bcrypt caps input at 72 bytes, and our secret is longer; pre-hash it with
+	// SHA-256 so bcrypt always sees a fixed 32-byte input. Verify pre-hashes the
+	// same way.
+	hash, err := bcrypt.GenerateFromPassword(prehash(secret), bcryptCost)
 	if err != nil {
 		return APIKey{}, "", fmt.Errorf("auth: hashing secret: %w", err)
 	}
@@ -106,7 +110,7 @@ func (s *APIKeyStore) Verify(secret string) (APIKey, error) {
 		return APIKey{}, ErrNotFound
 	}
 
-	if bcrypt.CompareHashAndPassword([]byte(key.Hash), []byte(secret)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(key.Hash), prehash(secret)) != nil {
 		return APIKey{}, ErrNotFound
 	}
 	if !key.ExpiresAt.IsZero() && time.Now().After(key.ExpiresAt) {
@@ -179,6 +183,13 @@ func (s *APIKeyStore) Load(path string) error {
 	s.keys = m
 	s.mu.Unlock()
 	return nil
+}
+
+// prehash reduces an arbitrary-length secret to a fixed 32-byte digest so it
+// fits within bcrypt's 72-byte input limit.
+func prehash(secret string) []byte {
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:]
 }
 
 // randomHex returns n random bytes hex-encoded (2n characters).
