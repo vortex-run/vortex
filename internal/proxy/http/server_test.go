@@ -208,6 +208,76 @@ func TestServer_PolicyMiddlewareCalled(t *testing.T) {
 	}
 }
 
+func TestServer_EdgeRunsBeforePolicy(t *testing.T) {
+	// Record the order middlewares execute in: edge must wrap policy.
+	var order []string
+	edge := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "edge")
+			next.ServeHTTP(w, r)
+		})
+	}
+	policy := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "policy")
+			next.ServeHTTP(w, r)
+		})
+	}
+	s := NewServer(ServerConfig{
+		Addr: "127.0.0.1:0", Router: okRouter("ok"),
+		EdgeMiddleware: edge, PolicyMiddleware: policy,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.ListenAndServe(ctx) }()
+	addr := waitListening(t, s)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if len(order) != 2 || order[0] != "edge" || order[1] != "policy" {
+		t.Errorf("middleware order = %v, want [edge policy]", order)
+	}
+}
+
+func TestServer_EdgeBlocksBeforePolicy(t *testing.T) {
+	// An edge that denies must short-circuit before policy ever runs.
+	var policyRan bool
+	edge := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		})
+	}
+	policy := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			policyRan = true
+			next.ServeHTTP(w, r)
+		})
+	}
+	s := NewServer(ServerConfig{
+		Addr: "127.0.0.1:0", Router: okRouter("ok"),
+		EdgeMiddleware: edge, PolicyMiddleware: policy,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.ListenAndServe(ctx) }()
+	addr := waitListening(t, s)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (edge blocked)", resp.StatusCode)
+	}
+	if policyRan {
+		t.Error("policy must not run when the edge blocks the request")
+	}
+}
+
 func TestServer_NilPolicyMiddlewarePassesThrough(t *testing.T) {
 	// With no PolicyMiddleware the request must reach the router unchanged.
 	s := NewServer(ServerConfig{Addr: "127.0.0.1:0", Router: okRouter("through")})

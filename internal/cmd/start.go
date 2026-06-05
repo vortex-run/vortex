@@ -424,7 +424,7 @@ func buildSecurityEdge(ctx context.Context, cfg *config.Config, log *slog.Logger
 	if !hasAllowlist && !sec.BlockTor {
 		// Nothing to enforce at the edge; per-route rate limits still apply via
 		// the proxy manager independently of the global Edge.
-		log.Info("security edge disabled", "reason", "no allowlist or tor blocking configured")
+		log.Info("security edge inactive", "reason", "no ip_allowlist or exit-node filtering configured")
 		return nil, nil
 	}
 
