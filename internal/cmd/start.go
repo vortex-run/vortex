@@ -17,6 +17,7 @@ import (
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/proxy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/vortex-run/vortex/internal/secrets"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
@@ -85,6 +86,11 @@ func runStart(ctx context.Context, pidfile string) error {
 		Path:     cfg.Observability.LogFile,
 		Sampling: cfg.Observability.LogSampling,
 	})
+
+	// --- secrets: validate declared keys, open store, load injectable env ---
+	if _, err := loadSecrets(cfg, log); err != nil {
+		return fmt.Errorf("initialising secrets: %w", err)
+	}
 
 	// --- data plane: TLS manager, connection pool, proxy manager -----------
 
@@ -305,6 +311,57 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 		"store", storePath,
 	)
 	return mc, nil
+}
+
+// loadSecrets validates the declared secret keys, opens the secret store, warns
+// (non-fatally) about any declared secret that is not yet set, and — when
+// inject_env is enabled — resolves the secrets that ARE set into an env map for
+// injection into managed processes. Invalid key names or a store that cannot be
+// opened are fatal; missing secret values are not (they may be set later).
+func loadSecrets(cfg *config.Config, log *slog.Logger) (map[string]string, error) {
+	if err := secrets.ValidateKeys(cfg.Secrets.Keys); err != nil {
+		return nil, err
+	}
+
+	storePath := os.Getenv("VORTEX_SECRET_STORE")
+	if storePath == "" {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		storePath = filepath.Join(cacheDir, "vortex", "secrets")
+	}
+	store, err := secrets.NewSecretStore(storePath, []byte(cfg.Cluster.Name+"-secrets"))
+	if err != nil {
+		return nil, fmt.Errorf("opening secret store: %w", err)
+	}
+
+	// Warn about declared-but-unset secrets and collect the ones that are set.
+	var present, missing []string
+	for _, key := range cfg.Secrets.Keys {
+		exists, eerr := store.Exists(key)
+		if eerr != nil {
+			return nil, fmt.Errorf("checking secret %s: %w", key, eerr)
+		}
+		if exists {
+			present = append(present, key)
+		} else {
+			missing = append(missing, key)
+			log.Warn("declared secret not set", "name", key,
+				"hint", "run: vortex secret set "+key+" <value>")
+		}
+	}
+
+	if !cfg.Secrets.InjectEnv {
+		return nil, nil
+	}
+
+	env, err := secrets.Resolve(store, present)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("secrets loaded", "count", len(present), "missing", len(missing))
+	return env, nil
 }
 
 // needsMTLS reports whether any route has mtls:true.
