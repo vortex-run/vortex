@@ -10,6 +10,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -120,6 +122,29 @@ type VortexProcess struct {
 	APIAddr    string
 	BinaryPath string
 	stopped    bool
+	logBuf     syncBuffer
+}
+
+// Logs returns the child process's captured stdout+stderr so far.
+func (p *VortexProcess) Logs() string { return p.logBuf.String() }
+
+// syncBuffer is a goroutine-safe bytes buffer: the child process writes to it
+// concurrently while a test reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // StartVortex starts `<bin> start --config <configPath> --log-level debug`,
@@ -128,17 +153,20 @@ type VortexProcess struct {
 func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 	t.Helper()
 	cmd := exec.Command(bin, "start", "--config", configPath, "--log-level", "debug")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting vortex: %v", err)
-	}
 	p := &VortexProcess{
-		Cmd:        cmd,
 		ConfigPath: configPath,
 		APIAddr:    apiBase,
 		BinaryPath: bin,
 	}
+	// Tee child output to both os.Stderr (visible while debugging) and an
+	// in-memory buffer so tests can assert on startup log lines.
+	out := io.MultiWriter(os.Stderr, &p.logBuf)
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting vortex: %v", err)
+	}
+	p.Cmd = cmd
 	t.Cleanup(func() {
 		if !p.stopped {
 			_ = cmd.Process.Kill()
