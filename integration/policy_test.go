@@ -131,15 +131,17 @@ func TestPolicy_ReloadPolicy(t *testing.T) {
 	if out, code := p.Run(t, "reload", "--config", cfg); code != 0 {
 		t.Fatalf("reload (%d): %s", code, out)
 	}
-	time.Sleep(200 * time.Millisecond)
 
-	// Now denied.
-	if code := getStatus(t, "http://"+addr+"/"); code != http.StatusForbidden {
-		t.Errorf("after reload: status = %d, want 403", code)
+	// The reload rebuilds the data plane: the old route listener closes and a new
+	// one binds on the same port, leaving a brief window with nothing listening.
+	// Poll through transient connection-refused errors until the new policy is in
+	// effect (403) rather than asserting once on a fixed sleep.
+	if !waitStatus(t, "http://"+addr+"/", http.StatusForbidden, 5*time.Second) {
+		t.Errorf("after reload: never observed 403 (deny-all) within timeout")
 	}
 }
 
-// getStatus issues a GET and returns the status code.
+// getStatus issues a GET and returns the status code, failing on a network error.
 func getStatus(t *testing.T, url string) int {
 	t.Helper()
 	resp, err := http.Get(url)
@@ -149,4 +151,25 @@ func getStatus(t *testing.T, url string) int {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
+}
+
+// waitStatus polls url until it returns want (tolerating transient connection
+// errors during a listener rebuild) or the timeout elapses.
+func waitStatus(t *testing.T, url string, want int, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err != nil {
+			time.Sleep(50 * time.Millisecond) // listener may be mid-rebuild
+			continue
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == want {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
