@@ -1,49 +1,31 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { fetchHealth } from "./lib/api";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Layout } from "./components/layout/Layout";
+import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
 
-// Landing shows the live cluster health to prove the embedded app talks to the
-// VORTEX management API. Full routed pages and layout arrive in File 2.
-function Landing() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["health"],
-    queryFn: fetchHealth,
-    refetchInterval: 5000,
-  });
-
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8">
-      <h1 className="text-3xl font-bold tracking-tight text-primary">VORTEX</h1>
-      <p className="text-muted-foreground">Management Dashboard</p>
-      <div className="mt-4 rounded-lg border border-border bg-card p-6 text-sm">
-        {isLoading && <span className="text-muted-foreground">Loading health…</span>}
-        {isError && <span className="text-red-400">management API unreachable</span>}
-        {data && (
-          <div className="space-y-1">
-            <div>
-              Cluster: <span className="font-mono">{data.cluster_name}</span>
-            </div>
-            <div>
-              Status: <span className="font-mono">{data.status}</span>
-            </div>
-            <div>
-              Version: <span className="font-mono">{data.version}</span>
-            </div>
-            <div>
-              Uptime: <span className="font-mono">{data.uptime}</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+// All routes live under the /dashboard base path (the app is served there by
+// VORTEX). Pages are stubs here; real implementations land in later files.
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Landing />
+      <BrowserRouter basename="/dashboard">
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<Stub name="Overview" />} />
+            <Route path="nodes" element={<Stub name="Nodes" />} />
+            <Route path="routes" element={<Stub name="Routes" />} />
+            <Route path="traffic" element={<Stub name="Traffic" />} />
+            <Route path="security" element={<Stub name="Security" />} />
+            <Route path="metrics" element={<Stub name="Metrics" />} />
+            <Route path="plugins" element={<Stub name="Plugins" />} />
+            <Route path="audit" element={<Stub name="Audit Log" />} />
+            <Route path="secrets" element={<Stub name="Secrets" />} />
+            <Route path="settings" element={<Stub name="Settings" />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
