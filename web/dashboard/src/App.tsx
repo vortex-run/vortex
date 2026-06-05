@@ -7,6 +7,7 @@ import { RouteBuilder } from "./pages/RouteBuilder";
 import { Metrics } from "./pages/Metrics";
 import { Security } from "./pages/Security";
 import { AuditLog } from "./pages/AuditLog";
+import { Secrets } from "./pages/Secrets";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -28,7 +29,7 @@ export default function App() {
             <Route path="metrics" element={<Metrics />} />
             <Route path="plugins" element={<Stub name="Plugins" />} />
             <Route path="audit" element={<AuditLog />} />
-            <Route path="secrets" element={<Stub name="Secrets" />} />
+            <Route path="secrets" element={<Secrets />} />
             <Route path="settings" element={<Stub name="Settings" />} />
           </Route>
         </Routes>
