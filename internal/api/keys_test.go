@@ -9,6 +9,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/observability"
 )
 
 // newAuthedServer builds a Server with auth wired, returning the server and an
@@ -119,6 +120,36 @@ func TestAPI_CreateKeyForbiddenForNonAdmin(t *testing.T) {
 	rec := serve(s, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("viewer POST /api/keys = %d, want 403", rec.Code)
+	}
+}
+
+func TestAPI_MetricsServedOnLocalhost(t *testing.T) {
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	m := observability.NewMetrics("vortex")
+	m.RecordRequest("web", "GET", 200, 0)
+	s.SetMetricsHandler(m.Handler())
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/metrics status = %d, want 200", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("vortex_requests_total")) {
+		t.Errorf("/metrics body missing vortex_requests_total:\n%s", rec.Body.String())
+	}
+}
+
+func TestAPI_MetricsUnconfigured(t *testing.T) {
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	// No metrics handler wired.
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	rec := serve(s, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/metrics without handler = %d, want 503", rec.Code)
 	}
 }
 

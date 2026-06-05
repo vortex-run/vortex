@@ -11,10 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	vtls "github.com/vortex-run/vortex/internal/tls"
@@ -309,6 +311,46 @@ func TestManager_NilPolicyEngineNoEnforcement(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || string(body) != "backend" {
 		t.Errorf("status=%d body=%q, want 200 'backend'", resp.StatusCode, body)
+	}
+}
+
+func TestManager_MetricsRecordedOnHTTPRoute(t *testing.T) {
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer be.Close()
+
+	metrics := observability.NewMetrics("vortex")
+	port := freePort(t)
+	m, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
+		}},
+		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
+		Metrics: metrics,
+		Logger:  discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body, _ := io.ReadAll(rec.Body)
+	if !strings.Contains(string(body), `route="web"`) {
+		t.Errorf("metrics should record a request labelled route=web:\n%s", body)
 	}
 }
 
