@@ -4,6 +4,7 @@ import { Layout } from "./components/layout/Layout";
 import { Overview } from "./pages/Overview";
 import { RoutesPage } from "./pages/Routes";
 import { RouteBuilder } from "./pages/RouteBuilder";
+import { Metrics } from "./pages/Metrics";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -22,7 +23,7 @@ export default function App() {
             <Route path="routes/new" element={<RouteBuilder />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
             <Route path="security" element={<Stub name="Security" />} />
-            <Route path="metrics" element={<Stub name="Metrics" />} />
+            <Route path="metrics" element={<Metrics />} />
             <Route path="plugins" element={<Stub name="Plugins" />} />
             <Route path="audit" element={<Stub name="Audit Log" />} />
             <Route path="secrets" element={<Stub name="Secrets" />} />
