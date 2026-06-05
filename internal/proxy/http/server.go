@@ -24,8 +24,13 @@ type ServerConfig struct {
 	TLSConfig *tls.Config // nil = plain HTTP
 	Router    *Router
 	// EdgeMiddleware, when non-nil, wraps the request pipeline ahead of policy
-	// (order: edge → policy → router) so IP blocking and rate limiting run first.
+	// (order: edge → obs → policy → router) so IP blocking and rate limiting run
+	// first.
 	EdgeMiddleware func(http.Handler) http.Handler
+	// ObsMiddleware, when non-nil, records metrics and traces. It sits between
+	// the edge and policy so every admitted request is measured, including
+	// policy-denied ones.
+	ObsMiddleware func(http.Handler) http.Handler
 	// PolicyMiddleware, when non-nil, wraps the router so every request is
 	// evaluated against the authorization policy before reaching a route. A nil
 	// value (the default) means no policy enforcement.
@@ -64,12 +69,15 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.IdleTimeout = defaultIdleTimeout
 	}
 
-	// Build the middleware chain inside-out: router first, then policy, then the
-	// edge (so requests hit edge → policy → router). Finally instrument the
-	// whole chain for connection/error stats.
+	// Build the middleware chain inside-out: router first, then policy, then
+	// observability, then the edge (so requests hit edge → obs → policy →
+	// router). Finally instrument the whole chain for connection/error stats.
 	var handler http.Handler = cfg.Router
 	if cfg.PolicyMiddleware != nil {
 		handler = cfg.PolicyMiddleware(handler)
+	}
+	if cfg.ObsMiddleware != nil {
+		handler = cfg.ObsMiddleware(handler)
 	}
 	if cfg.EdgeMiddleware != nil {
 		handler = cfg.EdgeMiddleware(handler)

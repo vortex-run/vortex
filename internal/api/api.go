@@ -52,7 +52,13 @@ type Server struct {
 	// auditLog records security-relevant API events (reload, key create/revoke).
 	// nil disables audit logging (used by unit tests).
 	auditLog *audit.Log
+
+	// metricsHandler serves the Prometheus /metrics endpoint when wired.
+	metricsHandler http.Handler
 }
+
+// SetMetricsHandler wires the Prometheus metrics handler served at /metrics.
+func (s *Server) SetMetricsHandler(h http.Handler) { s.metricsHandler = h }
 
 // SetAuditLog wires the audit log used to record reload and key-management
 // events. A nil log disables audit recording.
@@ -120,6 +126,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// rejected before the handler runs.
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
 	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
+	// /metrics is protected like the control plane: reachable from localhost
+	// (scrapers commonly run on-box) or with a valid key.
+	mux.Handle("GET /metrics", s.protected(http.HandlerFunc(s.handleMetrics)))
 	mux.Handle("GET /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleListKeys)))
 	mux.Handle("POST /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleCreateKey)))
 	mux.Handle("DELETE /api/keys/{id}", s.protectedAdmin(http.HandlerFunc(s.handleRevokeKey)))
@@ -220,6 +229,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		s.log.Error("encoding health response", "err", err)
 	}
+}
+
+// handleMetrics serves the Prometheus metrics exposition when a handler is
+// wired; otherwise it reports that metrics are unconfigured.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metricsHandler == nil {
+		http.Error(w, "metrics not configured", http.StatusServiceUnavailable)
+		return
+	}
+	s.metricsHandler.ServeHTTP(w, r)
 }
 
 // handleReady is a readiness probe. The management server only begins serving

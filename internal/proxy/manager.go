@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/policy"
 	proxygateway "github.com/vortex-run/vortex/internal/proxy/gateway"
 	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
@@ -23,6 +24,7 @@ import (
 	proxyudp "github.com/vortex-run/vortex/internal/proxy/udp"
 	"github.com/vortex-run/vortex/internal/security"
 	vtls "github.com/vortex-run/vortex/internal/tls"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // stopTimeout bounds how long Stop waits for all listeners to finish.
@@ -46,6 +48,10 @@ type ManagerConfig struct {
 	// Edge applies IP blocking and global rate limiting at the L7 edge, ahead of
 	// policy. May be nil, in which case no edge protection is applied.
 	Edge *security.Edge
+	// Metrics records per-request Prometheus metrics on L7 routes. May be nil.
+	Metrics *observability.Metrics
+	// Tracer creates per-request spans on L7 routes. May be nil (no-op tracer).
+	Tracer trace.Tracer
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -209,6 +215,9 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 	if mw := m.edgeMiddleware(rc); mw != nil {
 		srvCfg.EdgeMiddleware = mw
 	}
+	if m.cfg.Metrics != nil {
+		srvCfg.ObsMiddleware = m.obsMiddleware(rc.Name)
+	}
 	if useTLS {
 		if m.cfg.TLS == nil {
 			return nil, errors.New("https route requires a TLS manager")
@@ -229,6 +238,20 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 			return s.ActiveConns, s.TotalReqs
 		},
 	}, nil
+}
+
+// obsMiddleware returns a middleware that stamps the route name into the
+// X-Vortex-Route header (so the observability middleware labels metrics/spans by
+// route) and then records metrics and traces.
+func (m *Manager) obsMiddleware(routeName string) func(http.Handler) http.Handler {
+	record := observability.NewMiddleware(m.cfg.Metrics, m.cfg.Tracer)
+	return func(next http.Handler) http.Handler {
+		recorded := record(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Set("X-Vortex-Route", routeName)
+			recorded.ServeHTTP(w, r)
+		})
+	}
 }
 
 // routePolicyMiddleware returns a middleware that stamps the route name into

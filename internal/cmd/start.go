@@ -19,6 +19,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
@@ -27,6 +28,7 @@ import (
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // newStartCommand builds `vortex start`, which loads and validates config,
@@ -149,6 +151,38 @@ func runStart(ctx context.Context, pidfile string) error {
 		return fmt.Errorf("initialising security edge: %w", err)
 	}
 
+	// --- observability: metrics, tracing, profiling ------------------------
+	metrics := observability.NewMetrics("vortex")
+	apiSrv.SetMetricsHandler(metrics.Handler())
+
+	tracerProvider, err := observability.NewTracer(ctx, observability.TracerConfig{
+		ServiceName: cfg.Cluster.Name,
+		Endpoint:    cfg.Observability.TraceEndpoint,
+		Enabled:     cfg.Observability.Tracing && cfg.Observability.TraceEndpoint != "",
+	})
+	if err != nil {
+		return fmt.Errorf("initialising tracing: %w", err)
+	}
+	mgr.OnShutdown("tracer", func(c context.Context) error {
+		return observability.ShutdownTracer(c, tracerProvider)
+	})
+	tracer := tracerProvider.Tracer("vortex/proxy")
+
+	profiler := observability.NewProfiler(observability.ProfilerConfig{
+		Enabled: os.Getenv("VORTEX_PPROF") == "true",
+	})
+	go func() {
+		if perr := profiler.Start(ctx); perr != nil {
+			log.Warn("profiler stopped with error", "err", perr)
+		}
+	}()
+
+	log.Info("observability started",
+		"tracing", cfg.Observability.Tracing && cfg.Observability.TraceEndpoint != "",
+		"profiling", os.Getenv("VORTEX_PPROF") == "true",
+		"metrics_path", "/metrics",
+	)
+
 	// --- cluster: gossip + raft when multi-node, else single-node mode ------
 	clusterMgr, err := buildCluster(ctx, cfg, log)
 	if err != nil {
@@ -182,7 +216,10 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// The data plane is held behind a swappable holder so config reload can
 	// rebuild all listeners against the new route set.
-	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine, edge: edge, log: log}
+	dp := &dataPlane{
+		ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine,
+		edge: edge, metrics: metrics, tracer: tracer, log: log,
+	}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
@@ -227,13 +264,15 @@ func runStart(ctx context.Context, pidfile string) error {
 // dataPlane holds the currently-running proxy.Manager and rebuilds it on config
 // reload. It is safe for concurrent stats reads and reload-driven rebuilds.
 type dataPlane struct {
-	ctx    context.Context
-	pool   *tcp.Pool
-	tls    *vtls.Manager
-	mtls   *vtls.MTLSConfig
-	policy *policy.Engine
-	edge   *security.Edge
-	log    *slog.Logger
+	ctx     context.Context
+	pool    *tcp.Pool
+	tls     *vtls.Manager
+	mtls    *vtls.MTLSConfig
+	policy  *policy.Engine
+	edge    *security.Edge
+	metrics *observability.Metrics
+	tracer  trace.Tracer
+	log     *slog.Logger
 
 	mu      sync.Mutex
 	current *proxy.Manager
@@ -247,7 +286,8 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 	cfg := holder.Get()
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
-		PolicyEngine: d.policy, Edge: d.edge, Logger: d.log,
+		PolicyEngine: d.policy, Edge: d.edge,
+		Metrics: d.metrics, Tracer: d.tracer, Logger: d.log,
 	})
 	if err != nil {
 		return err
