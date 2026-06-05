@@ -266,11 +266,16 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 	if !needsMTLS(cfg) {
 		return nil, nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
+	// The mTLS store path defaults to the user cache dir but can be overridden
+	// via VORTEX_MTLS_STORE so peers (and tests) can share the same cluster CA.
+	storePath := os.Getenv("VORTEX_MTLS_STORE")
+	if storePath == "" {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		storePath = filepath.Join(cacheDir, "vortex", "mtls")
 	}
-	storePath := filepath.Join(cacheDir, "vortex", "mtls")
 	store, err := vtls.NewStore(storePath, []byte(cfg.Cluster.Name+"-mtls-key"))
 	if err != nil {
 		return nil, fmt.Errorf("creating mTLS store: %w", err)
