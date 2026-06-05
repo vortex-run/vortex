@@ -125,15 +125,10 @@ func (a *LocalAdapter) Delete(_ context.Context, name string) error {
 // Ping always succeeds: the local store is on the same host.
 func (a *LocalAdapter) Ping(_ context.Context) error { return nil }
 
-// The external-provider constructors below are implemented in their own files
-// (awsssm.go in M3.3 File 3, gcpsm.go in File 4). Until each lands they are
-// stubbed here so the package builds; each later file removes its stub and
-// provides the real constructor. (NewVaultAdapter now lives in vault.go.)
-
-// NewAWSSSMAdapter is implemented in awsssm.go (M3.3 File 3).
-func NewAWSSSMAdapter(AWSSSMConfig) (Adapter, error) {
-	return nil, errors.New("secrets: aws-ssm adapter not yet implemented")
-}
+// The external-provider constructor below is implemented in gcpsm.go (M3.3
+// File 4). Until it lands it is stubbed here so the package builds; gcpsm.go
+// removes this stub and provides the real constructor. (NewVaultAdapter lives in
+// vault.go; NewAWSSSMAdapter lives in awsssm.go.)
 
 // NewGCPSMAdapter is implemented in gcpsm.go (M3.3 File 4).
 func NewGCPSMAdapter(GCPSMConfig) (Adapter, error) {
