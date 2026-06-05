@@ -98,6 +98,10 @@ func (m *Manager) TLSConfig() *tls.Config {
 		MinVersion:       m.minVer,
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
 		CipherSuites: []uint16{
+			// AES-128-GCM first: Go's HTTP/2 stack requires at least one of the
+			// AES_128_GCM_SHA256 ECDHE suites or it refuses the listener.
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
