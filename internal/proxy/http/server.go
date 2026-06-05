@@ -23,6 +23,9 @@ type ServerConfig struct {
 	Addr      string
 	TLSConfig *tls.Config // nil = plain HTTP
 	Router    *Router
+	// EdgeMiddleware, when non-nil, wraps the request pipeline ahead of policy
+	// (order: edge → policy → router) so IP blocking and rate limiting run first.
+	EdgeMiddleware func(http.Handler) http.Handler
 	// PolicyMiddleware, when non-nil, wraps the router so every request is
 	// evaluated against the authorization policy before reaching a route. A nil
 	// value (the default) means no policy enforcement.
@@ -61,11 +64,15 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.IdleTimeout = defaultIdleTimeout
 	}
 
-	// Apply policy enforcement (if configured) closest to the router, then
-	// instrument the whole chain for connection/error stats.
+	// Build the middleware chain inside-out: router first, then policy, then the
+	// edge (so requests hit edge → policy → router). Finally instrument the
+	// whole chain for connection/error stats.
 	var handler http.Handler = cfg.Router
 	if cfg.PolicyMiddleware != nil {
 		handler = cfg.PolicyMiddleware(handler)
+	}
+	if cfg.EdgeMiddleware != nil {
+		handler = cfg.EdgeMiddleware(handler)
 	}
 
 	s := &Server{}

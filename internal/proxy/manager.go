@@ -21,6 +21,7 @@ import (
 	proxyquic "github.com/vortex-run/vortex/internal/proxy/quic"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	proxyudp "github.com/vortex-run/vortex/internal/proxy/udp"
+	"github.com/vortex-run/vortex/internal/security"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 )
 
@@ -42,6 +43,9 @@ type ManagerConfig struct {
 	// PolicyEngine enforces an authorization policy on every L7 (HTTP/HTTPS)
 	// request. May be nil, in which case no policy enforcement is applied.
 	PolicyEngine *policy.Engine
+	// Edge applies IP blocking and global rate limiting at the L7 edge, ahead of
+	// policy. May be nil, in which case no edge protection is applied.
+	Edge *security.Edge
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -202,6 +206,9 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 	if m.cfg.PolicyEngine != nil {
 		srvCfg.PolicyMiddleware = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
 	}
+	if mw := m.edgeMiddleware(rc); mw != nil {
+		srvCfg.EdgeMiddleware = mw
+	}
 	if useTLS {
 		if m.cfg.TLS == nil {
 			return nil, errors.New("https route requires a TLS manager")
@@ -235,6 +242,34 @@ func routePolicyMiddleware(engine *policy.Engine, routeName string) func(http.Ha
 			r = r.WithContext(policy.SetRouteName(r.Context(), routeName))
 			policed.ServeHTTP(w, r)
 		})
+	}
+}
+
+// edgeMiddleware returns the edge protection middleware for a route: the global
+// Edge (IP blocking + global rate limit) wrapped around an optional per-route
+// rate limiter built from rc.RateLimit. It returns nil when neither applies.
+func (m *Manager) edgeMiddleware(rc config.Route) func(http.Handler) http.Handler {
+	var chain []func(http.Handler) http.Handler
+
+	if m.cfg.Edge != nil {
+		chain = append(chain, m.cfg.Edge.Middleware())
+	}
+	if rc.RateLimit != nil && rc.RateLimit.RPM > 0 {
+		rl := security.NewHTTPRateLimiter(security.HTTPRateLimiterConfig{
+			RPM: rc.RateLimit.RPM, Burst: rc.RateLimit.Burst, Enabled: true,
+		})
+		chain = append(chain, rl.Middleware())
+	}
+	if len(chain) == 0 {
+		return nil
+	}
+	// Compose inside-out so chain[0] (the global edge) runs first.
+	return func(next http.Handler) http.Handler {
+		h := next
+		for i := len(chain) - 1; i >= 0; i-- {
+			h = chain[i](h)
+		}
+		return h
 	}
 }
 

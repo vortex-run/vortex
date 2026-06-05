@@ -22,6 +22,7 @@ import (
 	"github.com/vortex-run/vortex/internal/proxy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/vortex-run/vortex/internal/security"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
@@ -141,6 +142,12 @@ func runStart(ctx context.Context, pidfile string) error {
 		return nil
 	})
 
+	// --- security edge: IP blocking + rate limiting at the L7 edge ----------
+	edge, err := buildSecurityEdge(ctx, cfg, log)
+	if err != nil {
+		return fmt.Errorf("initialising security edge: %w", err)
+	}
+
 	// --- data plane: TLS manager, connection pool, proxy manager -----------
 
 	tlsMgr, err := buildTLSManager(cfg, log)
@@ -165,7 +172,7 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// The data plane is held behind a swappable holder so config reload can
 	// rebuild all listeners against the new route set.
-	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine, log: log}
+	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine, edge: edge, log: log}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
@@ -215,6 +222,7 @@ type dataPlane struct {
 	tls    *vtls.Manager
 	mtls   *vtls.MTLSConfig
 	policy *policy.Engine
+	edge   *security.Edge
 	log    *slog.Logger
 
 	mu      sync.Mutex
@@ -229,7 +237,7 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 	cfg := holder.Get()
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
-		PolicyEngine: d.policy, Logger: d.log,
+		PolicyEngine: d.policy, Edge: d.edge, Logger: d.log,
 	})
 	if err != nil {
 		return err
@@ -404,6 +412,46 @@ func openRuntimeAuditLog(cfg *config.Config, log *slog.Logger) (*audit.Log, erro
 	}
 	log.Info("audit log enabled", "path", path)
 	return al, nil
+}
+
+// buildSecurityEdge constructs the L7 edge (IP blocking + optional global rate
+// limiting) from cfg.Security and starts its background maintenance goroutines.
+// It returns nil when no edge protection is configured. block_clouds is a stub:
+// it is logged but not yet enforced.
+func buildSecurityEdge(ctx context.Context, cfg *config.Config, log *slog.Logger) (*security.Edge, error) {
+	sec := cfg.Security
+	hasAllowlist := len(sec.IPAllowlist) > 0
+	if !hasAllowlist && !sec.BlockTor {
+		// Nothing to enforce at the edge; per-route rate limits still apply via
+		// the proxy manager independently of the global Edge.
+		log.Info("security edge disabled", "reason", "no allowlist or tor blocking configured")
+		return nil, nil
+	}
+
+	bl, err := security.NewBlocklist(security.BlocklistConfig{
+		IPAllowlist: sec.IPAllowlist,
+		BlockTor:    sec.BlockTor,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if sec.BlockClouds {
+		log.Warn("block_clouds is configured but not yet implemented (no-op)")
+	}
+
+	edge := security.NewEdge(security.EdgeConfig{Blocklist: bl})
+
+	// Keep the Tor exit list fresh in the background.
+	if sec.BlockTor {
+		go bl.StartTorRefresh(ctx, "")
+	}
+
+	log.Info("security edge enabled",
+		"block_tor", sec.BlockTor,
+		"allowlist_size", len(sec.IPAllowlist),
+		"auto_ban", false,
+	)
+	return edge, nil
 }
 
 // buildPolicyEngine constructs the OPA policy engine. Policy enforcement is
