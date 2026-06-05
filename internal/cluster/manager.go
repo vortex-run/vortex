@@ -91,8 +91,15 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.started = true
 	m.mu.Unlock()
 
-	if err := m.gossip.Join(m.cfg.Peers); err != nil {
-		return err
+	// Joining peers is best-effort and asynchronous: a node must start promptly
+	// even if peers are unreachable (a join to a down peer can block on network
+	// timeouts). Gossip anti-entropy reconciles membership once peers come up.
+	if len(m.cfg.Peers) > 0 {
+		go func() {
+			if err := m.gossip.Join(m.cfg.Peers); err != nil {
+				m.log.Warn("initial gossip join failed, will retry via gossip", "err", err)
+			}
+		}()
 	}
 
 	if m.cfg.Bootstrap {

@@ -17,6 +17,7 @@ import (
 	"github.com/vortex-run/vortex/internal/api"
 	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/auth"
+	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
@@ -146,6 +147,15 @@ func runStart(ctx context.Context, pidfile string) error {
 	edge, err := buildSecurityEdge(ctx, cfg, log)
 	if err != nil {
 		return fmt.Errorf("initialising security edge: %w", err)
+	}
+
+	// --- cluster: gossip + raft when multi-node, else single-node mode ------
+	clusterMgr, err := buildCluster(ctx, cfg, log)
+	if err != nil {
+		return fmt.Errorf("initialising cluster: %w", err)
+	}
+	if clusterMgr != nil {
+		mgr.OnShutdown("cluster", func(context.Context) error { return clusterMgr.Shutdown() })
 	}
 
 	// --- data plane: TLS manager, connection pool, proxy manager -----------
@@ -412,6 +422,61 @@ func openRuntimeAuditLog(cfg *config.Config, log *slog.Logger) (*audit.Log, erro
 	}
 	log.Info("audit log enabled", "path", path)
 	return al, nil
+}
+
+// buildCluster starts the gossip+raft cluster manager when the deployment is
+// multi-node (cfg.Cluster.Nodes has more than one entry) or VORTEX_BOOTSTRAP is
+// set. Single-node deployments skip all clustering overhead and just log the
+// mode. The returned manager is nil in single-node mode.
+func buildCluster(ctx context.Context, cfg *config.Config, log *slog.Logger) (*cluster.Manager, error) {
+	bootstrap := os.Getenv("VORTEX_BOOTSTRAP") == "true"
+	if len(cfg.Cluster.Nodes) <= 1 && !bootstrap {
+		log.Info("running in single-node mode")
+		return nil, nil
+	}
+
+	bindAddr := os.Getenv("VORTEX_CLUSTER_BIND")
+	if bindAddr == "" {
+		bindAddr = "127.0.0.1"
+	}
+	node, err := cluster.NewNodeConfig(cfg.Cluster.Name, bindAddr, cfg.Cluster.GossipPort)
+	if err != nil {
+		return nil, err
+	}
+
+	mgr, err := cluster.NewManager(cluster.Config{
+		Node:       node,
+		RaftPort:   cfg.Cluster.RaftPort,
+		GossipPort: cfg.Cluster.GossipPort,
+		Bootstrap:  bootstrap,
+		Peers:      peersExcludingSelf(cfg.Cluster.Nodes, bindAddr),
+		Logger:     log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := mgr.Start(ctx); err != nil {
+		_ = mgr.Shutdown()
+		return nil, err
+	}
+	log.Info("cluster started",
+		"node_id", node.NodeID,
+		"peers", len(cfg.Cluster.Nodes),
+		"leader", mgr.IsLeader(),
+	)
+	return mgr, nil
+}
+
+// peersExcludingSelf returns the configured node addresses minus this node's
+// bind address (a node should not try to gossip-join itself).
+func peersExcludingSelf(nodes []string, self string) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n != self {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // buildSecurityEdge constructs the L7 edge (IP blocking + optional global rate
