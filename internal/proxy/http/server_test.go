@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -178,6 +179,51 @@ func TestServer_TLS(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "secure" {
 		t.Errorf("body = %q, want secure", body)
+	}
+}
+
+func TestServer_PolicyMiddlewareCalled(t *testing.T) {
+	var called atomic.Bool
+	mw := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called.Store(true)
+			next.ServeHTTP(w, r)
+		})
+	}
+	s := NewServer(ServerConfig{
+		Addr: "127.0.0.1:0", Router: okRouter("ok"), PolicyMiddleware: mw,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.ListenAndServe(ctx) }()
+	addr := waitListening(t, s)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if !called.Load() {
+		t.Error("PolicyMiddleware was not invoked")
+	}
+}
+
+func TestServer_NilPolicyMiddlewarePassesThrough(t *testing.T) {
+	// With no PolicyMiddleware the request must reach the router unchanged.
+	s := NewServer(ServerConfig{Addr: "127.0.0.1:0", Router: okRouter("through")})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.ListenAndServe(ctx) }()
+	addr := waitListening(t, s)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "through" {
+		t.Errorf("body = %q, want through", body)
 	}
 }
 

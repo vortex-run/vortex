@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 )
@@ -228,6 +230,85 @@ func TestManager_StopCancelsListeners(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Stop did not return within 5s")
+	}
+}
+
+// denyAllEngine builds a policy engine whose policy denies every request.
+func denyAllEngine(t *testing.T) *policy.Engine {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "deny.rego"),
+		[]byte("package vortex\n\ndefault allow = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, err := policy.NewEngine(policy.EngineConfig{PolicyDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestManager_PolicyEngineEnforcedOnHTTPRoute(t *testing.T) {
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	port := freePort(t)
+	m, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
+		}},
+		TCPPool:      tcp.NewPool(tcp.PoolConfig{}),
+		PolicyEngine: denyAllEngine(t),
+		Logger:       discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (deny-all policy)", resp.StatusCode)
+	}
+}
+
+func TestManager_NilPolicyEngineNoEnforcement(t *testing.T) {
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	port := freePort(t)
+	// No PolicyEngine: requests must pass through to the backend.
+	m := newTestManager(t, []config.Route{
+		{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "backend" {
+		t.Errorf("status=%d body=%q, want 200 'backend'", resp.StatusCode, body)
 	}
 }
 
