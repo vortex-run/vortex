@@ -34,6 +34,9 @@ type ManagerConfig struct {
 	TLS *vtls.Manager
 	// TCPPool is shared by all routes for backend dialing. Required.
 	TCPPool *tcp.Pool
+	// MTLSConfig provides the mTLS server config for routes with mtls:true. May
+	// be nil when no route uses mTLS.
+	MTLSConfig *vtls.MTLSConfig
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -113,13 +116,22 @@ func (m *Manager) buildRoute(rc config.Route) (*route, error) {
 }
 
 func (m *Manager) buildTCP(rc config.Route) (*route, error) {
-	ln, err := tcp.NewListener(tcp.ListenerConfig{
+	lc := tcp.ListenerConfig{
 		ListenAddr:     listenAddr(rc.Listen),
 		Backends:       routeToTCPBackends(rc.Backends),
 		Pool:           m.cfg.TCPPool,
 		MaxConnections: 0,
 		Logger:         m.log,
-	})
+	}
+	// mTLS routes require the cluster identity mesh; wrap accepted connections
+	// in the mTLS server config so peers must present a valid cluster cert.
+	if rc.MTLS {
+		if m.cfg.MTLSConfig == nil {
+			return nil, errors.New("route has mtls:true but no mTLS config was provided")
+		}
+		lc.TLSConfig = m.cfg.MTLSConfig.ServerTLSConfig()
+	}
+	ln, err := tcp.NewListener(lc)
 	if err != nil {
 		return nil, err
 	}

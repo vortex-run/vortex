@@ -93,6 +93,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		return fmt.Errorf("initialising TLS: %w", err)
 	}
 
+	// mTLS identity mesh: when any route has mtls:true, set up the cluster CA +
+	// node cert rotation and the mTLS config used to wrap those routes.
+	mtlsCfg, err := buildMTLS(ctx, cfg, log)
+	if err != nil {
+		return fmt.Errorf("initialising mTLS: %w", err)
+	}
+
 	pool := tcp.NewPool(tcp.PoolConfig{
 		MaxIdle:     100,
 		MaxOpen:     1000,
@@ -103,7 +110,7 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// The data plane is held behind a swappable holder so config reload can
 	// rebuild all listeners against the new route set.
-	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, log: log}
+	dp := &dataPlane{ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, log: log}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
@@ -151,6 +158,7 @@ type dataPlane struct {
 	ctx  context.Context
 	pool *tcp.Pool
 	tls  *vtls.Manager
+	mtls *vtls.MTLSConfig
 	log  *slog.Logger
 
 	mu      sync.Mutex
@@ -164,7 +172,7 @@ type dataPlane struct {
 func (d *dataPlane) rebuild(holder *config.Holder) error {
 	cfg := holder.Get()
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
-		Config: cfg, TLS: d.tls, TCPPool: d.pool, Logger: d.log,
+		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls, Logger: d.log,
 	})
 	if err != nil {
 		return err
@@ -245,6 +253,59 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 func needsTLS(cfg *config.Config) bool {
 	for _, r := range cfg.Routes {
 		if r.Protocol == "https" || r.Protocol == "h3" {
+			return true
+		}
+	}
+	return false
+}
+
+// buildMTLS sets up the cluster CA + node cert rotation and the mTLS config when
+// any route has mtls:true, starting the rotation loop. Returns nil when no route
+// uses mTLS.
+func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls.MTLSConfig, error) {
+	if !needsMTLS(cfg) {
+		return nil, nil
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	storePath := filepath.Join(cacheDir, "vortex", "mtls")
+	store, err := vtls.NewStore(storePath, []byte(cfg.Cluster.Name+"-mtls-key"))
+	if err != nil {
+		return nil, fmt.Errorf("creating mTLS store: %w", err)
+	}
+
+	rm, err := vtls.NewRotationManager(vtls.RotationConfig{
+		ClusterName: cfg.Cluster.Name,
+		Store:       store,
+		Logger:      log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating rotation manager: %w", err)
+	}
+	rm.StartRotation(ctx)
+
+	mc, err := vtls.NewMTLSConfig(vtls.MTLSConfig{
+		RotationMgr: rm,
+		TrustDomain: rm.Identity().TrustDomain,
+		Logger:      log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.Info("mTLS identity mesh enabled",
+		"node_id", rm.Identity().NodeID,
+		"trust_domain", rm.Identity().TrustDomain,
+		"store", storePath,
+	)
+	return mc, nil
+}
+
+// needsMTLS reports whether any route has mtls:true.
+func needsMTLS(cfg *config.Config) bool {
+	for _, r := range cfg.Routes {
+		if r.MTLS {
 			return true
 		}
 	}

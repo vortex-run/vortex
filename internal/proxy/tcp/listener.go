@@ -2,6 +2,7 @@ package tcp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"log/slog"
@@ -15,6 +16,9 @@ import (
 // the context is cancelled before returning anyway.
 const drainTimeout = 30 * time.Second
 
+// tlsHandshakeTimeout bounds the mTLS handshake on an accepted connection.
+const tlsHandshakeTimeout = 10 * time.Second
+
 // ListenerConfig configures a TCP tunnel Listener.
 type ListenerConfig struct {
 	// ListenAddr is the local bind address, e.g. ":5432".
@@ -27,6 +31,9 @@ type ListenerConfig struct {
 	Tunnel TunnelConfig
 	// MaxConnections caps concurrent tunnels; 0 means unlimited.
 	MaxConnections int
+	// TLSConfig, when non-nil, wraps each accepted connection in a TLS server
+	// handshake before tunneling — used for mTLS routes. Nil means plain TCP.
+	TLSConfig *tls.Config
 	// Logger receives tunnel/accept diagnostics; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -117,8 +124,10 @@ func (l *Listener) Listen(ctx context.Context) error {
 	return nil
 }
 
-// handleAccept enforces MaxConnections, selects a backend, borrows a pooled
-// connection, and dispatches a tunnel goroutine.
+// handleAccept enforces MaxConnections and dispatches a goroutine that
+// (for mTLS routes) performs the TLS handshake, selects a backend, borrows a
+// pooled connection, and tunnels. The handshake runs off the accept loop so a
+// slow or hostile client cannot stall new accepts.
 func (l *Listener) handleAccept(ctx context.Context, client net.Conn) {
 	if l.cfg.MaxConnections > 0 && l.active.Load() >= int64(l.cfg.MaxConnections) {
 		l.rejected.Add(1)
@@ -126,35 +135,52 @@ func (l *Listener) handleAccept(ctx context.Context, client net.Conn) {
 		return
 	}
 	l.total.Add(1)
-
-	backend, err := l.rr.Next()
-	if err != nil {
-		l.log.Error("tcp backend selection failed", "err", err)
-		_ = client.Close()
-		return
-	}
-
-	backendConn, err := l.cfg.Pool.Get(ctx, "tcp", backend.Addr)
-	if err != nil {
-		l.log.Error("tcp backend dial failed", "backend", backend.Addr, "err", err)
-		_ = client.Close()
-		return
-	}
-
 	l.active.Add(1)
 	l.wg.Add(1)
 	go func() {
 		defer l.wg.Done()
 		defer l.active.Add(-1)
-		defer l.cfg.Pool.Put(backendConn, backend.Addr)
-		defer func() { _ = client.Close() }()
-
-		if terr := Tunnel(ctx, client, backendConn, l.cfg.Tunnel); terr != nil {
-			if !errors.Is(terr, io.EOF) && !errors.Is(terr, context.Canceled) {
-				l.log.Debug("tcp tunnel ended", "backend", backend.Addr, "err", terr)
-			}
-		}
+		l.serveConn(ctx, client)
 	}()
+}
+
+// serveConn handles one accepted connection: optional mTLS handshake, backend
+// selection, and bidirectional tunnel. It always closes the client connection.
+func (l *Listener) serveConn(ctx context.Context, client net.Conn) {
+	defer func() { _ = client.Close() }()
+
+	// mTLS routes: wrap the client connection in a TLS server handshake before
+	// tunneling. A failed handshake closes the connection without touching a
+	// backend, keeping the listener running.
+	if l.cfg.TLSConfig != nil {
+		tlsConn := tls.Server(client, l.cfg.TLSConfig)
+		hsCtx, cancel := context.WithTimeout(ctx, tlsHandshakeTimeout)
+		err := tlsConn.HandshakeContext(hsCtx)
+		cancel()
+		if err != nil {
+			l.log.Warn("mTLS handshake failed", "remote_addr", client.RemoteAddr().String(), "err", err)
+			return
+		}
+		client = tlsConn
+	}
+
+	backend, err := l.rr.Next()
+	if err != nil {
+		l.log.Error("tcp backend selection failed", "err", err)
+		return
+	}
+	backendConn, err := l.cfg.Pool.Get(ctx, "tcp", backend.Addr)
+	if err != nil {
+		l.log.Error("tcp backend dial failed", "backend", backend.Addr, "err", err)
+		return
+	}
+	defer l.cfg.Pool.Put(backendConn, backend.Addr)
+
+	if terr := Tunnel(ctx, client, backendConn, l.cfg.Tunnel); terr != nil {
+		if !errors.Is(terr, io.EOF) && !errors.Is(terr, context.Canceled) {
+			l.log.Debug("tcp tunnel ended", "backend", backend.Addr, "err", terr)
+		}
+	}
 }
 
 // drain waits for active tunnel goroutines to finish, bounded by drainTimeout.
