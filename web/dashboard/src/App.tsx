@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/layout/Layout";
 import { Overview } from "./pages/Overview";
 import { RoutesPage } from "./pages/Routes";
+import { RouteBuilder } from "./pages/RouteBuilder";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -18,6 +19,7 @@ export default function App() {
             <Route index element={<Overview />} />
             <Route path="nodes" element={<Stub name="Nodes" />} />
             <Route path="routes" element={<RoutesPage />} />
+            <Route path="routes/new" element={<RouteBuilder />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
             <Route path="security" element={<Stub name="Security" />} />
             <Route path="metrics" element={<Stub name="Metrics" />} />
