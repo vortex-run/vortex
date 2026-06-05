@@ -5,6 +5,7 @@ import { Overview } from "./pages/Overview";
 import { RoutesPage } from "./pages/Routes";
 import { RouteBuilder } from "./pages/RouteBuilder";
 import { Metrics } from "./pages/Metrics";
+import { Security } from "./pages/Security";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -22,7 +23,7 @@ export default function App() {
             <Route path="routes" element={<RoutesPage />} />
             <Route path="routes/new" element={<RouteBuilder />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
-            <Route path="security" element={<Stub name="Security" />} />
+            <Route path="security" element={<Security />} />
             <Route path="metrics" element={<Metrics />} />
             <Route path="plugins" element={<Stub name="Plugins" />} />
             <Route path="audit" element={<Stub name="Audit Log" />} />
