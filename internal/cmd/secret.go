@@ -4,13 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/secrets"
 )
 
 // errSecret signals a secret-command failure whose detail was already printed;
@@ -32,26 +28,6 @@ func newSecretCommand() *cobra.Command {
 	return c
 }
 
-// openSecretStore loads the config and opens the secret store for its cluster.
-func openSecretStore() (*secrets.SecretStore, *config.Config, error) {
-	cfg, err := config.Load(flags.configPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	if override := os.Getenv("VORTEX_SECRET_STORE"); override != "" {
-		cacheDir = override
-		store, serr := secrets.NewSecretStore(cacheDir, []byte(cfg.Cluster.Name+"-secrets"))
-		return store, cfg, serr
-	}
-	path := filepath.Join(cacheDir, "vortex", "secrets")
-	store, err := secrets.NewSecretStore(path, []byte(cfg.Cluster.Name+"-secrets"))
-	return store, cfg, err
-}
-
 func newSecretSetCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <name> <value>",
@@ -59,12 +35,12 @@ func newSecretSetCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, value := args[0], args[1]
-			store, _, err := openSecretStore()
+			a, _, err := openSecretAdapter()
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
-			if err := store.Set(name, value); err != nil {
+			if err := a.Set(cmd.Context(), name, value); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
@@ -82,34 +58,25 @@ func newSecretGetCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			store, _, err := openSecretStore()
+			a, _, err := openSecretAdapter()
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
 			out := cmd.OutOrStdout()
-			if reveal {
-				val, gerr := store.Get(name)
-				if errors.Is(gerr, os.ErrNotExist) {
-					fmt.Fprintf(out, "%s: [not set]\n", name)
-					return nil
-				}
-				if gerr != nil {
-					fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", gerr)
-					return errSecret
-				}
-				fmt.Fprintf(out, "%s: %s\n", name, val)
+			val, gerr := a.Get(cmd.Context(), name)
+			if errors.Is(gerr, os.ErrNotExist) {
+				fmt.Fprintf(out, "%s: [not set]\n", name)
 				return nil
 			}
-			exists, eerr := store.Exists(name)
-			if eerr != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", eerr)
+			if gerr != nil {
+				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", gerr)
 				return errSecret
 			}
-			if exists {
-				fmt.Fprintf(out, "%s: [set]\n", name)
+			if reveal {
+				fmt.Fprintf(out, "%s: %s\n", name, val)
 			} else {
-				fmt.Fprintf(out, "%s: [not set]\n", name)
+				fmt.Fprintf(out, "%s: [set]\n", name)
 			}
 			return nil
 		},
@@ -124,12 +91,12 @@ func newSecretListCommand() *cobra.Command {
 		Short: "List declared secrets and their set/unset status",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, cfg, err := openSecretStore()
+			a, cfg, err := openSecretAdapter()
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
-			stored, err := store.List()
+			stored, err := a.List(cmd.Context())
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
@@ -181,12 +148,12 @@ func newSecretDeleteCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			store, _, err := openSecretStore()
+			a, _, err := openSecretAdapter()
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
-			if err := store.Delete(name); err != nil {
+			if err := a.Delete(cmd.Context(), name); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}

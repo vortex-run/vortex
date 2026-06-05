@@ -137,6 +137,12 @@ func (s *SecretStore) Exists(name string) (bool, error) {
 	return false, fmt.Errorf("secrets: checking secret %q: %w", name, err)
 }
 
+// Adapter returns this store wrapped as a local Adapter, so callers can treat
+// the on-disk store uniformly with the external secret backends.
+func (s *SecretStore) Adapter() Adapter {
+	return NewLocalAdapter(s)
+}
+
 // fileFor returns the on-disk path for a secret.
 func (s *SecretStore) fileFor(name string) string {
 	return filepath.Join(s.path, name+secretExt)

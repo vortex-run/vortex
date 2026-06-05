@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,24 @@ func Resolve(store *SecretStore, keys []string) (map[string]string, error) {
 	out := make(map[string]string, len(keys))
 	for _, key := range keys {
 		val, err := store.Get(key)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("secret not found: %s", key)
+			}
+			return nil, fmt.Errorf("resolving secret %s: %w", key, err)
+		}
+		out[key] = val
+	}
+	return out, nil
+}
+
+// ResolveAdapter is the Adapter-based counterpart of Resolve: it looks up every
+// key through any secret backend (local or external). Resolution is
+// all-or-nothing, naming the first missing or failing key.
+func ResolveAdapter(ctx context.Context, a Adapter, keys []string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		val, err := a.Get(ctx, key)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("secret not found: %s", key)

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -88,7 +89,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	})
 
 	// --- secrets: validate declared keys, open store, load injectable env ---
-	if _, err := loadSecrets(cfg, log); err != nil {
+	if _, err := loadSecrets(ctx, cfg, log); err != nil {
 		return fmt.Errorf("initialising secrets: %w", err)
 	}
 
@@ -318,37 +319,42 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 // inject_env is enabled — resolves the secrets that ARE set into an env map for
 // injection into managed processes. Invalid key names or a store that cannot be
 // opened are fatal; missing secret values are not (they may be set later).
-func loadSecrets(cfg *config.Config, log *slog.Logger) (map[string]string, error) {
+func loadSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) (map[string]string, error) {
 	if err := secrets.ValidateKeys(cfg.Secrets.Keys); err != nil {
 		return nil, err
 	}
 
-	storePath := os.Getenv("VORTEX_SECRET_STORE")
-	if storePath == "" {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
-		storePath = filepath.Join(cacheDir, "vortex", "secrets")
-	}
-	store, err := secrets.NewSecretStore(storePath, []byte(cfg.Cluster.Name+"-secrets"))
+	ac, err := buildAdapterConfig(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("opening secret store: %w", err)
+		return nil, err
+	}
+	adapter, err := secrets.NewAdapter(ac)
+	if err != nil {
+		return nil, fmt.Errorf("opening secret backend: %w", err)
+	}
+
+	// Verify connectivity to the backend. An unreachable external backend is a
+	// warning, not a fatal error: secrets may be resolved later, and a transient
+	// outage should not prevent the proxy from starting.
+	if perr := adapter.Ping(ctx); perr != nil {
+		log.Warn("secret backend unreachable at startup", "kind", ac.Kind, "err", perr)
+	} else {
+		log.Info("secret backend connected", "kind", ac.Kind)
 	}
 
 	// Warn about declared-but-unset secrets and collect the ones that are set.
 	var present, missing []string
 	for _, key := range cfg.Secrets.Keys {
-		exists, eerr := store.Exists(key)
-		if eerr != nil {
-			return nil, fmt.Errorf("checking secret %s: %w", key, eerr)
-		}
-		if exists {
+		_, gerr := adapter.Get(ctx, key)
+		switch {
+		case gerr == nil:
 			present = append(present, key)
-		} else {
+		case errors.Is(gerr, os.ErrNotExist):
 			missing = append(missing, key)
 			log.Warn("declared secret not set", "name", key,
 				"hint", "run: vortex secret set "+key+" <value>")
+		default:
+			return nil, fmt.Errorf("checking secret %s: %w", key, gerr)
 		}
 	}
 
@@ -356,7 +362,7 @@ func loadSecrets(cfg *config.Config, log *slog.Logger) (map[string]string, error
 		return nil, nil
 	}
 
-	env, err := secrets.Resolve(store, present)
+	env, err := secrets.ResolveAdapter(ctx, adapter, present)
 	if err != nil {
 		return nil, err
 	}
