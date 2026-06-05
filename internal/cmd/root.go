@@ -84,6 +84,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newReloadCommand())
 	root.AddCommand(newServiceCommand())
 	root.AddCommand(newSelfUpdateCommand())
+	root.AddCommand(newSecretCommand())
 
 	return root
 }
@@ -95,7 +96,8 @@ func Execute() {
 		// user-facing diagnostics and signal failure via a sentinel; in that
 		// case exit non-zero without an extra generic log line.
 		if errors.Is(err, errCheckFailed) || errors.Is(err, errNotRunning) ||
-			errors.Is(err, errNeedRoot) || errors.Is(err, errSelfUpdate) {
+			errors.Is(err, errNeedRoot) || errors.Is(err, errSelfUpdate) ||
+			errors.Is(err, errSecret) {
 			os.Exit(1)
 		}
 		// PersistentPreRunE may not have run on early parse errors; guard nil.
