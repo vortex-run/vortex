@@ -38,14 +38,15 @@ func NewMTLSConfig(cfg MTLSConfig) (*MTLSConfig, error) {
 	return &cfg, nil
 }
 
-// ServerTLSConfig returns a *tls.Config that requires and verifies a client
-// certificate from the cluster CA with a valid SPIFFE identity.
+// ServerTLSConfig returns a *tls.Config that requires a client certificate and
+// verifies it (chain + SPIFFE identity) via verifyPeer.
 func (m *MTLSConfig) ServerTLSConfig() *tls.Config {
-	pool, _ := BuildCAPool(m.RotationMgr.ClusterCA())
 	return &tls.Config{
 		MinVersion: m.MinVersion,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  pool,
+		// RequestAnyClientCert + manual verification: we authorize peers by
+		// their SPIFFE identity (not hostname), so we run our own chain check in
+		// VerifyPeerCertificate rather than relying on the default verifier.
+		ClientAuth: tls.RequireAnyClientCert,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return m.RotationMgr.Current(), nil
 		},
@@ -54,13 +55,13 @@ func (m *MTLSConfig) ServerTLSConfig() *tls.Config {
 }
 
 // ClientTLSConfig returns a *tls.Config that presents this node's certificate
-// and verifies the server's certificate against the cluster CA and trust domain.
+// and verifies the server by SPIFFE identity. Hostname verification is disabled
+// (InsecureSkipVerify) because nodes are identified by SPIFFE URI, not DNS name;
+// full chain + identity verification is enforced in verifyPeer instead.
 func (m *MTLSConfig) ClientTLSConfig() *tls.Config {
-	pool, _ := BuildCAPool(m.RotationMgr.ClusterCA())
 	return &tls.Config{
 		MinVersion:         m.MinVersion,
-		InsecureSkipVerify: false, //nolint:gosec // RootCAs + VerifyPeerCertificate enforce trust
-		RootCAs:            pool,
+		InsecureSkipVerify: true, //nolint:gosec // verifyPeer performs full chain + SPIFFE verification
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return m.RotationMgr.Current(), nil
 		},
@@ -68,14 +69,43 @@ func (m *MTLSConfig) ClientTLSConfig() *tls.Config {
 	}
 }
 
-// verifyPeer runs after the standard chain verification: it extracts the peer's
-// SPIFFE identity and confirms its trust domain matches ours.
-func (m *MTLSConfig) verifyPeer(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
-	if len(verifiedChains) == 0 || len(verifiedChains[0]) == 0 {
-		return errors.New("vtls mtls: no verified peer certificate chain")
+// verifyPeer manually verifies the peer's certificate chain against the cluster
+// CA and confirms its SPIFFE identity is in our trust domain. It is used in
+// place of the default verifier so peers are authorized by SPIFFE identity
+// rather than DNS name.
+func (m *MTLSConfig) verifyPeer(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	if len(rawCerts) == 0 {
+		return errors.New("vtls mtls: peer presented no certificate")
 	}
-	leaf := verifiedChains[0][0]
 
+	certs := make([]*x509.Certificate, 0, len(rawCerts))
+	for _, der := range rawCerts {
+		c, err := x509.ParseCertificate(der)
+		if err != nil {
+			return fmt.Errorf("vtls mtls: parsing peer cert: %w", err)
+		}
+		certs = append(certs, c)
+	}
+	leaf := certs[0]
+
+	// Verify the chain against the cluster CA.
+	pool, err := BuildCAPool(m.RotationMgr.ClusterCA())
+	if err != nil {
+		return err
+	}
+	inter := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		inter.AddCert(c)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         pool,
+		Intermediates: inter,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		return fmt.Errorf("vtls mtls: peer chain verification failed: %w", err)
+	}
+
+	// Authorize by SPIFFE identity in our trust domain.
 	spiffeID, err := ExtractSPIFFEID(leaf)
 	if err != nil {
 		return fmt.Errorf("vtls mtls: peer cert lacks SPIFFE identity: %w", err)
