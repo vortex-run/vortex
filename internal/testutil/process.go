@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -48,6 +49,48 @@ func BuildBinary(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.Remove(bin) })
 	return bin
+}
+
+// BuildBinaryInto compiles the vortex binary into destDir and returns its path,
+// WITHOUT registering any per-test cleanup. Callers own destDir's lifetime —
+// use this from TestMain to build a binary once and share it across a whole
+// suite (BuildBinary ties the binary to a single test via t.TempDir/t.Cleanup,
+// which deletes it when that one test finishes).
+func BuildBinaryInto(destDir string) (string, error) {
+	name := "vortex"
+	if runtime.GOOS == "windows" {
+		name = "vortex.exe"
+	}
+	bin := filepath.Join(destDir, name)
+
+	root, err := moduleRootFromWD()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("building vortex binary: %w\n%s", err, out)
+	}
+	return bin, nil
+}
+
+// moduleRootFromWD is the non-testing form of moduleRoot for use outside a test.
+func moduleRootFromWD() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("could not locate go.mod above %s", dir)
+		}
+		dir = parent
+	}
 }
 
 // moduleRoot walks up from the test's working directory until it finds the

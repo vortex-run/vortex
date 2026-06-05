@@ -158,7 +158,7 @@ tasks:
   test:integration:
     desc: Run integration tests (starts a real vortex process)
     cmds:
-      - go test -v -tags integration -timeout 120s ./integration/...
+      - go test -v -tags integration -timeout 300s ./integration/...
 
   test:all:
     desc: Run unit tests + integration tests

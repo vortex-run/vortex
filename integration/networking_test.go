@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -16,6 +17,41 @@ import (
 
 	"github.com/vortex-run/vortex/internal/testutil"
 )
+
+// Networking tests each start a real vortex process, which requires compiling
+// the binary. Building it once per test (5×, ~20-30s each) blows the timeout,
+// so TestMain builds it a single time into a suite-owned temp dir and shares it
+// across every networking test. (A per-test BuildBinary would delete the binary
+// via t.Cleanup/t.TempDir when its owning test finished, breaking later tests.)
+var netBin string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "vortex-net-bin-*")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "networking TestMain: temp dir:", err)
+		os.Exit(1)
+	}
+	bin, err := testutil.BuildBinaryInto(dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "networking TestMain: build:", err)
+		_ = os.RemoveAll(dir)
+		os.Exit(1)
+	}
+	netBin = bin
+
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// getNetBinary returns the suite-shared vortex binary built by TestMain.
+func getNetBinary(t *testing.T) string {
+	t.Helper()
+	if netBin == "" {
+		t.Fatal("networking binary not built (TestMain did not run)")
+	}
+	return netBin
+}
 
 // netConfig builds a vortex.cue with the given routes block. observability uses
 // stderr logging so the started process does not need a log directory.
@@ -76,7 +112,7 @@ func tcpEcho(t *testing.T) int {
 }
 
 func TestNetworking_HealthShowsRoutes(t *testing.T) {
-	bin := testutil.BuildBinary(t)
+	bin := getNetBinary(t)
 	be := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer be.Close()
 	beHost, bePort := hostPort(t, be)
@@ -110,7 +146,7 @@ func TestNetworking_HealthShowsRoutes(t *testing.T) {
 }
 
 func TestNetworking_HTTPRouteServesTraffic(t *testing.T) {
-	bin := testutil.BuildBinary(t)
+	bin := getNetBinary(t)
 	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "traffic ok")
 	}))
@@ -137,7 +173,7 @@ func TestNetworking_HTTPRouteServesTraffic(t *testing.T) {
 }
 
 func TestNetworking_TCPRouteServesTraffic(t *testing.T) {
-	bin := testutil.BuildBinary(t)
+	bin := getNetBinary(t)
 	bePort := tcpEcho(t)
 	listen := testutil.FreePort(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(tcpRoute("db", listen, bePort)))
@@ -157,7 +193,7 @@ func TestNetworking_TCPRouteServesTraffic(t *testing.T) {
 }
 
 func TestNetworking_MultipleRoutesSimultaneous(t *testing.T) {
-	bin := testutil.BuildBinary(t)
+	bin := getNetBinary(t)
 	httpBE := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "http route ok")
 	}))
@@ -213,7 +249,7 @@ func TestNetworking_MultipleRoutesSimultaneous(t *testing.T) {
 }
 
 func TestNetworking_ConfigReloadUpdatesRoutes(t *testing.T) {
-	bin := testutil.BuildBinary(t)
+	bin := getNetBinary(t)
 	be := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer be.Close()
 	beHost, bePort := hostPort(t, be)
