@@ -81,7 +81,14 @@ func (e *Engine) compile(ctx context.Context) (rego.PreparedEvalQuery, bool, err
 	// than using rego.Load with file paths: OPA's loader mishandles Windows
 	// volume-qualified paths (it drops the drive letter), and reading the bytes
 	// directly is portable and keeps compilation independent of the loader.
-	opts := []func(*rego.Rego){rego.Query(e.cfg.QueryPath)}
+	// StrictBuiltinErrors makes built-in failures (e.g. division by zero,
+	// bad type conversions) surface as evaluation errors instead of silently
+	// yielding "undefined". The middleware turns an Eval error into a 500, so a
+	// buggy policy fails loudly rather than silently denying every request.
+	opts := []func(*rego.Rego){
+		rego.Query(e.cfg.QueryPath),
+		rego.StrictBuiltinErrors(true),
+	}
 	usingDefault := false
 	if len(regoFiles) == 0 {
 		// No operator policy: fall back to the built-in allow-all module.
