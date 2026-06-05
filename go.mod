@@ -5,6 +5,7 @@ go 1.26
 require (
 	cuelang.org/go v0.16.1
 	github.com/coreos/go-oidc/v3 v3.18.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/open-policy-agent/opa v1.17.0
 	github.com/quic-go/quic-go v0.59.1
 	github.com/spf13/cobra v1.10.2
@@ -18,7 +19,6 @@ require (
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/emicklei/proto v1.14.3 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
