@@ -2,13 +2,63 @@ package tcp
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"sync"
 	"testing"
 	"time"
 )
+
+// selfSignedTLS builds a server TLS config (requiring a client cert) and a
+// matching client TLS config that trusts it and presents the same cert. This
+// exercises the listener's TLS-wrapping path without importing vtls.
+func selfSignedTLS(t *testing.T) (server, client *tls.Config) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+	parsed, _ := x509.ParseCertificate(der)
+	pool := x509.NewCertPool()
+	pool.AddCert(parsed)
+
+	server = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    pool,
+	}
+	client = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool,
+		ServerName:   "localhost",
+	}
+	return server, client
+}
 
 // echoServer is a TCP server that echoes everything it reads back to the
 // sender. It is the backend for listener tests.
@@ -342,5 +392,74 @@ func TestListener_StatsAccurate(t *testing.T) {
 	}
 	if a := l.Stats().Active; a != 0 {
 		t.Errorf("Active = %d after close, want 0", a)
+	}
+}
+
+func TestListener_MTLSRejectsPlainConn(t *testing.T) {
+	be := newEchoServer(t)
+	serverTLS, _ := selfSignedTLS(t)
+	pool := NewPool(PoolConfig{})
+	defer func() { _ = pool.Close() }()
+	addr, l, _ := startListener(t, ListenerConfig{
+		Backends:  []BackendAddr{{Addr: be.addr(), Weight: 1}},
+		Pool:      pool,
+		TLSConfig: serverTLS,
+	})
+
+	// A plain (non-TLS) client: the server's TLS handshake fails, the conn is
+	// closed, and the backend receives nothing.
+	c, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_, _ = c.Write([]byte("plaintext"))
+	_ = c.SetReadDeadline(time.Now().Add(time.Second))
+	buf := make([]byte, 8)
+	if _, rerr := c.Read(buf); rerr == nil {
+		t.Error("plain client should not get an echo through an mTLS listener")
+	}
+	_ = c.Close()
+
+	// The listener must still be running and no active tunnel established.
+	time.Sleep(200 * time.Millisecond)
+	if a := l.Stats().Active; a != 0 {
+		t.Errorf("Active = %d after rejected plain conn, want 0", a)
+	}
+	// A subsequent proper TLS client still works (listener survived).
+	if _, err := net.DialTimeout("tcp", addr, time.Second); err != nil {
+		t.Errorf("listener should still accept connections: %v", err)
+	}
+}
+
+func TestListener_MTLSAcceptsMTLSConn(t *testing.T) {
+	be := newEchoServer(t)
+	serverTLS, clientTLS := selfSignedTLS(t)
+	pool := NewPool(PoolConfig{})
+	defer func() { _ = pool.Close() }()
+	addr, _, _ := startListener(t, ListenerConfig{
+		Backends:  []BackendAddr{{Addr: be.addr(), Weight: 1}},
+		Pool:      pool,
+		TLSConfig: serverTLS,
+	})
+
+	// A TLS client presenting a valid cert: handshake succeeds and bytes tunnel
+	// to the echo backend and back.
+	conn, err := tls.Dial("tcp", addr, clientTLS)
+	if err != nil {
+		t.Fatalf("TLS dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	want := []byte("hello mtls")
+	if _, err := conn.Write(want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("echo = %q, want %q", got, want)
 	}
 }

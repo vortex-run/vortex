@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	vtls "github.com/vortex-run/vortex/internal/tls"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -47,6 +49,75 @@ func backendOf(t *testing.T, srv *httptest.Server) config.Backend {
 	host, portStr, _ := net.SplitHostPort(u.Host)
 	port, _ := strconv.Atoi(portStr)
 	return config.Backend{Host: host, Port: port, Weight: 1}
+}
+
+// testMTLSConfig builds an mTLS config for the given cluster name.
+func testMTLSConfig(t *testing.T, clusterName string) *vtls.MTLSConfig {
+	t.Helper()
+	store, err := vtls.NewStore(filepath.Join(t.TempDir(), "mtls"), []byte("mgr-mtls-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rm, err := vtls.NewRotationManager(vtls.RotationConfig{
+		ClusterName: clusterName, Store: store, Logger: discardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mc, err := vtls.NewMTLSConfig(vtls.MTLSConfig{
+		RotationMgr: rm, TrustDomain: rm.Identity().TrustDomain, Logger: discardLogger(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mc
+}
+
+func TestManager_MTLSRouteUsesTLSConfig(t *testing.T) {
+	mc := testMTLSConfig(t, "prod")
+	// A tcp route with mtls:true plus an MTLSConfig must build successfully and
+	// produce a TLS-wrapped listener.
+	m, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "db", Protocol: "tcp", Listen: freePort(t),
+				Backends: []config.Backend{{Host: "127.0.0.1", Port: freePort(t), Weight: 1}}, MTLS: true},
+		}},
+		TCPPool:    tcp.NewPool(tcp.PoolConfig{}),
+		MTLSConfig: mc,
+		Logger:     discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager with mtls route + config: %v", err)
+	}
+	if len(m.routes) != 1 || m.routes[0].protocol != "tcp" {
+		t.Fatalf("expected one tcp route, got %+v", m.routes)
+	}
+}
+
+func TestManager_MTLSRouteWithoutConfigErrors(t *testing.T) {
+	// mtls:true with NO MTLSConfig must be rejected at build time.
+	_, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "db", Protocol: "tcp", Listen: freePort(t),
+				Backends: []config.Backend{{Host: "127.0.0.1", Port: freePort(t), Weight: 1}}, MTLS: true},
+		}},
+		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
+		Logger:  discardLogger(),
+	})
+	if err == nil {
+		t.Error("expected error for mtls:true route without MTLSConfig")
+	}
+}
+
+func TestManager_PlainTCPRouteNoTLS(t *testing.T) {
+	// A tcp route with mtls:false must build fine with no MTLSConfig.
+	m := newTestManager(t, []config.Route{
+		{Name: "plain", Protocol: "tcp", Listen: freePort(t),
+			Backends: []config.Backend{{Host: "127.0.0.1", Port: freePort(t), Weight: 1}}, MTLS: false},
+	})
+	if len(m.routes) != 1 {
+		t.Fatalf("expected one route, got %d", len(m.routes))
+	}
 }
 
 func TestManager_NilConfigError(t *testing.T) {
