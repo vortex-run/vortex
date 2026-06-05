@@ -44,6 +44,8 @@ func newSecretSetCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
+			// Audit the operation, never the secret value.
+			auditCLI(cmd, "secret.set", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "Secret %q set successfully\n", name)
 			return nil
 		},
@@ -157,6 +159,7 @@ func newSecretDeleteCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 				return errSecret
 			}
+			auditCLI(cmd, "secret.delete", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "Secret %q deleted\n", name)
 			return nil
 		},

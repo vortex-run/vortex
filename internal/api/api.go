@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/pkg/logger"
@@ -47,6 +48,24 @@ type Server struct {
 	authMW func(http.Handler) http.Handler
 	keys   *auth.APIKeyStore
 	rbac   *auth.RBAC
+
+	// auditLog records security-relevant API events (reload, key create/revoke).
+	// nil disables audit logging (used by unit tests).
+	auditLog *audit.Log
+}
+
+// SetAuditLog wires the audit log used to record reload and key-management
+// events. A nil log disables audit recording.
+func (s *Server) SetAuditLog(l *audit.Log) { s.auditLog = l }
+
+// audit records an event if an audit log is wired; it is a no-op otherwise.
+func (s *Server) audit(actor, action, resource string, detail map[string]any) {
+	if s.auditLog == nil {
+		return
+	}
+	if err := s.auditLog.Append(context.Background(), actor, action, resource, detail); err != nil {
+		s.log.Warn("audit append failed", "action", action, "err", err)
+	}
 }
 
 // SetAuth wires the authentication middleware and the key/role stores backing

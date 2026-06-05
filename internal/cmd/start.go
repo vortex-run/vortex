@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/api"
+	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/policy"
@@ -61,7 +62,24 @@ func runStart(ctx context.Context, pidfile string) error {
 	mgr := lifecycle.New(lifecycle.Config{Logger: log})
 	cfgMgr.RegisterReload(mgr)
 
+	// Audit log: tamper-proof record of security-relevant events. Keyed by the
+	// cluster name so the `vortex audit` CLI can verify the same chain.
+	auditLog, err := openRuntimeAuditLog(cfg, log)
+	if err != nil {
+		return fmt.Errorf("initialising audit log: %w", err)
+	}
+	if auditLog != nil {
+		_ = auditLog.Append(ctx, "system", "vortex.start", "server", map[string]any{
+			"version": version, "cluster": cfg.Cluster.Name,
+		})
+		mgr.OnShutdown("audit", func(context.Context) error {
+			_ = auditLog.Append(context.Background(), "system", "vortex.stop", "server", nil)
+			return nil
+		})
+	}
+
 	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
+	apiSrv.SetAuditLog(auditLog)
 
 	// Authentication: load (or start) the API-key store and seed the RBAC roles,
 	// then protect the management API. /internal/* stays reachable from localhost
@@ -368,6 +386,24 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 		log.Warn("loading API key store failed, starting empty", "path", path, "err", err)
 	}
 	return store, path
+}
+
+// openRuntimeAuditLog opens the audit log used by the running server. The path
+// (VORTEX_AUDIT_LOG or <cache>/vortex/audit.log) and HMAC key (cluster name)
+// match the `vortex audit` CLI so the same chain is verifiable. A failure to
+// open is fatal — an unwritable audit log is a security regression, not
+// something to silently skip.
+func openRuntimeAuditLog(cfg *config.Config, log *slog.Logger) (*audit.Log, error) {
+	path := auditLogPath()
+	if derr := os.MkdirAll(filepath.Dir(path), 0o700); derr != nil {
+		log.Warn("creating audit log dir failed", "path", filepath.Dir(path), "err", derr)
+	}
+	al, err := audit.NewLog(path, []byte(cfg.Cluster.Name+"-audit-key"))
+	if err != nil {
+		return nil, err
+	}
+	log.Info("audit log enabled", "path", path)
+	return al, nil
 }
 
 // buildPolicyEngine constructs the OPA policy engine. Policy enforcement is

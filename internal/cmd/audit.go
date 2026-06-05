@@ -41,6 +41,18 @@ func openAuditLog() (*audit.Log, error) {
 	return audit.NewLog(auditLogPath(), []byte(cfg.Cluster.Name+"-audit-key"))
 }
 
+// auditCLI records a CLI-initiated audit event (actor "cli"), never logging
+// secret values. It is best-effort: an audit-log failure must not break the
+// user's command, so errors are silently ignored. The resource is the object
+// acted on (e.g. a secret name).
+func auditCLI(cmd *cobra.Command, action, resource string) {
+	log, err := openAuditLog()
+	if err != nil {
+		return
+	}
+	_ = log.Append(cmd.Context(), "cli", action, resource, nil)
+}
+
 // newAuditCommand builds `vortex audit` with verify and export subcommands.
 func newAuditCommand() *cobra.Command {
 	c := &cobra.Command{

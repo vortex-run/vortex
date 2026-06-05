@@ -19,6 +19,16 @@ func localhostOnly(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// clientIP returns the request's source IP (host portion of RemoteAddr) for
+// audit attribution, falling back to the raw RemoteAddr.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 // writeJSON writes v as a JSON response with the given status code.
 func (s *Server) writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -44,9 +54,11 @@ func (s *Server) handleInternalReload(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload failed: " + err.Error()})
 		return
 	}
+	hash := s.holder.Get().Hash()
+	s.audit(clientIP(r), "config.reload", "config", map[string]any{"hash": hash})
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"reloaded": true,
-		"hash":     s.holder.Get().Hash(),
+		"hash":     hash,
 	})
 }
 

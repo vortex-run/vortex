@@ -63,6 +63,7 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issuing key: " + err.Error()})
 		return
 	}
+	s.audit(clientIP(r), "apikey.create", key.ID, map[string]any{"org": key.OrgID, "user": key.UserID})
 	s.writeJSON(w, http.StatusCreated, createKeyResponse{
 		ID:        key.ID,
 		Secret:    secret,
@@ -88,5 +89,6 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoking key: " + err.Error()})
 		return
 	}
+	s.audit(clientIP(r), "apikey.revoke", id, nil)
 	s.writeJSON(w, http.StatusOK, map[string]string{"revoked": id})
 }
