@@ -126,14 +126,9 @@ func (a *LocalAdapter) Delete(_ context.Context, name string) error {
 func (a *LocalAdapter) Ping(_ context.Context) error { return nil }
 
 // The external-provider constructors below are implemented in their own files
-// (vault.go in M3.3 File 2, awsssm.go in File 3, gcpsm.go in File 4). Until each
-// lands they are stubbed here so the package builds; each later file removes its
-// stub and provides the real constructor.
-
-// NewVaultAdapter is implemented in vault.go (M3.3 File 2).
-func NewVaultAdapter(VaultConfig) (Adapter, error) {
-	return nil, errors.New("secrets: vault adapter not yet implemented")
-}
+// (awsssm.go in M3.3 File 3, gcpsm.go in File 4). Until each lands they are
+// stubbed here so the package builds; each later file removes its stub and
+// provides the real constructor. (NewVaultAdapter now lives in vault.go.)
 
 // NewAWSSSMAdapter is implemented in awsssm.go (M3.3 File 3).
 func NewAWSSSMAdapter(AWSSSMConfig) (Adapter, error) {
