@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Layout } from "./components/layout/Layout";
+import { Overview } from "./pages/Overview";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -13,7 +14,7 @@ export default function App() {
       <BrowserRouter basename="/dashboard">
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<Stub name="Overview" />} />
+            <Route index element={<Overview />} />
             <Route path="nodes" element={<Stub name="Nodes" />} />
             <Route path="routes" element={<Stub name="Routes" />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
