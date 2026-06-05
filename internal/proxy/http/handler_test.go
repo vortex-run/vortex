@@ -2,6 +2,7 @@ package proxyhttp
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -11,7 +12,27 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/plugins"
 )
+
+// fnHook adapts a function into a plugins.Hook for tests.
+type fnHook struct {
+	fn func(plugins.HookInput) (plugins.HookOutput, error)
+}
+
+func (h fnHook) Name() string           { return "fn" }
+func (h fnHook) Type() plugins.HookType { return plugins.HookPreRequest }
+func (h fnHook) Execute(_ context.Context, in plugins.HookInput) (plugins.HookOutput, error) {
+	return h.fn(in)
+}
+
+// chainOf builds a HookChain from a single hook function.
+func chainOf(fn func(plugins.HookInput) (plugins.HookOutput, error)) *plugins.HookChain {
+	c := plugins.NewHookChain(false)
+	c.Register(fnHook{fn: fn}, 0)
+	return c
+}
 
 // backendAddr extracts host:port from an httptest server URL.
 func backendAddr(t *testing.T, srv *httptest.Server) BackendAddr {
@@ -224,5 +245,68 @@ func TestHandler_StreamingFlush(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("first chunk took %v, expected incremental delivery", elapsed)
+	}
+}
+
+func TestHandler_HookAllowForwards(t *testing.T) {
+	var reached bool
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	h, _ := NewHandler(HandlerConfig{
+		Backends: []BackendAddr{backendAddr(t, be)},
+		HookChain: chainOf(func(plugins.HookInput) (plugins.HookOutput, error) {
+			return plugins.HookOutput{Allow: true}, nil
+		}),
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/", nil))
+	if !reached || rec.Code != http.StatusOK {
+		t.Errorf("allow hook: reached=%v code=%d, want true 200", reached, rec.Code)
+	}
+}
+
+func TestHandler_HookDenyReturns403(t *testing.T) {
+	var reached bool
+	be := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	defer be.Close()
+
+	h, _ := NewHandler(HandlerConfig{
+		Backends: []BackendAddr{backendAddr(t, be)},
+		HookChain: chainOf(func(plugins.HookInput) (plugins.HookOutput, error) {
+			return plugins.HookOutput{Allow: false}, nil
+		}),
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("deny hook status = %d, want 403", rec.Code)
+	}
+	if reached {
+		t.Error("backend must not be reached when a hook denies")
+	}
+}
+
+func TestHandler_HookModifiesRequestHeader(t *testing.T) {
+	var gotHeader string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("X-Plugin")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	h, _ := NewHandler(HandlerConfig{
+		Backends: []BackendAddr{backendAddr(t, be)},
+		HookChain: chainOf(func(plugins.HookInput) (plugins.HookOutput, error) {
+			return plugins.HookOutput{Allow: true, Headers: map[string][]string{"X-Plugin": {"injected"}}}, nil
+		}),
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://x/", nil))
+	if gotHeader != "injected" {
+		t.Errorf("backend saw X-Plugin = %q, want 'injected' (hook header mod)", gotHeader)
 	}
 }
