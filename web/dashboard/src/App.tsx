@@ -8,6 +8,7 @@ import { Metrics } from "./pages/Metrics";
 import { Security } from "./pages/Security";
 import { AuditLog } from "./pages/AuditLog";
 import { Secrets } from "./pages/Secrets";
+import { Nodes } from "./pages/Nodes";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -21,7 +22,7 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<Overview />} />
-            <Route path="nodes" element={<Stub name="Nodes" />} />
+            <Route path="nodes" element={<Nodes />} />
             <Route path="routes" element={<RoutesPage />} />
             <Route path="routes/new" element={<RouteBuilder />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
