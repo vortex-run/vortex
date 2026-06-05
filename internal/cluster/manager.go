@@ -33,6 +33,7 @@ type Manager struct {
 
 	mu      sync.Mutex
 	started bool
+	closed  bool
 	stopCh  chan struct{}
 }
 
@@ -171,9 +172,16 @@ func (m *Manager) IsLeader() bool { return m.raft.IsLeader() }
 // LeaderAddr returns the current Raft leader address.
 func (m *Manager) LeaderAddr() string { return m.raft.LeaderAddr() }
 
-// Shutdown stops the reconcile loop and tears down raft and gossip.
+// Shutdown stops the reconcile loop and tears down raft and gossip. It is
+// idempotent: repeated calls (e.g. an explicit Shutdown plus a test cleanup
+// hook) are no-ops after the first.
 func (m *Manager) Shutdown() error {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
+	m.closed = true
 	if m.started {
 		close(m.stopCh)
 		m.started = false
