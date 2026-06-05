@@ -8,7 +8,12 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/plugins"
 )
+
+// hookBodyLimit caps how much request body is passed to plugins (first 64KB).
+const hookBodyLimit = 64 * 1024
 
 // Handler defaults.
 const (
@@ -34,6 +39,11 @@ type HandlerConfig struct {
 	RetryOn       []int         // HTTP status codes to retry; default 502/503/504
 	Timeout       time.Duration // per-request; default 30s
 	FlushInterval time.Duration // streaming flush cadence; default 100ms
+	// HookChain, when non-nil, runs plugin pre-request hooks before forwarding
+	// (a deny returns 403) and post-response hooks after the backend replies.
+	HookChain *plugins.HookChain
+	// RouteName labels hook inputs; optional.
+	RouteName string
 }
 
 // Handler is an http.Handler that reverse-proxies requests to backends with
@@ -45,6 +55,8 @@ type Handler struct {
 	retryOn       map[int]bool
 	timeout       time.Duration
 	flushInterval time.Duration
+	hooks         *plugins.HookChain
+	routeName     string
 }
 
 // NewHandler validates cfg and builds a Handler.
@@ -94,6 +106,8 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		retryOn:       retrySet,
 		timeout:       timeout,
 		flushInterval: flush,
+		hooks:         cfg.HookChain,
+		routeName:     cfg.RouteName,
 	}, nil
 }
 
@@ -109,6 +123,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(req.Context(), h.timeout)
 	defer cancel()
 
+	// Pre-request plugin hooks: a deny short-circuits the proxy; header
+	// modifications are applied to the outbound request.
+	var preHeaders map[string][]string
+	if h.hooks != nil && h.hooks.Len() > 0 {
+		out, err := h.hooks.Execute(ctx, h.hookInput(req, plugins.HookPreRequest))
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "plugin hook error")
+			return
+		}
+		if !out.Allow {
+			status := out.Status
+			if status == 0 {
+				status = http.StatusForbidden
+			}
+			writeJSONError(w, status, "denied by plugin")
+			return
+		}
+		preHeaders = out.Headers
+	}
+
 	attempts := h.retries + 1
 	var lastErr error
 	for attempt := 0; attempt < attempts; attempt++ {
@@ -123,6 +157,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		outreq.URL.Host = backend.Addr
 		outreq.Host = req.Host
 		outreq.RequestURI = ""
+		// Apply plugin pre-request header modifications to the outbound request.
+		for k, vs := range preHeaders {
+			outreq.Header[http.CanonicalHeaderKey(k)] = vs
+		}
 
 		start := time.Now()
 		resp, err := h.rt.RoundTrip(outreq)
@@ -145,6 +183,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 
 		h.balancer.RecordResult(backend.Addr, resp.StatusCode < 500, time.Since(start))
+		// Post-response plugin hooks may add/override response headers.
+		if h.hooks != nil && h.hooks.Len() > 0 {
+			if out, herr := h.hooks.Execute(ctx, h.hookInput(req, plugins.HookPostResponse)); herr == nil {
+				for k, vs := range out.Headers {
+					resp.Header[http.CanonicalHeaderKey(k)] = vs
+				}
+			}
+		}
 		h.writeResponse(w, resp)
 		return
 	}
@@ -198,6 +244,41 @@ func (h *Handler) streamBody(w http.ResponseWriter, body io.Reader) {
 		}
 	}
 }
+
+// hookInput builds a plugins.HookInput from a request. The body is read up to
+// hookBodyLimit and restored so the proxied request still sees the full body.
+func (h *Handler) hookInput(req *http.Request, typ plugins.HookType) plugins.HookInput {
+	var body []byte
+	if req.Body != nil {
+		limited := io.LimitReader(req.Body, hookBodyLimit)
+		body, _ = io.ReadAll(limited)
+		// Restore the consumed bytes ahead of any remaining unread body.
+		req.Body = newRewindBody(body, req.Body)
+	}
+	return plugins.HookInput{
+		Type:    typ,
+		Method:  req.Method,
+		Path:    req.URL.Path,
+		Headers: req.Header,
+		Body:    body,
+		Remote:  req.RemoteAddr,
+		Route:   h.routeName,
+	}
+}
+
+// newRewindBody returns a ReadCloser that yields head first, then the remaining
+// unread body, closing the original on Close.
+func newRewindBody(head []byte, rest io.ReadCloser) io.ReadCloser {
+	return &rewindBody{r: io.MultiReader(strings.NewReader(string(head)), rest), c: rest}
+}
+
+type rewindBody struct {
+	r io.Reader
+	c io.Closer
+}
+
+func (b *rewindBody) Read(p []byte) (int, error) { return b.r.Read(p) }
+func (b *rewindBody) Close() error               { return b.c.Close() }
 
 func isWebSocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(req.Header.Get("Upgrade"), "websocket")

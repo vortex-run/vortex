@@ -16,6 +16,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/vortex-run/vortex/internal/plugins"
 	"github.com/vortex-run/vortex/internal/policy"
 	proxygateway "github.com/vortex-run/vortex/internal/proxy/gateway"
 	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
@@ -52,6 +53,10 @@ type ManagerConfig struct {
 	Metrics *observability.Metrics
 	// Tracer creates per-request spans on L7 routes. May be nil (no-op tracer).
 	Tracer trace.Tracer
+	// Runtime and PluginRegistry back per-route WASM hook chains. Both may be
+	// nil, in which case routes run without plugins.
+	Runtime        *plugins.Runtime
+	PluginRegistry *plugins.Registry
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -184,11 +189,17 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 }
 
 func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
+	hookChain, err := m.buildHookChain(rc)
+	if err != nil {
+		return nil, err
+	}
 	handler, err := proxyhttp.NewHandler(proxyhttp.HandlerConfig{
 		Backends:     routeToHTTPBackends(rc.Backends),
 		Balancer:     "round-robin",
 		RoundTripper: proxyhttp.NewRoundTripper(proxyhttp.RoundTripperConfig{Pool: m.cfg.TCPPool}),
 		Timeout:      parseTimeout(rc.Timeout),
+		HookChain:    hookChain,
+		RouteName:    rc.Name,
 	})
 	if err != nil {
 		return nil, err
@@ -238,6 +249,35 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 			return s.ActiveConns, s.TotalReqs
 		},
 	}, nil
+}
+
+// buildHookChain loads the plugins declared on rc from the registry into the
+// runtime and assembles a HookChain. It returns nil when the route declares no
+// plugins or when no runtime/registry is configured.
+func (m *Manager) buildHookChain(rc config.Route) (*plugins.HookChain, error) {
+	if len(rc.Plugins) == 0 || m.cfg.Runtime == nil || m.cfg.PluginRegistry == nil {
+		return nil, nil
+	}
+	chain := plugins.NewHookChain(true)
+	for i, name := range rc.Plugins {
+		wasm, manifest, err := m.cfg.PluginRegistry.Get(name, "latest")
+		if err != nil {
+			return nil, fmt.Errorf("route %q plugin %q: %w", rc.Name, name, err)
+		}
+		hookType := plugins.HookPreRequest
+		if len(manifest.HookTypes) > 0 {
+			hookType = manifest.HookTypes[0]
+		}
+		// Namespace the loaded module by route so the same plugin can serve
+		// multiple routes without instance collisions.
+		instance := rc.Name + "/" + name
+		hook, err := plugins.NewWASMHook(m.cfg.Runtime, instance, wasm, hookType)
+		if err != nil {
+			return nil, fmt.Errorf("route %q plugin %q: %w", rc.Name, name, err)
+		}
+		chain.Register(hook, i)
+	}
+	return chain, nil
 }
 
 // obsMiddleware returns a middleware that stamps the route name into the

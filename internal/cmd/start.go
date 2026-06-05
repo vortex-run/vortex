@@ -20,6 +20,7 @@ import (
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/vortex-run/vortex/internal/plugins"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
@@ -183,6 +184,15 @@ func runStart(ctx context.Context, pidfile string) error {
 		"metrics_path", "/metrics",
 	)
 
+	// --- plugins: sandboxed WASM runtime + registry -------------------------
+	pluginRuntime, pluginRegistry, err := buildPlugins(ctx, log)
+	if err != nil {
+		return fmt.Errorf("initialising plugins: %w", err)
+	}
+	if pluginRuntime != nil {
+		mgr.OnShutdown("plugins", func(c context.Context) error { return pluginRuntime.Close(c) })
+	}
+
 	// --- cluster: gossip + raft when multi-node, else single-node mode ------
 	clusterMgr, err := buildCluster(ctx, cfg, log)
 	if err != nil {
@@ -218,7 +228,8 @@ func runStart(ctx context.Context, pidfile string) error {
 	// rebuild all listeners against the new route set.
 	dp := &dataPlane{
 		ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine,
-		edge: edge, metrics: metrics, tracer: tracer, log: log,
+		edge: edge, metrics: metrics, tracer: tracer,
+		pluginRT: pluginRuntime, pluginReg: pluginRegistry, log: log,
 	}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
@@ -264,15 +275,17 @@ func runStart(ctx context.Context, pidfile string) error {
 // dataPlane holds the currently-running proxy.Manager and rebuilds it on config
 // reload. It is safe for concurrent stats reads and reload-driven rebuilds.
 type dataPlane struct {
-	ctx     context.Context
-	pool    *tcp.Pool
-	tls     *vtls.Manager
-	mtls    *vtls.MTLSConfig
-	policy  *policy.Engine
-	edge    *security.Edge
-	metrics *observability.Metrics
-	tracer  trace.Tracer
-	log     *slog.Logger
+	ctx       context.Context
+	pool      *tcp.Pool
+	tls       *vtls.Manager
+	mtls      *vtls.MTLSConfig
+	policy    *policy.Engine
+	edge      *security.Edge
+	metrics   *observability.Metrics
+	tracer    trace.Tracer
+	pluginRT  *plugins.Runtime
+	pluginReg *plugins.Registry
+	log       *slog.Logger
 
 	mu      sync.Mutex
 	current *proxy.Manager
@@ -287,7 +300,8 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
 		PolicyEngine: d.policy, Edge: d.edge,
-		Metrics: d.metrics, Tracer: d.tracer, Logger: d.log,
+		Metrics: d.metrics, Tracer: d.tracer,
+		Runtime: d.pluginRT, PluginRegistry: d.pluginReg, Logger: d.log,
 	})
 	if err != nil {
 		return err
@@ -517,6 +531,24 @@ func peersExcludingSelf(nodes []string, self string) []string {
 		}
 	}
 	return out
+}
+
+// buildPlugins creates the sandboxed WASM runtime and opens the plugin
+// registry. Both are always created so routes can declare plugins; a route with
+// no plugins incurs no per-request plugin cost. The registry path honours
+// VORTEX_PLUGIN_DIR (shared with the `vortex plugin` CLI).
+func buildPlugins(ctx context.Context, log *slog.Logger) (*plugins.Runtime, *plugins.Registry, error) {
+	rt, err := plugins.NewRuntime(ctx, plugins.RuntimeConfig{})
+	if err != nil {
+		return nil, nil, err
+	}
+	reg, err := plugins.NewRegistry(pluginStorePath())
+	if err != nil {
+		_ = rt.Close(ctx)
+		return nil, nil, err
+	}
+	log.Info("plugin runtime ready", "store", pluginStorePath(), "installed", len(reg.List()))
+	return rt, reg, nil
 }
 
 // buildSecurityEdge constructs the L7 edge (IP blocking + optional global rate
