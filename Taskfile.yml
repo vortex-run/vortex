@@ -42,6 +42,24 @@ tasks:
     generates:
       - "{{.BIN}}"
 
+  dashboard:dev:
+    desc: Run the dashboard dev server (proxies API to :9090)
+    dir: web/dashboard
+    cmds:
+      - npm run dev
+
+  dashboard:build:
+    desc: Build the dashboard into web/dashboard/dist (embedded into the binary)
+    dir: web/dashboard
+    cmds:
+      - npm run build
+
+  dashboard:build-and-embed:
+    desc: Build the dashboard, then build the Go binary with it embedded
+    cmds:
+      - task: dashboard:build
+      - task: build
+
   run:
     desc: Build and start the VORTEX server
     deps: [build]

@@ -16,6 +16,7 @@ import (
 	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/dashboard"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
@@ -121,6 +122,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// Public endpoints — liveness/readiness must never require auth.
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /ready", s.handleReady)
+	// The management dashboard SPA is served (unauthenticated; it is the login
+	// surface) under /dashboard/.
+	mux.Handle("GET /dashboard/", dashboard.Handler())
 	// Protected endpoints — wrapped at request time with the auth middleware
 	// (if one has been wired via SetAuth) so a missing/invalid credential is
 	// rejected before the handler runs.
