@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
@@ -40,6 +41,23 @@ type Server struct {
 	// callback returning api-owned RouteHealth so this package need not import
 	// the full proxy stack.
 	routeStats func() []RouteHealth
+
+	// auth protects management endpoints; nil means no auth (legacy/tests). keys
+	// and rbac back the /api/keys endpoints. Wired via SetAuth.
+	authMW func(http.Handler) http.Handler
+	keys   *auth.APIKeyStore
+	rbac   *auth.RBAC
+}
+
+// SetAuth wires the authentication middleware and the key/role stores backing
+// the /api/keys endpoints. It must be called before New builds the mux — so it
+// is passed through New via the optional AuthDeps rather than set afterward.
+// (Provided as a method for symmetry with the other Set* wirings used in tests
+// that construct the server in stages.)
+func (s *Server) SetAuth(mw func(http.Handler) http.Handler, keys *auth.APIKeyStore, rbac *auth.RBAC) {
+	s.authMW = mw
+	s.keys = keys
+	s.rbac = rbac
 }
 
 // RouteHealth is one route's health summary in the /health response.
@@ -75,16 +93,53 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		startTime: time.Now(),
 	}
 	mux := http.NewServeMux()
+	// Public endpoints — liveness/readiness must never require auth.
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /ready", s.handleReady)
-	mux.HandleFunc("POST /internal/reload", s.handleInternalReload)
-	mux.HandleFunc("POST /internal/shutdown", s.handleInternalShutdown)
+	// Protected endpoints — wrapped at request time with the auth middleware
+	// (if one has been wired via SetAuth) so a missing/invalid credential is
+	// rejected before the handler runs.
+	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
+	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
+	mux.Handle("GET /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleListKeys)))
+	mux.Handle("POST /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleCreateKey)))
+	mux.Handle("DELETE /api/keys/{id}", s.protectedAdmin(http.HandlerFunc(s.handleRevokeKey)))
+
 	s.srv = &http.Server{
 		Addr:              addr,
 		Handler:           s.correlationMiddleware(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+// protected wraps h with the auth middleware (if wired) — except for loopback
+// requests, which are allowed through without a credential. The /internal/*
+// control-plane endpoints are already restricted to localhost (the Windows-safe
+// SIGHUP/SIGTERM equivalents used by `vortex reload`/`stop`), so an on-box call
+// is implicitly trusted; a remote call still needs a valid key. With no auth
+// wired the handler runs unchanged.
+func (s *Server) protected(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authMW == nil || localhostOnly(r) {
+			h.ServeHTTP(w, r)
+			return
+		}
+		s.authMW(h).ServeHTTP(w, r)
+	})
+}
+
+// protectedAdmin is like protected but additionally requires the admin role,
+// stamped into the context so the auth middleware enforces it.
+func (s *Server) protectedAdmin(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authMW == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		r = r.WithContext(auth.SetRequiredRole(r.Context(), auth.RoleAdmin))
+		s.authMW(h).ServeHTTP(w, r)
+	})
 }
 
 // correlationMiddleware ensures every request carries a correlation ID. It

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/api"
+	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
@@ -61,6 +62,21 @@ func runStart(ctx context.Context, pidfile string) error {
 	cfgMgr.RegisterReload(mgr)
 
 	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
+
+	// Authentication: load (or start) the API-key store and seed the RBAC roles,
+	// then protect the management API. /internal/* stays reachable from localhost
+	// without a key (control plane); /api/keys requires an admin key.
+	keyStore, keyStorePath := openAPIKeyStore(log)
+	rbac := auth.NewRBAC()
+	apiSrv.SetAuth(auth.NewAuthMiddleware(keyStore, nil, rbac), keyStore, rbac)
+	log.Info("auth middleware enabled", "key_store", keyStorePath, "roles", len(rbac.Roles()))
+	mgr.OnShutdown("apikeys", func(context.Context) error {
+		if err := keyStore.Save(keyStorePath); err != nil {
+			log.Warn("saving API key store failed", "err", err)
+		}
+		return nil
+	})
+
 	// Windows-safe control plane: POST /internal/reload and /internal/shutdown
 	// stand in for SIGHUP/SIGTERM, which Windows lacks. Reload goes through the
 	// lifecycle so ALL reload hooks fire (config swap + proxy rebuild), not just
@@ -328,6 +344,30 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 		"store", storePath,
 	)
 	return mc, nil
+}
+
+// openAPIKeyStore opens the API-key store, loading any persisted keys. The path
+// honours VORTEX_APIKEY_STORE (used by tests/operators) and otherwise defaults
+// to <user-cache>/vortex/apikeys.json. A load failure is logged but not fatal —
+// the server starts with an empty store rather than refusing to boot.
+func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
+	path := os.Getenv("VORTEX_APIKEY_STORE")
+	if path == "" {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		path = filepath.Join(cacheDir, "vortex", "apikeys.json")
+	}
+	// Ensure the parent directory exists so Save on shutdown succeeds.
+	if derr := os.MkdirAll(filepath.Dir(path), 0o700); derr != nil {
+		log.Warn("creating API key store dir failed", "path", filepath.Dir(path), "err", derr)
+	}
+	store := auth.NewAPIKeyStore()
+	if err := store.Load(path); err != nil {
+		log.Warn("loading API key store failed, starting empty", "path", path, "err", err)
+	}
+	return store, path
 }
 
 // buildPolicyEngine constructs the OPA policy engine. Policy enforcement is
