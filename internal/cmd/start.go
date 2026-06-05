@@ -293,8 +293,15 @@ type dataPlane struct {
 }
 
 // rebuild constructs a proxy.Manager from the current config and starts it,
-// stopping any previously-running manager. On a build error the previous
+// stopping any previously-running manager first. On a build error the previous
 // manager is left running and the error is returned.
+//
+// The previous manager is stopped BEFORE the new one starts: routes bind fixed
+// ports, so an overlapping start would race the old listener and fail with
+// "address already in use", leaving the route with no listener. Stopping first
+// frees the ports for a clean rebind. This trades a brief (sub-second) bind gap
+// for correctness; in-flight requests on the old listener still drain via the
+// listener's own graceful shutdown.
 func (d *dataPlane) rebuild(holder *config.Holder) error {
 	cfg := holder.Get()
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
@@ -307,23 +314,25 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 		return err
 	}
 
+	// Swap in the new manager and capture the previous one to stop.
+	d.mu.Lock()
+	prev, prevCancel := d.current, d.cancel
 	runCtx, cancel := context.WithCancel(d.ctx)
+	d.current, d.cancel = mgr, cancel
+	d.mu.Unlock()
+
+	// Stop the previous manager and wait for its listeners to release their
+	// ports before starting the new one on the same ports.
+	if prev != nil {
+		prevCancel()
+		_ = prev.Stop(context.Background())
+	}
+
 	go func() {
 		if perr := mgr.Start(runCtx); perr != nil {
 			d.log.Error("proxy manager stopped with error", "err", perr)
 		}
 	}()
-
-	d.mu.Lock()
-	prev, prevCancel := d.current, d.cancel
-	d.current, d.cancel = mgr, cancel
-	d.mu.Unlock()
-
-	// Stop the previous manager (if any) now that the new one is running.
-	if prev != nil {
-		prevCancel()
-		_ = prev.Stop(context.Background())
-	}
 	return nil
 }
 
