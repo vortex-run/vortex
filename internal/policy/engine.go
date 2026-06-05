@@ -8,12 +8,15 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/storage"
+	"github.com/open-policy-agent/opa/v1/storage/inmem"
 )
 
 // defaultQueryPath is the Rego query evaluated for an authorization decision
@@ -73,11 +76,11 @@ func (e *Engine) compile(ctx context.Context) (rego.PreparedEvalQuery, bool, err
 	if err != nil {
 		return empty, false, err
 	}
-	dataFiles, err := listDataFiles(e.cfg.DataDir)
-	if err != nil {
-		return empty, false, err
-	}
 
+	// We read .rego files ourselves and register them as named modules rather
+	// than using rego.Load with file paths: OPA's loader mishandles Windows
+	// volume-qualified paths (it drops the drive letter), and reading the bytes
+	// directly is portable and keeps compilation independent of the loader.
 	opts := []func(*rego.Rego){rego.Query(e.cfg.QueryPath)}
 	usingDefault := false
 	if len(regoFiles) == 0 {
@@ -85,8 +88,20 @@ func (e *Engine) compile(ctx context.Context) (rego.PreparedEvalQuery, bool, err
 		opts = append(opts, rego.Module("vortex_default.rego", defaultPolicy))
 		usingDefault = true
 	} else {
-		loadPaths := append(append([]string{}, regoFiles...), dataFiles...)
-		opts = append(opts, rego.Load(loadPaths, nil))
+		for _, path := range regoFiles {
+			src, rerr := os.ReadFile(path) //nolint:gosec // path comes from listing PolicyDir
+			if rerr != nil {
+				return empty, false, fmt.Errorf("policy: reading %s: %w", path, rerr)
+			}
+			opts = append(opts, rego.Module(filepath.Base(path), string(src)))
+		}
+		store, serr := e.loadDataStore()
+		if serr != nil {
+			return empty, false, serr
+		}
+		if store != nil {
+			opts = append(opts, rego.Store(store))
+		}
 	}
 
 	prepared, err := rego.New(opts...).PrepareForEval(ctx)
@@ -170,9 +185,32 @@ func listRegoFiles(dir string) ([]string, error) {
 	return listByExt(dir, ".rego")
 }
 
-// listDataFiles returns the .json files in dir (non-recursive).
-func listDataFiles(dir string) ([]string, error) {
-	return listByExt(dir, ".json")
+// loadDataStore builds an in-memory store from the JSON files under
+// cfg.DataDir, merging each file's object into the store's root document. It
+// returns nil (no store) when DataDir is unset or contains no JSON files.
+func (e *Engine) loadDataStore() (storage.Store, error) {
+	files, err := listByExt(e.cfg.DataDir, ".json")
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	merged := map[string]any{}
+	for _, path := range files {
+		raw, rerr := os.ReadFile(path) //nolint:gosec // path comes from listing DataDir
+		if rerr != nil {
+			return nil, fmt.Errorf("policy: reading data %s: %w", path, rerr)
+		}
+		var doc map[string]any
+		if jerr := json.Unmarshal(raw, &doc); jerr != nil {
+			return nil, fmt.Errorf("policy: parsing data %s: %w", path, jerr)
+		}
+		for k, v := range doc {
+			merged[k] = v
+		}
+	}
+	return inmem.NewFromObject(merged), nil
 }
 
 // listByExt returns files in dir with the given extension. A missing directory
