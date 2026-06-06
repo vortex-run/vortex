@@ -31,6 +31,12 @@ var ErrToolNotFound = errors.New("agents: tool not found")
 // permitted sandbox (path outside the sandbox dir, disallowed command, etc.).
 var ErrSandboxViolation = errors.New("agents: sandbox violation")
 
+// ErrSandboxEscape is returned specifically when a filesystem path escapes the
+// sandbox boundary, either lexically (../) or via a symlink pointing outside.
+// It wraps ErrSandboxViolation so existing errors.Is(err, ErrSandboxViolation)
+// checks continue to hold.
+var ErrSandboxEscape = fmt.Errorf("%w: path escapes sandbox boundary", ErrSandboxViolation)
+
 // ToolRegistry holds the set of tools available to agents.
 type ToolRegistry struct {
 	mu    sync.RWMutex
@@ -137,7 +143,11 @@ func (t HTTPGetTool) Execute(ctx context.Context, params map[string]any) (any, e
 // --- WriteFileTool / ReadFileTool -------------------------------------------
 
 // sandboxResolve joins rel onto sandboxDir and verifies the result stays within
-// the sandbox, defeating "../" traversal.
+// the sandbox. It defeats both "../" traversal (lexical) AND symlink escape: a
+// symlink placed inside the sandbox pointing outside would pass the lexical
+// check, so after the join we resolve symlinks (on the path itself if it exists,
+// otherwise on its parent directory for new-file writes) and re-verify the real
+// path is contained.
 func sandboxResolve(sandboxDir, rel string) (string, error) {
 	if sandboxDir == "" {
 		return "", fmt.Errorf("%w: no sandbox configured", ErrSandboxViolation)
@@ -146,11 +156,50 @@ func sandboxResolve(sandboxDir, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	full := filepath.Join(base, rel)
-	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
-		return "", fmt.Errorf("%w: path %q escapes sandbox", ErrSandboxViolation, rel)
+
+	// Step 1: lexical join (blocks ../ traversal).
+	joined := filepath.Join(base, rel)
+	if joined != base && !strings.HasPrefix(joined, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("%w: path %q escapes sandbox", ErrSandboxEscape, rel)
 	}
-	return full, nil
+
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", fmt.Errorf("agents: resolve sandbox base: %w", err)
+	}
+
+	// Step 2: if the path already exists, resolve symlinks and re-check. This
+	// catches a symlink inside the sandbox that points outside it.
+	if _, lerr := os.Lstat(joined); lerr == nil {
+		resolved, rerr := filepath.EvalSymlinks(joined)
+		if rerr != nil {
+			return "", fmt.Errorf("agents: resolve symlink: %w", rerr)
+		}
+		if !containedIn(resolved, realBase) {
+			return "", fmt.Errorf("%w: %q resolves outside sandbox", ErrSandboxEscape, rel)
+		}
+		return resolved, nil
+	}
+
+	// Step 3: the path does not exist yet (e.g. a new file to write). Resolve
+	// the parent directory's real path and ensure it is within the sandbox, so
+	// a symlinked parent cannot redirect the write outside.
+	parent := filepath.Dir(joined)
+	if _, lerr := os.Lstat(parent); lerr == nil {
+		realParent, rerr := filepath.EvalSymlinks(parent)
+		if rerr != nil {
+			return "", fmt.Errorf("agents: resolve parent: %w", rerr)
+		}
+		if !containedIn(realParent, realBase) {
+			return "", fmt.Errorf("%w: parent of %q resolves outside sandbox", ErrSandboxEscape, rel)
+		}
+	}
+	return joined, nil
+}
+
+// containedIn reports whether path is realBase itself or lies beneath it.
+func containedIn(path, realBase string) bool {
+	return path == realBase || strings.HasPrefix(path, realBase+string(os.PathSeparator))
 }
 
 // WriteFileTool writes content to a file inside the agent's sandbox.
