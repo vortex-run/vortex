@@ -299,6 +299,33 @@ func TestVortexAPITool_RejectsNonAPIPath(t *testing.T) {
 	}
 }
 
+func TestVortexAPITool_DeniesAgentAndControlPaths(t *testing.T) {
+	for _, p := range []string{"/api/agents/submit", "/api/agents/status", "/internal/shutdown", "/internal/reload"} {
+		_, err := VortexAPITool{BaseURL: "http://x"}.Execute(context.Background(),
+			map[string]any{"method": "POST", "path": p})
+		if !errors.Is(err, ErrSandboxViolation) {
+			t.Errorf("path %q: err = %v, want ErrSandboxViolation", p, err)
+		}
+	}
+}
+
+func TestVortexAPITool_AllowsSafeAPIPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer srv.Close()
+	_, err := VortexAPITool{BaseURL: srv.URL, Client: srv.Client()}.Execute(context.Background(),
+		map[string]any{"method": "GET", "path": "/api/status"})
+	if err != nil {
+		t.Fatalf("/api/status should be allowed: %v", err)
+	}
+	if gotPath != "/api/status" {
+		t.Errorf("server got %q, want /api/status", gotPath)
+	}
+}
+
 func TestSendMessageTool_DeliversViaBus(t *testing.T) {
 	bus := NewBus()
 	target := NewBaseAgent(AgentConfig{Name: "worker", Type: TypeTask})

@@ -6,12 +6,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 )
 
@@ -133,4 +135,75 @@ func TestAgentEndpoints_503WhenUnconfigured(t *testing.T) {
 		t.Errorf("status = %d, want 503", resp.StatusCode)
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
+}
+
+// newAuthedAgentServer builds an in-memory authed server with an agent runtime.
+func newAuthedAgentServer(t *testing.T, rt AgentRuntime) (*Server, string) {
+	t.Helper()
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	keys := auth.NewAPIKeyStore()
+	rbac := auth.NewRBAC()
+	_, secret, err := keys.Issue("agent-user", "default", []auth.Role{auth.RoleOperator}, "agent token", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetAuth(auth.NewAuthMiddleware(keys, nil, rbac), keys, rbac)
+	s.SetAgentRuntime(rt)
+	return s, secret
+}
+
+func TestAgentSubmit_RequiresAPIKeyEvenOnLocalhost(t *testing.T) {
+	s, _ := newAuthedAgentServer(t, stubRuntime{response: "hi"})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/submit",
+		strings.NewReader(`{"message":"x"}`))
+	req.RemoteAddr = "127.0.0.1:5555" // loopback — must NOT bypass auth
+	rec := serve(s, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("submit without key from localhost = %d, want 401", rec.Code)
+	}
+}
+
+func TestAgentSubmit_WithValidKeySucceeds(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{response: "hi"})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/submit",
+		strings.NewReader(`{"message":"x"}`))
+	req.Header.Set("X-API-Key", secret)
+	req.RemoteAddr = "127.0.0.1:5555"
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("submit with valid key = %d, want 200 (body=%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestAgentSubmit_RateLimited(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{response: "hi"})
+	got429 := false
+	for i := 0; i < 12; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/submit",
+			strings.NewReader(`{"message":"x"}`))
+		req.Header.Set("X-API-Key", secret)
+		req.RemoteAddr = "198.51.100.9:5555"
+		rec := serve(s, req)
+		if rec.Code == http.StatusTooManyRequests {
+			got429 = true
+			break
+		}
+	}
+	if !got429 {
+		t.Error("expected a 429 within 12 rapid submits (limit 10/min burst 5)")
+	}
+}
+
+func TestAgentSubmit_ConcurrencyCap503(t *testing.T) {
+	// A runtime that reports ErrAgentBusy → handler must return 503.
+	s, secret := newAuthedAgentServer(t, stubRuntime{subErr: ErrAgentBusy})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/submit",
+		strings.NewReader(`{"message":"x"}`))
+	req.Header.Set("X-API-Key", secret)
+	req.RemoteAddr = "127.0.0.1:5555"
+	rec := serve(s, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("busy runtime = %d, want 503", rec.Code)
+	}
 }

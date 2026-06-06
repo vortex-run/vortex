@@ -541,7 +541,16 @@ func stringSlice(v any) ([]string, error) {
 
 // --- VortexAPITool ----------------------------------------------------------
 
-// VortexAPITool calls the VORTEX management API. Only /api/* paths are allowed.
+// vortexAPIDeniedPaths are path prefixes the agent must never call: the agent
+// endpoints (no recursive self-submission) and the control plane.
+var vortexAPIDeniedPaths = []string{
+	"/api/agents/",
+	"/internal/shutdown",
+	"/internal/reload",
+}
+
+// VortexAPITool calls the VORTEX management API. Only /api/* paths are allowed,
+// excluding the agent and control-plane paths in vortexAPIDeniedPaths.
 type VortexAPITool struct {
 	BaseURL string // e.g. http://127.0.0.1:9090
 	Client  *http.Client
@@ -565,6 +574,13 @@ func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any,
 	}
 	if !strings.HasPrefix(path, "/api/") {
 		return nil, fmt.Errorf("%w: only /api/* paths allowed", ErrSandboxViolation)
+	}
+	// Deny self-referential / control-plane paths: an agent must not be able to
+	// recursively drive the agent runtime or trigger reload/shutdown.
+	for _, denied := range vortexAPIDeniedPaths {
+		if strings.HasPrefix(path, denied) {
+			return nil, fmt.Errorf("%w: path %q is not allowed", ErrSandboxViolation, path)
+		}
 	}
 	body, _ := params["body"].(string)
 	client := t.Client
