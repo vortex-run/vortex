@@ -27,7 +27,7 @@ type StubAIGateway struct {
 // Complete returns a canned response. When the system prompt asks for intent
 // classification, it returns IntentReply (default GENERAL_QUESTION).
 func (s StubAIGateway) Complete(_ context.Context, _ string, systemPrompt string) (string, error) {
-	if strings.Contains(systemPrompt, "classify") {
+	if strings.Contains(strings.ToLower(systemPrompt), "classify") {
 		if s.IntentReply != "" {
 			return s.IntentReply, nil
 		}
