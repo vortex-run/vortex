@@ -255,6 +255,10 @@ func runStart(ctx context.Context, pidfile string) error {
 		return out
 	})
 
+	// Dashboard data providers: extended status, secret set/unset state (never
+	// values), and installed plugins.
+	wireDashboardProviders(apiSrv, cfgMgr, auditLog, pluginRegistry, policyEngine)
+
 	// ACME HTTP-01 challenge handler must be reachable on :80 for cert issuance.
 	if h := tlsChallengeHandler(tlsMgr, cfg); h != nil {
 		startChallengeServer(mgr, h, log)
@@ -540,6 +544,85 @@ func peersExcludingSelf(nodes []string, self string) []string {
 		}
 	}
 	return out
+}
+
+// wireDashboardProviders attaches the dashboard data providers to the API
+// server: extended status, declared-secret set/unset state (never values), and
+// installed plugins. Each provider reads live state when called.
+func wireDashboardProviders(
+	apiSrv *api.Server,
+	cfgMgr *config.Manager,
+	auditLog *audit.Log,
+	pluginRegistry *plugins.Registry,
+	policyEngine *policy.Engine,
+) {
+	apiSrv.SetStatusProvider(func() api.StatusInfo {
+		cfg := cfgMgr.Current()
+		info := api.StatusInfo{
+			ClusterName:   cfg.Cluster.Name,
+			TLSProvider:   cfg.TLS.Provider,
+			SecretBackend: secretBackendKind(cfg),
+			PolicyDefault: policyEngine != nil && policyEngine.UsingDefault(),
+		}
+		if id, err := vtls.NewNodeIdentity(cfg.Cluster.Name); err == nil {
+			info.NodeID = id.NodeID
+			info.TrustDomain = id.TrustDomain
+		}
+		if pluginRegistry != nil {
+			info.PluginCount = len(pluginRegistry.List())
+		}
+		if auditLog != nil {
+			if entries, err := auditLog.Query(audit.QueryFilter{}); err == nil {
+				info.AuditEntryCount = len(entries)
+			}
+		}
+		return info
+	})
+
+	apiSrv.SetSecretsProvider(func() []api.SecretStatus {
+		cfg := cfgMgr.Current()
+		out := make([]api.SecretStatus, 0, len(cfg.Secrets.Keys))
+		ac, err := buildAdapterConfig(cfg)
+		if err != nil {
+			return out
+		}
+		adapter, err := secrets.NewAdapter(ac)
+		if err != nil {
+			return out
+		}
+		for _, key := range cfg.Secrets.Keys {
+			_, gerr := adapter.Get(context.Background(), key)
+			out = append(out, api.SecretStatus{Name: key, Set: gerr == nil})
+		}
+		return out
+	})
+
+	apiSrv.SetPluginsProvider(func() []api.PluginInfo {
+		if pluginRegistry == nil {
+			return nil
+		}
+		manifests := pluginRegistry.List()
+		out := make([]api.PluginInfo, 0, len(manifests))
+		for _, m := range manifests {
+			hooks := make([]string, 0, len(m.HookTypes))
+			for _, h := range m.HookTypes {
+				hooks = append(hooks, string(h))
+			}
+			out = append(out, api.PluginInfo{
+				Name: m.Name, Version: m.Version,
+				Description: m.Description, HookTypes: hooks,
+			})
+		}
+		return out
+	})
+}
+
+// secretBackendKind returns the configured secret backend, defaulting to local.
+func secretBackendKind(cfg *config.Config) string {
+	if cfg.Secrets.Store == "" {
+		return "local"
+	}
+	return cfg.Secrets.Store
 }
 
 // buildPlugins creates the sandboxed WASM runtime and opens the plugin

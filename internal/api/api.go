@@ -56,7 +56,50 @@ type Server struct {
 
 	// metricsHandler serves the Prometheus /metrics endpoint when wired.
 	metricsHandler http.Handler
+
+	// Dashboard data providers (all optional; nil yields empty/zero responses).
+	// They are callbacks so this package stays decoupled from the audit, plugin,
+	// and secret subsystems.
+	statusProvider  func() StatusInfo
+	secretsProvider func() []SecretStatus
+	pluginsProvider func() []PluginInfo
 }
+
+// StatusInfo is the extended status returned by GET /api/status.
+type StatusInfo struct {
+	NodeID          string `json:"node_id"`
+	TrustDomain     string `json:"trust_domain"`
+	TLSProvider     string `json:"tls_provider"`
+	SecretBackend   string `json:"secret_backend"`
+	PolicyDefault   bool   `json:"policy_default"`
+	PluginCount     int    `json:"plugin_count"`
+	AuditEntryCount int    `json:"audit_entry_count"`
+	ClusterName     string `json:"cluster_name"`
+	Version         string `json:"version"`
+}
+
+// SecretStatus is one declared secret's set/unset state (never its value).
+type SecretStatus struct {
+	Name string `json:"name"`
+	Set  bool   `json:"set"`
+}
+
+// PluginInfo mirrors a plugin manifest for GET /api/plugins.
+type PluginInfo struct {
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description,omitempty"`
+	HookTypes   []string `json:"hook_types,omitempty"`
+}
+
+// SetStatusProvider wires the GET /api/status data source.
+func (s *Server) SetStatusProvider(fn func() StatusInfo) { s.statusProvider = fn }
+
+// SetSecretsProvider wires the GET /api/secrets/status data source.
+func (s *Server) SetSecretsProvider(fn func() []SecretStatus) { s.secretsProvider = fn }
+
+// SetPluginsProvider wires the GET /api/plugins data source.
+func (s *Server) SetPluginsProvider(fn func() []PluginInfo) { s.pluginsProvider = fn }
 
 // SetMetricsHandler wires the Prometheus metrics handler served at /metrics.
 func (s *Server) SetMetricsHandler(h http.Handler) { s.metricsHandler = h }
@@ -136,6 +179,13 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleListKeys)))
 	mux.Handle("POST /api/keys", s.protectedAdmin(http.HandlerFunc(s.handleCreateKey)))
 	mux.Handle("DELETE /api/keys/{id}", s.protectedAdmin(http.HandlerFunc(s.handleRevokeKey)))
+
+	// Dashboard data endpoints (protected: localhost or valid key).
+	mux.Handle("GET /api/status", s.protected(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
+	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
+	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
+	mux.Handle("POST /api/audit/verify", s.protected(http.HandlerFunc(s.handleAuditVerify)))
 
 	s.srv = &http.Server{
 		Addr:              addr,
