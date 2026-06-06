@@ -42,6 +42,26 @@ tasks:
     generates:
       - "{{.BIN}}"
 
+  tune:show:
+    desc: Show recommended OS tuning settings
+    cmds:
+      - '"{{.BIN}}" tune show'
+
+  tune:apply:
+    desc: Apply recommended OS tuning (dry-run)
+    cmds:
+      - '"{{.BIN}}" tune apply --dry-run'
+
+  bench:
+    desc: Run the full benchmark suite
+    cmds:
+      - '"{{.BIN}}" tune bench'
+
+  bench:save:
+    desc: Run benchmarks and save as the new baseline
+    cmds:
+      - '"{{.BIN}}" tune bench --save'
+
   dashboard:dev:
     desc: Run the dashboard dev server (proxies API to :9090)
     dir: web/dashboard

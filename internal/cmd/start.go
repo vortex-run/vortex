@@ -20,6 +20,7 @@ import (
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/vortex-run/vortex/internal/perf"
 	"github.com/vortex-run/vortex/internal/plugins"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
@@ -193,6 +194,10 @@ func runStart(ctx context.Context, pidfile string) error {
 	if pluginRuntime != nil {
 		mgr.OnShutdown("plugins", func(c context.Context) error { return pluginRuntime.Close(c) })
 	}
+
+	// --- performance: OS tuning + optional autoscaler -----------------------
+	applyTuning(log)
+	startAutoscaler(ctx, log)
 
 	// --- tenancy: namespace registry + quota enforcer -----------------------
 	tenantRegistry, tenantEnforcer := buildTenancy(log)
@@ -690,6 +695,62 @@ func secretBackendKind(cfg *config.Config) string {
 		return "local"
 	}
 	return cfg.Secrets.Store
+}
+
+// applyTuning logs the recommended OS tuning at startup, and applies it when
+// VORTEX_APPLY_TUNING=true (Linux + root only; otherwise settings are skipped).
+func applyTuning(log *slog.Logger) {
+	apply := os.Getenv("VORTEX_APPLY_TUNING") == "true"
+	res := perf.Apply(!apply)
+	for _, s := range res.Skipped {
+		log.Debug("os tuning skipped", "setting", s)
+	}
+	if apply {
+		log.Info("os tuning applied", "applied", len(res.Applied), "skipped", len(res.Skipped))
+		for _, e := range res.Errors {
+			log.Warn("os tuning error", "detail", e)
+		}
+	}
+}
+
+// startAutoscaler creates and starts the horizontal autoscaler when
+// VORTEX_AUTOSCALE_PROVIDER is set; otherwise it logs that autoscaling is off.
+func startAutoscaler(ctx context.Context, log *slog.Logger) {
+	provider := os.Getenv("VORTEX_AUTOSCALE_PROVIDER")
+	if provider == "" {
+		log.Info("autoscaler disabled")
+		return
+	}
+	cfg := perf.AutoscaleConfig{
+		Provider:   provider,
+		APIKey:     os.Getenv("VORTEX_AUTOSCALE_API_KEY"),
+		WebhookURL: os.Getenv("VORTEX_AUTOSCALE_WEBHOOK"),
+		MinNodes:   atoiDefault(os.Getenv("VORTEX_AUTOSCALE_MIN_NODES"), 1),
+		MaxNodes:   atoiDefault(os.Getenv("VORTEX_AUTOSCALE_MAX_NODES"), 10),
+	}
+	as, err := perf.NewAutoscaler(cfg)
+	if err != nil {
+		log.Warn("autoscaler configuration invalid, disabling", "err", err)
+		return
+	}
+	log.Info("autoscaler enabled", "provider", cfg.Provider, "min", cfg.MinNodes, "max", cfg.MaxNodes)
+	// CPU and node-count providers are placeholders until cluster metrics are
+	// wired; the loop runs but evaluates conservatively (0% CPU, 1 node).
+	go func() {
+		_ = as.Start(ctx, func() float64 { return 0 }, func() int { return 1 })
+	}()
+}
+
+// atoiDefault parses s as an int, returning def on empty or parse failure.
+func atoiDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // buildTenancy opens the namespace registry and builds the quota enforcer.
