@@ -109,7 +109,7 @@ func TestReadFileTool_RejectsEscape(t *testing.T) {
 
 func TestRunCommandTool_RunsAllowed(t *testing.T) {
 	dir := t.TempDir()
-	// "go version" is allowed and present in CI/dev.
+	// "go version" is allowed; RequireApproval is false (zero value) so it runs.
 	res, err := RunCommandTool{SandboxDir: dir}.Execute(context.Background(),
 		map[string]any{"command": "go", "args": []string{"version"}})
 	if err != nil {
@@ -130,6 +130,87 @@ func TestRunCommandTool_RejectsDisallowed(t *testing.T) {
 		map[string]any{"command": bad, "args": []string{}})
 	if !errors.Is(err, ErrSandboxViolation) {
 		t.Errorf("err = %v, want ErrSandboxViolation", err)
+	}
+}
+
+func TestRunCommandTool_InterpretersRemovedFromAllowlist(t *testing.T) {
+	for _, banned := range []string{"python3", "npm", "pip3"} {
+		if (RunCommandTool{}).allowed(banned) {
+			t.Errorf("%q must not be in the default allowlist (RCE risk)", banned)
+		}
+	}
+	for _, ok := range []string{"go", "git", "tar", "unzip", "flutter"} {
+		if !(RunCommandTool{}).allowed(ok) {
+			t.Errorf("%q should remain allowed", ok)
+		}
+	}
+}
+
+func TestRunCommandTool_DangerousArgsRejected(t *testing.T) {
+	// Each case opts the command into the allowlist so the rejection is proven
+	// to come from validateArgs, not the allowlist check.
+	cases := []struct {
+		name    string
+		command string
+		args    []string
+	}{
+		{"curl-file", "curl", []string{"-o", "x", "file:///etc/passwd"}},
+		{"curl-loopback", "curl", []string{"http://127.0.0.1/secret"}},
+		{"curl-metadata", "curl", []string{"http://169.254.169.254/latest/meta-data/"}},
+		{"curl-rfc1918", "curl", []string{"http://10.0.0.5/"}},
+		{"git-sshcommand", "git", []string{"-c", "core.sshCommand=touch pwned", "clone", "x"}},
+		{"go-exec", "go", []string{"test", "-exec", "evil", "./..."}},
+		{"tar-tocommand", "tar", []string{"--to-command=evil", "-xf", "a.tar"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tool := RunCommandTool{SandboxDir: t.TempDir(), AllowedCommands: []string{c.command}}
+			_, err := tool.Execute(context.Background(),
+				map[string]any{"command": c.command, "args": c.args})
+			if !errors.Is(err, ErrSandboxViolation) {
+				t.Errorf("%s: err = %v, want ErrSandboxViolation", c.name, err)
+			}
+		})
+	}
+}
+
+func TestRunCommandTool_LegitimateArgsPass(t *testing.T) {
+	// These pass validateArgs; with RequireApproval the tool stops at the gate
+	// (an ApprovalError, not a sandbox violation) — proving validation passed.
+	// curl is not in the default allowlist (SSRF/file-read risk), so an operator
+	// must opt it in explicitly; when they do, validateArgs still applies.
+	cases := []struct {
+		command string
+		allow   []string
+		args    []string
+	}{
+		{"curl", []string{"curl"}, []string{"https://example.com"}},
+		{"go", nil, []string{"build", "./..."}},
+	}
+	for _, c := range cases {
+		_, err := NewRunCommandTool(t.TempDir(), c.allow).Execute(context.Background(),
+			map[string]any{"command": c.command, "args": c.args})
+		if errors.Is(err, ErrSandboxViolation) {
+			t.Errorf("%s %v should pass validation, got sandbox violation: %v", c.command, c.args, err)
+		}
+		if !errors.Is(err, ErrApprovalRequired) {
+			t.Errorf("%s %v should reach the approval gate, got: %v", c.command, c.args, err)
+		}
+	}
+}
+
+func TestRunCommandTool_ApprovalGate(t *testing.T) {
+	_, err := NewRunCommandTool(t.TempDir(), nil).Execute(context.Background(),
+		map[string]any{"command": "go", "args": []string{"version"}})
+	if !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("err = %v, want ErrApprovalRequired", err)
+	}
+	var ae *ApprovalError
+	if !errors.As(err, &ae) {
+		t.Fatalf("err is not *ApprovalError: %v", err)
+	}
+	if ae.Request.Command != "go" || len(ae.Request.Args) != 1 || ae.Request.Args[0] != "version" {
+		t.Errorf("approval request = %+v, want go [version]", ae.Request)
 	}
 }
 
