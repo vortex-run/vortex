@@ -39,14 +39,70 @@ func TestHTTPGetTool_FetchesURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	res, err := HTTPGetTool{Client: srv.Client()}.Execute(context.Background(),
-		map[string]any{"url": srv.URL})
+	// httptest binds loopback, which the SSRF guard blocks by default; the
+	// operator opt-in (AllowedHosts) is the supported way to reach it.
+	res, err := HTTPGetTool{Client: srv.Client(), AllowedHosts: []string{"127.0.0.1"}}.
+		Execute(context.Background(), map[string]any{"url": srv.URL})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	m := res.(map[string]any)
 	if m["status"].(int) != 200 || m["body"].(string) != "hello" {
 		t.Errorf("got status=%v body=%v, want 200 hello", m["status"], m["body"])
+	}
+}
+
+func TestHTTPGet_BlocksSSRFTargets(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"loopback-ip", "http://127.0.0.1/secret"},
+		{"localhost", "http://localhost/secret"},
+		{"metadata", "http://169.254.169.254/latest/meta-data/"},
+		{"rfc1918-10", "http://10.0.0.1/"},
+		{"rfc1918-192", "http://192.168.1.1/"},
+		{"rfc1918-172", "http://172.16.0.1/"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := HTTPGetTool{}.Execute(context.Background(), map[string]any{"url": c.url})
+			if !errors.Is(err, ErrSSRFBlocked) {
+				t.Errorf("%s: err = %v, want ErrSSRFBlocked", c.url, err)
+			}
+		})
+	}
+}
+
+func TestHTTPGet_BlocksNonHTTPSchemeViaSSRF(t *testing.T) {
+	for _, u := range []string{"file:///etc/passwd", "ftp://host/x", "gopher://host"} {
+		_, err := HTTPGetTool{}.Execute(context.Background(), map[string]any{"url": u})
+		if !errors.Is(err, ErrSandboxViolation) {
+			t.Errorf("%s: err = %v, want ErrSandboxViolation", u, err)
+		}
+	}
+}
+
+func TestHTTPGet_AllowedHostsRestriction(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+
+	// Host not in the allow-list is blocked even though it would otherwise be
+	// reachable.
+	_, err := HTTPGetTool{Client: srv.Client(), AllowedHosts: []string{"example.com"}}.
+		Execute(context.Background(), map[string]any{"url": srv.URL})
+	if !errors.Is(err, ErrSSRFBlocked) {
+		t.Errorf("host outside allow-list: err = %v, want ErrSSRFBlocked", err)
+	}
+}
+
+func TestHTTPGet_AllowsPublicIP(t *testing.T) {
+	// A literal public IP passes the SSRF check without any DNS lookup, so this
+	// is hermetic (no network). 8.8.8.8 is public (not private/loopback/meta).
+	if err := (HTTPGetTool{}).isSSRFTarget("https://8.8.8.8/path"); err != nil {
+		t.Errorf("public IP should pass SSRF check, got: %v", err)
 	}
 }
 
