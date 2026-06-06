@@ -3,9 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
+
+// ErrAgentBusy signals the agent runtime's concurrency cap is reached; the
+// submit handler maps it to 503. The runtime adapter (in start.go) translates
+// the agents-package error into this one to keep api decoupled from agents.
+var ErrAgentBusy = errors.New("api: agent runtime busy")
 
 // AgentRuntime is the subset of the agent runtime the API needs. It is
 // satisfied by *agents.Runtime; declaring it here keeps the api package
@@ -59,6 +65,11 @@ func (s *Server) handleAgentSubmit(w http.ResponseWriter, r *http.Request) {
 
 	ch, err := s.agentRuntime.Submit(r.Context(), req.Message, req.SessionID)
 	if err != nil {
+		// Concurrency cap reached → 503 (retryable); other errors → 500.
+		if errors.Is(err, ErrAgentBusy) {
+			http.Error(w, "agent runtime busy", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -124,4 +135,32 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, _ *http.Request) {
 // wantsSSE reports whether the client requested Server-Sent Events.
 func wantsSSE(r *http.Request) bool {
 	return r.Header.Get("Accept") == "text/event-stream"
+}
+
+// requireAPIKey enforces API-key authentication with NO localhost bypass. The
+// agent endpoints are a data plane (tools can touch the filesystem, run
+// commands, call the network), so they must not inherit the control-plane
+// loopback exemption used by protected(). When no auth middleware is configured
+// (unit tests that don't call SetAuth), it passes through.
+func (s *Server) requireAPIKey(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authMW == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		s.authMW(h).ServeHTTP(w, r)
+	})
+}
+
+// rateLimitAgents applies the per-IP agent submit rate limiter, returning 429
+// with a Retry-After header when exceeded.
+func (s *Server) rateLimitAgents(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.agentLimiter != nil && !s.agentLimiter.Allow(clientIP(r)) {
+			w.Header().Set("Retry-After", "6")
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }

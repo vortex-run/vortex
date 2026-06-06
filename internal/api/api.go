@@ -17,6 +17,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/dashboard"
+	"github.com/vortex-run/vortex/internal/security"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
@@ -72,6 +73,8 @@ type Server struct {
 
 	// agentRuntime backs the /api/agents endpoints. Optional; nil yields 503.
 	agentRuntime AgentRuntime
+	// agentLimiter rate-limits POST /api/agents/submit per source IP.
+	agentLimiter *security.HTTPRateLimiter
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -202,6 +205,11 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		log:       log,
 		version:   version,
 		startTime: time.Now(),
+		// Agent submit is expensive (spawns work, may call an AI provider), so
+		// it is rate-limited per source IP: 10/min, burst 5.
+		agentLimiter: security.NewHTTPRateLimiter(security.HTTPRateLimiterConfig{
+			RPM: 10, Burst: 5, Enabled: true,
+		}),
 	}
 	mux := http.NewServeMux()
 	// Public endpoints — liveness/readiness must never require auth.
@@ -231,8 +239,12 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 
 	// Namespace management (admin only).
 	// Agent runtime (M10).
-	mux.Handle("POST /api/agents/submit", s.protected(http.HandlerFunc(s.handleAgentSubmit)))
-	mux.Handle("GET /api/agents/status", s.protected(http.HandlerFunc(s.handleAgentStatus)))
+	// Agent endpoints are the data plane (they can run tools), so unlike the
+	// /internal/* control plane they require a real API key even from localhost
+	// (no loopback bypass). Submit is additionally rate-limited per IP.
+	mux.Handle("POST /api/agents/submit",
+		s.requireAPIKey(s.rateLimitAgents(http.HandlerFunc(s.handleAgentSubmit))))
+	mux.Handle("GET /api/agents/status", s.requireAPIKey(http.HandlerFunc(s.handleAgentStatus)))
 
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))

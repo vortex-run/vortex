@@ -10,13 +10,21 @@ import (
 	"sync/atomic"
 )
 
+// ErrTooManyRequests is returned by Submit when the concurrency cap is reached.
+var ErrTooManyRequests = errors.New("agents: too many concurrent submissions")
+
+// defaultMaxConcurrent bounds simultaneous in-flight Submits when MaxConcurrent
+// is not set.
+const defaultMaxConcurrent = 5
+
 // RuntimeConfig configures the persistent agent runtime supervisor.
 type RuntimeConfig struct {
-	Bus         *Bus
-	Coordinator *Coordinator
-	MaxAgents   int
-	SandboxBase string       // base directory for per-agent sandboxes
-	Logger      *slog.Logger // optional; defaults to slog.Default()
+	Bus           *Bus
+	Coordinator   *Coordinator
+	MaxAgents     int
+	MaxConcurrent int          // max simultaneous in-flight Submits (default 5)
+	SandboxBase   string       // base directory for per-agent sandboxes
+	Logger        *slog.Logger // optional; defaults to slog.Default()
 }
 
 // Runtime supervises the coordinator and the message bus, exposing a simple
@@ -27,6 +35,9 @@ type Runtime struct {
 
 	mu      sync.Mutex
 	started bool
+
+	// submitSem caps concurrent in-flight Submits (DoS guard).
+	submitSem chan struct{}
 
 	messages atomic.Int64
 	queue    atomic.Int64
@@ -44,7 +55,14 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runtime{cfg: cfg, log: log}, nil
+	if cfg.MaxConcurrent <= 0 {
+		cfg.MaxConcurrent = defaultMaxConcurrent
+	}
+	return &Runtime{
+		cfg:       cfg,
+		log:       log,
+		submitSem: make(chan struct{}, cfg.MaxConcurrent),
+	}, nil
 }
 
 // Start registers the coordinator on the bus, ensures the sandbox base exists,
@@ -80,9 +98,17 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 		return nil, fmt.Errorf("agents: runtime not started")
 	}
 
+	// Acquire a concurrency slot; reject rather than queue unboundedly.
+	select {
+	case r.submitSem <- struct{}{}:
+	default:
+		return nil, ErrTooManyRequests
+	}
+
 	out := make(chan string, 1)
 	r.queue.Add(1)
 	go func() {
+		defer func() { <-r.submitSem }()
 		defer close(out)
 		defer r.queue.Add(-1)
 		r.messages.Add(1)

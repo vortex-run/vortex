@@ -815,7 +815,13 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 type agentRuntimeAdapter struct{ rt *agents.Runtime }
 
 func (a *agentRuntimeAdapter) Submit(ctx context.Context, userMsg, sessionID string) (<-chan string, error) {
-	return a.rt.Submit(ctx, userMsg, sessionID)
+	ch, err := a.rt.Submit(ctx, userMsg, sessionID)
+	if errors.Is(err, agents.ErrTooManyRequests) {
+		// Translate to the api-layer sentinel so the handler maps it to 503
+		// without the api package importing the agents package.
+		return nil, api.ErrAgentBusy
+	}
+	return ch, err
 }
 
 func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
