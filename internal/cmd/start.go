@@ -263,6 +263,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// Dashboard data providers: extended status, secret set/unset state (never
 	// values), and installed plugins.
 	wireDashboardProviders(apiSrv, cfgMgr, auditLog, pluginRegistry, policyEngine)
+	wireNamespaceHooks(apiSrv, tenantRegistry, tenantEnforcer)
 
 	// ACME HTTP-01 challenge handler must be reachable on :80 for cert issuance.
 	if h := tlsChallengeHandler(tlsMgr, cfg); h != nil {
@@ -623,6 +624,64 @@ func wireDashboardProviders(
 		}
 		return out
 	})
+}
+
+// wireNamespaceHooks attaches the namespace management endpoints to the API
+// server, backed by the tenant registry and enforcer.
+func wireNamespaceHooks(apiSrv *api.Server, reg *tenancy.Registry, enf *tenancy.Enforcer) {
+	apiSrv.SetNamespaceHooks(
+		func() []api.NamespaceInfo {
+			out := []api.NamespaceInfo{}
+			for _, ns := range reg.List("") {
+				out = append(out, nsToAPI(ns.Config()))
+			}
+			return out
+		},
+		func(ni api.NamespaceInfo) error {
+			_, err := reg.Create(apiToNS(ni))
+			if err != nil {
+				return err
+			}
+			return reg.Save(namespaceStorePath())
+		},
+		func(id string) error {
+			if err := reg.Delete(id); err != nil {
+				return err
+			}
+			return reg.Save(namespaceStorePath())
+		},
+		func(id string) (api.NamespaceStats, bool) {
+			if _, err := reg.Get(id); err != nil {
+				return api.NamespaceStats{}, false
+			}
+			s := enf.Stats(id)
+			return api.NamespaceStats{
+				ActiveConns: s.ActiveConns, BandwidthUsed: s.BandwidthUsed, RouteCount: s.RouteCount,
+			}, true
+		},
+	)
+}
+
+// nsToAPI converts a tenancy config to the API shape.
+func nsToAPI(c tenancy.NamespaceConfig) api.NamespaceInfo {
+	var ni api.NamespaceInfo
+	ni.ID, ni.Name, ni.OrgID = c.ID, c.Name, c.OrgID
+	ni.Quotas.MaxRoutes = c.Quotas.MaxRoutes
+	ni.Quotas.MaxSecrets = c.Quotas.MaxSecrets
+	ni.Quotas.MaxConnections = c.Quotas.MaxConnections
+	ni.Quotas.BandwidthMbps = c.Quotas.BandwidthMbps
+	return ni
+}
+
+// apiToNS converts the API shape to a tenancy config.
+func apiToNS(ni api.NamespaceInfo) tenancy.NamespaceConfig {
+	return tenancy.NamespaceConfig{
+		ID: ni.ID, Name: ni.Name, OrgID: ni.OrgID,
+		Quotas: tenancy.QuotaConfig{
+			MaxRoutes: ni.Quotas.MaxRoutes, MaxSecrets: ni.Quotas.MaxSecrets,
+			MaxConnections: ni.Quotas.MaxConnections, BandwidthMbps: ni.Quotas.BandwidthMbps,
+		},
+	}
 }
 
 // secretBackendKind returns the configured secret backend, defaulting to local.

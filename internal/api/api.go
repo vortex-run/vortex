@@ -63,6 +63,45 @@ type Server struct {
 	statusProvider  func() StatusInfo
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
+
+	// Namespace management hooks (admin-only). Optional; nil yields 404/empty.
+	nsLister  func() []NamespaceInfo
+	nsCreator func(NamespaceInfo) error
+	nsDeleter func(id string) error
+	nsStats   func(id string) (NamespaceStats, bool)
+}
+
+// NamespaceInfo mirrors a tenant namespace for the API.
+type NamespaceInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	OrgID  string `json:"org_id"`
+	Quotas struct {
+		MaxRoutes      int   `json:"max_routes"`
+		MaxSecrets     int   `json:"max_secrets"`
+		MaxConnections int64 `json:"max_connections"`
+		BandwidthMbps  int64 `json:"bandwidth_mbps"`
+	} `json:"quotas"`
+}
+
+// NamespaceStats is a namespace's live usage for the API.
+type NamespaceStats struct {
+	ActiveConns   int64 `json:"active_conns"`
+	BandwidthUsed int64 `json:"bandwidth_used"`
+	RouteCount    int   `json:"route_count"`
+}
+
+// SetNamespaceHooks wires the namespace management endpoints.
+func (s *Server) SetNamespaceHooks(
+	lister func() []NamespaceInfo,
+	creator func(NamespaceInfo) error,
+	deleter func(id string) error,
+	stats func(id string) (NamespaceStats, bool),
+) {
+	s.nsLister = lister
+	s.nsCreator = creator
+	s.nsDeleter = deleter
+	s.nsStats = stats
 }
 
 // StatusInfo is the extended status returned by GET /api/status.
@@ -186,6 +225,12 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
 	mux.Handle("POST /api/audit/verify", s.protected(http.HandlerFunc(s.handleAuditVerify)))
+
+	// Namespace management (admin only).
+	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
+	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))
+	mux.Handle("DELETE /api/namespaces/{id}", s.protectedAdmin(http.HandlerFunc(s.handleDeleteNamespace)))
+	mux.Handle("GET /api/namespaces/{id}/stats", s.protectedAdmin(http.HandlerFunc(s.handleNamespaceStats)))
 
 	s.srv = &http.Server{
 		Addr:              addr,
