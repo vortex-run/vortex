@@ -69,6 +69,9 @@ type Server struct {
 	nsCreator func(NamespaceInfo) error
 	nsDeleter func(id string) error
 	nsStats   func(id string) (NamespaceStats, bool)
+
+	// agentRuntime backs the /api/agents endpoints. Optional; nil yields 503.
+	agentRuntime AgentRuntime
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -227,6 +230,10 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/audit/verify", s.protected(http.HandlerFunc(s.handleAuditVerify)))
 
 	// Namespace management (admin only).
+	// Agent runtime (M10).
+	mux.Handle("POST /api/agents/submit", s.protected(http.HandlerFunc(s.handleAgentSubmit)))
+	mux.Handle("GET /api/agents/status", s.protected(http.HandlerFunc(s.handleAgentStatus)))
+
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))
 	mux.Handle("DELETE /api/namespaces/{id}", s.protectedAdmin(http.HandlerFunc(s.handleDeleteNamespace)))

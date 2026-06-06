@@ -14,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vortex-run/vortex/internal/agents"
 	"github.com/vortex-run/vortex/internal/api"
 	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/auth"
@@ -269,6 +270,13 @@ func runStart(ctx context.Context, pidfile string) error {
 	// values), and installed plugins.
 	wireDashboardProviders(apiSrv, cfgMgr, auditLog, pluginRegistry, policyEngine)
 	wireNamespaceHooks(apiSrv, tenantRegistry, tenantEnforcer)
+
+	// --- agent runtime (M10) ------------------------------------------------
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog)
+	if agentRuntime != nil {
+		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
+		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
+	}
 
 	// ACME HTTP-01 challenge handler must be reachable on :80 for cert issuance.
 	if h := tlsChallengeHandler(tlsMgr, cfg); h != nil {
@@ -751,6 +759,72 @@ func atoiDefault(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// buildAgentRuntime constructs and starts the agent runtime: a message bus, a
+// sandboxed tool registry wired to the audit log, a coordinator (using a stub
+// AI gateway until M11 wires real providers), and the supervising runtime. It
+// returns nil if construction fails (the server still runs without agents).
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log) *agents.Runtime {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	sandboxBase := filepath.Join(cacheDir, "vortex", "agents")
+
+	bus := agents.NewBus()
+	registry := agents.NewToolRegistry()
+	apiBaseURL := "http://" + apiAddr
+	if err := agents.RegisterBuiltins(registry, sandboxBase, agents.DefaultAllowedCommands, bus, apiBaseURL, "coordinator"); err != nil {
+		log.Warn("agent runtime disabled: tool registration failed", "err", err)
+		return nil
+	}
+	sandboxed := agents.NewSandboxedRegistry(registry, sandboxBase, agents.DefaultAllowedCommands, bus)
+	if auditLog != nil {
+		sandboxed = sandboxed.WithAudit(auditLog, "coordinator")
+	}
+
+	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
+		Bus:       bus,
+		Tools:     sandboxed,
+		AIGateway: agents.StubAIGateway{}, // real gateway wired in M11
+		MaxAgents: 8,
+	})
+	if err != nil {
+		log.Warn("agent runtime disabled: coordinator init failed", "err", err)
+		return nil
+	}
+	rt, err := agents.NewRuntime(agents.RuntimeConfig{
+		Bus: bus, Coordinator: coord, MaxAgents: 8,
+		SandboxBase: sandboxBase, Logger: log,
+	})
+	if err != nil {
+		log.Warn("agent runtime disabled: runtime init failed", "err", err)
+		return nil
+	}
+	if err := rt.Start(ctx); err != nil {
+		log.Warn("agent runtime disabled: start failed", "err", err)
+		return nil
+	}
+	return rt
+}
+
+// agentRuntimeAdapter adapts *agents.Runtime to the api.AgentRuntime interface,
+// translating agents.RuntimeStats into api.AgentRuntimeStats so the api package
+// stays decoupled from the agents package.
+type agentRuntimeAdapter struct{ rt *agents.Runtime }
+
+func (a *agentRuntimeAdapter) Submit(ctx context.Context, userMsg, sessionID string) (<-chan string, error) {
+	return a.rt.Submit(ctx, userMsg, sessionID)
+}
+
+func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
+	s := a.rt.Stats()
+	return api.AgentRuntimeStats{
+		ActiveAgents:  s.ActiveAgents,
+		TotalMessages: s.TotalMessages,
+		QueueDepth:    s.QueueDepth,
+	}
 }
 
 // buildTenancy opens the namespace registry and builds the quota enforcer.
