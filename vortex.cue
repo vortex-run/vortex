@@ -21,6 +21,9 @@ tls: {
 	min_version: "TLS1.2"
 }
 
+// Plugins are opt-in. Install with:
+//   vortex plugin install <path>
+// Then add: plugins: ["plugin-name"] to any route.
 routes: [
 	{
 		name:         "frontend"
@@ -36,7 +39,6 @@ routes: [
 		backends:   [{host: "127.0.0.1", port: 3000}]
 		rate_limit: {rpm: 600, burst: 50}
 		timeout:    "30s"
-		plugins:    ["request-logger", "jwt-auth"]
 		health_check: {path: "/api/health", interval: "10s"}
 	},
 	{
