@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -138,4 +139,125 @@ func TestRuntime_ConcurrentSubmit(t *testing.T) {
 	if got := rt.Stats().TotalMessages; got != n {
 		t.Errorf("TotalMessages = %d, want %d", got, n)
 	}
+}
+
+// slowGateway is an AIGateway whose Complete blocks for delay or until the
+// context is cancelled. It is used to verify Stop cancels and drains in-flight
+// work promptly.
+type slowGateway struct{ delay time.Duration }
+
+func (g slowGateway) Complete(ctx context.Context, _, _ string) (string, error) {
+	select {
+	case <-time.After(g.delay):
+		return "done", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// stubbornGateway ignores context cancellation entirely, blocking for the full
+// delay — used to force Stop's drain to hit its deadline.
+type stubbornGateway struct {
+	delay   time.Duration
+	started chan struct{}
+}
+
+func (g stubbornGateway) Complete(_ context.Context, _, _ string) (string, error) {
+	if g.started != nil {
+		close(g.started)
+	}
+	time.Sleep(g.delay) // deliberately ignores ctx
+	return "done", nil
+}
+
+func newRuntimeWithGateway(t *testing.T, gw AIGateway) *Runtime {
+	t.Helper()
+	bus := NewBus()
+	c, err := NewCoordinator(CoordinatorConfig{Bus: bus, AIGateway: gw, MaxAgents: 4})
+	if err != nil {
+		t.Fatalf("NewCoordinator: %v", err)
+	}
+	rt, err := NewRuntime(RuntimeConfig{Bus: bus, Coordinator: c, SandboxBase: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	return rt
+}
+
+func TestRuntime_SubmitAfterStopRejected(t *testing.T) {
+	rt := newTestRuntime(t)
+	_ = rt.Start(context.Background())
+	_ = rt.Stop(context.Background())
+	if _, err := rt.Submit(context.Background(), "hi", "s"); !errors.Is(err, ErrRuntimeStopped) {
+		t.Errorf("Submit after Stop err = %v, want ErrRuntimeStopped", err)
+	}
+}
+
+func TestRuntime_StopDrainsInFlight(t *testing.T) {
+	// A cancellable slow handler: Stop cancels it, and the drain must wait for
+	// the goroutine to actually finish (channel closed) before returning.
+	rt := newRuntimeWithGateway(t, slowGateway{delay: 2 * time.Second})
+	_ = rt.Start(context.Background())
+
+	ch, err := rt.Submit(context.Background(), "general question", "s")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if serr := rt.Stop(stopCtx); serr != nil {
+		t.Fatalf("Stop should drain cleanly (cancellable handler), got: %v", serr)
+	}
+	// After Stop returns, the in-flight goroutine has finished: the channel is
+	// closed and readable without blocking.
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Error("response channel not closed — goroutine was not drained")
+	}
+	// QueueDepth must be back to zero (goroutine fully unwound).
+	if d := rt.Stats().QueueDepth; d != 0 {
+		t.Errorf("QueueDepth after drain = %d, want 0", d)
+	}
+}
+
+func TestRuntime_StopTimesOut(t *testing.T) {
+	// A handler that ignores cancellation blocks ~2s; Stop with a 100ms
+	// deadline must give up waiting and return context.DeadlineExceeded.
+	started := make(chan struct{})
+	rt := newRuntimeWithGateway(t, stubbornGateway{delay: 2 * time.Second, started: started})
+	_ = rt.Start(context.Background())
+
+	if _, err := rt.Submit(context.Background(), "general question", "s"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	<-started // ensure the handler is actually running before we Stop
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := rt.Stop(stopCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Stop timeout err = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+func TestRuntime_ConcurrentSubmitAndStop(t *testing.T) {
+	rt := newRuntimeWithGateway(t, slowGateway{delay: 20 * time.Millisecond})
+	_ = rt.Start(context.Background())
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ch, err := rt.Submit(context.Background(), "q", "s"); err == nil {
+				<-ch
+			}
+		}()
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = rt.Stop(stopCtx)
+	wg.Wait()
 }
