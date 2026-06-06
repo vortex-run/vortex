@@ -276,10 +276,12 @@ func (g *AIGateway) rolloverLocked() {
 	}
 }
 
-// Cost returns the total USD spent today.
+// Cost returns the total USD spent today, rolling over (to 0) first if the day
+// boundary has passed since the last activity.
 func (g *AIGateway) Cost() float64 {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.rolloverLocked()
 	return g.costToday
 }
 

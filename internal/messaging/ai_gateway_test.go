@@ -1,0 +1,239 @@
+package messaging
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestNewAIGateway_RequiresProvider(t *testing.T) {
+	if _, err := NewAIGateway(AIGatewayConfig{}); err == nil {
+		t.Error("expected error with no providers")
+	}
+}
+
+func TestAIGateway_RoutesToFirstProvider(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"content":[{"text":"claude says hi"}],"usage":{"input_tokens":3,"output_tokens":2}}`)
+	}))
+	defer srv.Close()
+
+	g, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderClaude, APIKey: "k", Endpoint: srv.URL, Models: []string{"claude-x"}, Priority: 0},
+		},
+		Client: srv.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := g.Complete(context.Background(), "hi", "be brief")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if out != "claude says hi" {
+		t.Errorf("out = %q, want 'claude says hi'", out)
+	}
+}
+
+func TestAIGateway_FallsBackOnFailure(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"openai fallback"}}],"usage":{"total_tokens":5}}`)
+	}))
+	defer ok.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderClaude, APIKey: "k", Endpoint: failing.URL, Models: []string{"c"}, Priority: 0},
+			{Name: ProviderOpenAI, APIKey: "k", Endpoint: ok.URL, Models: []string{"gpt"}, Priority: 1},
+		},
+		Client: ok.Client(),
+	})
+	out, err := g.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if out != "openai fallback" {
+		t.Errorf("out = %q, want fallback to openai", out)
+	}
+}
+
+func TestAIGateway_ClaudeHeaders(t *testing.T) {
+	var gotKey, gotVer string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("x-api-key")
+		gotVer = r.Header.Get("anthropic-version")
+		_, _ = io.WriteString(w, `{"content":[{"text":"ok"}],"usage":{}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderClaude, APIKey: "secret-key", Endpoint: srv.URL, Models: []string{"c"}}},
+		Client:    srv.Client(),
+	})
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if gotKey != "secret-key" || gotVer != "2023-06-01" {
+		t.Errorf("headers: x-api-key=%q anthropic-version=%q", gotKey, gotVer)
+	}
+}
+
+func TestAIGateway_OpenAIAuthHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderOpenAI, APIKey: "sk-123", Endpoint: srv.URL, Models: []string{"gpt"}}},
+		Client:    srv.Client(),
+	})
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer sk-123" {
+		t.Errorf("Authorization = %q, want Bearer sk-123", gotAuth)
+	}
+}
+
+func TestAIGateway_OllamaLocalEndpoint(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"response":"local model reply","eval_count":7}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderOllama, Endpoint: srv.URL, Models: []string{"llama"}}},
+		Client:    srv.Client(),
+	})
+	out, err := g.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "local model reply" || gotPath != "/api/generate" {
+		t.Errorf("out=%q path=%q", out, gotPath)
+	}
+}
+
+func TestAIGateway_CostTracking(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"x"}}],"usage":{"total_tokens":100}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers:    []AIProvider{{Name: ProviderOpenAI, APIKey: "k", Endpoint: srv.URL, Models: []string{"gpt"}}},
+		CostPerToken: map[string]float64{"gpt": 0.001},
+		Client:       srv.Client(),
+	})
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if c := g.Cost(); c < 0.099 || c > 0.101 { // 100 * 0.001 = 0.1
+		t.Errorf("Cost = %f, want ~0.1", c)
+	}
+}
+
+func TestAIGateway_BudgetExceeded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"x"}}],"usage":{"total_tokens":1000}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers:    []AIProvider{{Name: ProviderOpenAI, APIKey: "k", Endpoint: srv.URL, Models: []string{"gpt"}}},
+		CostPerToken: map[string]float64{"gpt": 0.01},
+		DailyBudget:  5.0,
+		Client:       srv.Client(),
+	})
+	// First call spends 1000*0.01 = $10, exceeding the $5 budget.
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Second call is rejected before any provider is reached.
+	if _, err := g.Complete(context.Background(), "again", "sys"); !errors.Is(err, ErrBudgetExceeded) {
+		t.Errorf("second call err = %v, want ErrBudgetExceeded", err)
+	}
+}
+
+func TestAIGateway_ResetDailyCost(t *testing.T) {
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderOllama, Models: []string{"x"}}},
+	})
+	g.recordCost("x", 0) // no-op, but exercise path
+	g.mu.Lock()
+	g.costToday = 42
+	g.mu.Unlock()
+	g.ResetDailyCost()
+	if g.Cost() != 0 {
+		t.Errorf("Cost after reset = %f, want 0", g.Cost())
+	}
+}
+
+func TestAIGateway_AllProvidersFail(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusBadGateway)
+	}))
+	defer bad.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderClaude, APIKey: "k", Endpoint: bad.URL, Models: []string{"c"}, Priority: 0},
+			{Name: ProviderOpenAI, APIKey: "k", Endpoint: bad.URL, Models: []string{"g"}, Priority: 1},
+		},
+		Client: bad.Client(),
+	})
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err == nil {
+		t.Error("expected error when all providers fail")
+	}
+}
+
+func TestAIGateway_DailyRollover(t *testing.T) {
+	clock := &fakeClock{t: time.Now()}
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderOllama, Models: []string{"x"}}},
+		now:       clock.now,
+	})
+	g.mu.Lock()
+	g.costToday = 99
+	g.mu.Unlock()
+	// Advance 25h; cost should roll over to 0 on the next budget/cost check.
+	clock.advance(25 * time.Hour)
+	if g.budgetExceeded() { // triggers rollover (budget 0 → never exceeded, but rolls)
+		t.Error("budget 0 should never be exceeded")
+	}
+	if g.Cost() != 0 {
+		t.Errorf("cost after 25h rollover = %f, want 0", g.Cost())
+	}
+}
+
+// fakeClock is a controllable clock for rollover tests.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
