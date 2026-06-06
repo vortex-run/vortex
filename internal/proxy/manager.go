@@ -24,6 +24,7 @@ import (
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	proxyudp "github.com/vortex-run/vortex/internal/proxy/udp"
 	"github.com/vortex-run/vortex/internal/security"
+	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -57,6 +58,10 @@ type ManagerConfig struct {
 	// nil, in which case routes run without plugins.
 	Runtime        *plugins.Runtime
 	PluginRegistry *plugins.Registry
+	// Registry and Enforcer back per-route tenant quota enforcement. Both may be
+	// nil, in which case routes run without tenancy.
+	Registry *tenancy.Registry
+	Enforcer *tenancy.Enforcer
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
 }
@@ -314,6 +319,11 @@ func routePolicyMiddleware(engine *policy.Engine, routeName string) func(http.Ha
 func (m *Manager) edgeMiddleware(rc config.Route) func(http.Handler) http.Handler {
 	var chain []func(http.Handler) http.Handler
 
+	// Tenant quota enforcement runs first: an over-quota request is rejected
+	// before any other edge or proxy processing.
+	if rc.NamespaceID != "" && m.cfg.Enforcer != nil && m.cfg.Registry != nil {
+		chain = append(chain, m.cfg.Enforcer.HTTPMiddleware(rc.NamespaceID))
+	}
 	if m.cfg.Edge != nil {
 		chain = append(chain, m.cfg.Edge.Middleware())
 	}

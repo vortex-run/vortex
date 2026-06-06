@@ -87,6 +87,7 @@ type Route struct {
 	Timeout     string       `json:"timeout,omitempty"`
 	MTLS        bool         `json:"mtls"`
 	Plugins     []string     `json:"plugins"`
+	NamespaceID string       `json:"namespace_id,omitempty"`
 }
 
 // Security mirrors #Security.

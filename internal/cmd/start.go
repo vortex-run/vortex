@@ -26,6 +26,7 @@ import (
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	"github.com/vortex-run/vortex/internal/secrets"
 	"github.com/vortex-run/vortex/internal/security"
+	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
@@ -193,6 +194,9 @@ func runStart(ctx context.Context, pidfile string) error {
 		mgr.OnShutdown("plugins", func(c context.Context) error { return pluginRuntime.Close(c) })
 	}
 
+	// --- tenancy: namespace registry + quota enforcer -----------------------
+	tenantRegistry, tenantEnforcer := buildTenancy(log)
+
 	// --- cluster: gossip + raft when multi-node, else single-node mode ------
 	clusterMgr, err := buildCluster(ctx, cfg, log)
 	if err != nil {
@@ -229,7 +233,8 @@ func runStart(ctx context.Context, pidfile string) error {
 	dp := &dataPlane{
 		ctx: ctx, pool: pool, tls: tlsMgr, mtls: mtlsCfg, policy: policyEngine,
 		edge: edge, metrics: metrics, tracer: tracer,
-		pluginRT: pluginRuntime, pluginReg: pluginRegistry, log: log,
+		pluginRT: pluginRuntime, pluginReg: pluginRegistry,
+		tenantReg: tenantRegistry, tenantEnf: tenantEnforcer, log: log,
 	}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
 		return fmt.Errorf("initialising proxy manager: %w", err)
@@ -289,6 +294,8 @@ type dataPlane struct {
 	tracer    trace.Tracer
 	pluginRT  *plugins.Runtime
 	pluginReg *plugins.Registry
+	tenantReg *tenancy.Registry
+	tenantEnf *tenancy.Enforcer
 	log       *slog.Logger
 
 	mu      sync.Mutex
@@ -312,7 +319,8 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
 		PolicyEngine: d.policy, Edge: d.edge,
 		Metrics: d.metrics, Tracer: d.tracer,
-		Runtime: d.pluginRT, PluginRegistry: d.pluginReg, Logger: d.log,
+		Runtime: d.pluginRT, PluginRegistry: d.pluginReg,
+		Registry: d.tenantReg, Enforcer: d.tenantEnf, Logger: d.log,
 	})
 	if err != nil {
 		return err
@@ -623,6 +631,21 @@ func secretBackendKind(cfg *config.Config) string {
 		return "local"
 	}
 	return cfg.Secrets.Store
+}
+
+// buildTenancy opens the namespace registry and builds the quota enforcer.
+// Both are always created so routes can declare a namespace_id; a route without
+// one incurs no tenancy cost. The registry path honours VORTEX_NAMESPACE_STORE
+// (shared with the `vortex namespace` CLI).
+func buildTenancy(log *slog.Logger) (*tenancy.Registry, *tenancy.Enforcer) {
+	reg := tenancy.NewRegistry()
+	path := namespaceStorePath()
+	if err := reg.Load(path); err != nil {
+		log.Warn("loading namespace registry failed, starting empty", "path", path, "err", err)
+	}
+	enforcer := tenancy.NewEnforcer(reg)
+	log.Info("tenancy enabled", "namespace_count", len(reg.List("")))
+	return reg, enforcer
 }
 
 // buildPlugins creates the sandboxed WASM runtime and opens the plugin

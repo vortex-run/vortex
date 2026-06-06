@@ -84,6 +84,9 @@ package vortex
 	timeout?:      #Duration
 	mtls:          bool | *false
 	plugins: [...string] | *[]
+	// namespace_id assigns the route to a tenant namespace for quota
+	// enforcement and isolation; empty means no tenancy.
+	namespace_id: string | *""
 }
 
 // #Security configures edge-level protections.
