@@ -88,6 +88,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newAuditCommand())
 	root.AddCommand(newClusterCommand())
 	root.AddCommand(newPluginCommand())
+	root.AddCommand(newNamespaceCommand())
 
 	return root
 }
@@ -101,7 +102,8 @@ func Execute() {
 		if errors.Is(err, errCheckFailed) || errors.Is(err, errNotRunning) ||
 			errors.Is(err, errNeedRoot) || errors.Is(err, errSelfUpdate) ||
 			errors.Is(err, errSecret) || errors.Is(err, errAudit) ||
-			errors.Is(err, errCluster) || errors.Is(err, errPlugin) {
+			errors.Is(err, errCluster) || errors.Is(err, errPlugin) ||
+			errors.Is(err, errNamespace) {
 			os.Exit(1)
 		}
 		// PersistentPreRunE may not have run on early parse errors; guard nil.
