@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,31 +98,140 @@ func strParam(params map[string]any, key string) (string, error) {
 
 // --- HTTPGetTool ------------------------------------------------------------
 
-// HTTPGetTool performs an HTTP(S) GET request.
+// ErrSSRFBlocked is returned when http_get is asked to reach a private,
+// loopback, link-local, or cloud-metadata address (SSRF prevention).
+var ErrSSRFBlocked = errors.New("agents: SSRF target blocked")
+
+// metadataIPs are well-known cloud instance-metadata service addresses.
+var metadataIPs = map[string]bool{
+	"169.254.169.254": true, // AWS / GCP / Azure (IMDS)
+	"fd00:ec2::254":   true, // AWS IPv6 metadata
+}
+
+// HTTPGetTool performs an HTTP(S) GET request with SSRF protection.
 type HTTPGetTool struct {
 	Client *http.Client
+	// AllowedHosts, when non-empty, restricts requests to URLs whose hostname
+	// exactly matches one of these entries (in addition to the IP checks).
+	AllowedHosts []string
 }
 
 // Name returns the tool name.
 func (HTTPGetTool) Name() string { return "http_get" }
 
 // Description returns a human-readable summary.
-func (HTTPGetTool) Description() string { return "HTTP GET a http/https URL" }
+func (HTTPGetTool) Description() string { return "HTTP GET a http/https URL (SSRF-protected)" }
 
-// Execute fetches the URL. Only http/https schemes are permitted.
+// blockedIP reports whether ip is a loopback, link-local, private, or
+// metadata address that http_get must never reach.
+func blockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true // unparseable → block
+	}
+	if metadataIPs[ip.String()] {
+		return true
+	}
+	return ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsPrivate() || // RFC1918 + IPv6 ULA (fc00::/7)
+		ip.IsUnspecified()
+}
+
+// isSSRFTarget resolves rawURL's host and returns ErrSSRFBlocked if the scheme
+// is not http/https, the host is in no allow-list, or any resolved IP is a
+// blocked (internal) address. Resolution happens here AND again in the dialer
+// (checkedDialer) to defeat DNS rebinding.
+func (t HTTPGetTool) isSSRFTarget(rawURL string) error {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%w: invalid URL: %v", ErrSandboxViolation, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("%w: only http/https URLs allowed", ErrSandboxViolation)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("%w: missing host", ErrSandboxViolation)
+	}
+	if len(t.AllowedHosts) > 0 {
+		if !t.hostAllowed(host) {
+			return fmt.Errorf("%w: host %q not in allow-list", ErrSSRFBlocked, host)
+		}
+		// An explicit allow-list is an operator opt-in: it may legitimately name
+		// an internal host (e.g. 127.0.0.1 for a co-located service), so once a
+		// host matches we skip the internal-IP block for it.
+		return nil
+	}
+	// If the host is a literal IP, check it directly; otherwise resolve.
+	if ip := net.ParseIP(host); ip != nil {
+		if blockedIP(ip) {
+			return fmt.Errorf("%w: %s", ErrSSRFBlocked, host)
+		}
+		return nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("%w: resolve %q: %v", ErrSSRFBlocked, host, err)
+	}
+	for _, ip := range ips {
+		if blockedIP(ip) {
+			return fmt.Errorf("%w: %s resolves to %s", ErrSSRFBlocked, host, ip)
+		}
+	}
+	return nil
+}
+
+// hostAllowed reports whether host matches an AllowedHosts entry.
+func (t HTTPGetTool) hostAllowed(host string) bool {
+	for _, h := range t.AllowedHosts {
+		if strings.EqualFold(h, host) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkedDialer wraps a net.Dialer, re-validating the resolved IP at dial time
+// so a DNS rebind (safe at check, internal at dial) cannot bypass the guard.
+func checkedDialer() func(ctx context.Context, network, addr string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			host = addr
+		}
+		if ip := net.ParseIP(host); ip != nil && blockedIP(ip) {
+			return nil, fmt.Errorf("%w: dial %s", ErrSSRFBlocked, host)
+		}
+		return d.DialContext(ctx, network, addr)
+	}
+}
+
+// Execute fetches the URL after SSRF validation. Only http/https schemes are
+// permitted and internal/metadata addresses are blocked.
 func (t HTTPGetTool) Execute(ctx context.Context, params map[string]any) (any, error) {
-	url, err := strParam(params, "url")
+	rawURL, err := strParam(params, "url")
 	if err != nil {
 		return nil, err
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("%w: only http/https URLs allowed", ErrSandboxViolation)
+	if serr := t.isSSRFTarget(rawURL); serr != nil {
+		return nil, serr
 	}
 	client := t.Client
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		dial := checkedDialer()
+		// With an explicit host allow-list the operator has opted in (and the
+		// host was validated above), so the dialer-level internal-IP block is
+		// not applied — otherwise an allowed internal host could never connect.
+		if len(t.AllowedHosts) > 0 {
+			dial = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
+		}
+		client = &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{DialContext: dial},
+		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
