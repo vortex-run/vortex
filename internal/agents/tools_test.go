@@ -295,3 +295,88 @@ func TestSandboxedRegistry_AuditsExecution(t *testing.T) {
 		t.Errorf("audit calls = %v, want [tool.execute:write_file]", rec.calls)
 	}
 }
+
+// mkSymlink creates a symlink old→new, skipping on platforms/permissions where
+// symlink creation is denied (typically Windows without privilege). On CI/Linux
+// (where the C3 exploit applies) a failure to create is fatal, not skipped, so
+// the escape test cannot silently no-op.
+func mkSymlink(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		if os.Getenv("CI") != "" && runtime.GOOS != "windows" {
+			t.Fatalf("symlink creation must work on CI/Linux: %v", err)
+		}
+		t.Skipf("symlink not supported here: %v", err)
+	}
+}
+
+func TestSandbox_SymlinkPointingInsideAllowed(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(target, []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkSymlink(t, target, filepath.Join(dir, "link")) // points INSIDE the sandbox
+
+	res, err := ReadFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": "link"})
+	if err != nil {
+		t.Fatalf("legitimate in-sandbox symlink should be readable: %v", err)
+	}
+	if res.(map[string]any)["content"].(string) != "inside" {
+		t.Errorf("content = %v, want inside", res.(map[string]any)["content"])
+	}
+}
+
+func TestSandbox_SymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	// A secret OUTSIDE the sandbox.
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mkSymlink(t, secret, filepath.Join(dir, "link")) // inside sandbox, points OUT
+
+	// Read via the escaping symlink must be blocked.
+	_, err := ReadFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": "link"})
+	if !errors.Is(err, ErrSandboxEscape) {
+		t.Errorf("read via escaping symlink: err = %v, want ErrSandboxEscape", err)
+	}
+}
+
+func TestSandbox_WriteViaSymlinkedParentRejected(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	// "dir/out" is a symlink to a directory outside the sandbox; a write to
+	// "out/file.txt" would land outside.
+	mkSymlink(t, outside, filepath.Join(dir, "out"))
+
+	_, err := WriteFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": "out/file.txt", "content": "x"})
+	if !errors.Is(err, ErrSandboxEscape) {
+		t.Errorf("write via symlinked parent: err = %v, want ErrSandboxEscape", err)
+	}
+}
+
+func TestSandbox_WriteNewFileAllowed(t *testing.T) {
+	dir := t.TempDir()
+	_, err := WriteFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": "newfile.txt", "content": "ok"})
+	if err != nil {
+		t.Fatalf("writing a new file in the sandbox should succeed: %v", err)
+	}
+}
+
+func TestSandbox_BrokenSymlinkHandledSafely(t *testing.T) {
+	dir := t.TempDir()
+	// Symlink to a non-existent target inside the sandbox.
+	mkSymlink(t, filepath.Join(dir, "does-not-exist"), filepath.Join(dir, "broken"))
+	_, err := ReadFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": "broken"})
+	// Must error (EvalSymlinks fails on a broken link) and must not panic.
+	if err == nil {
+		t.Error("reading a broken symlink should return an error")
+	}
+}
