@@ -20,7 +20,12 @@ func newTestRuntime(t *testing.T) *Runtime {
 		t.Fatalf("NewCoordinator: %v", err)
 	}
 	rt, err := NewRuntime(RuntimeConfig{
-		Bus: bus, Coordinator: c, MaxAgents: 4, SandboxBase: t.TempDir(),
+		Bus: bus, Coordinator: c, MaxAgents: 4,
+		// Generous concurrency so tests that fire many simultaneous Submits
+		// exercise contention without tripping the DoS cap (the cap itself is
+		// covered by the API-layer 503 test and TestRuntime_ConcurrencyCap).
+		MaxConcurrent: 64,
+		SandboxBase:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -141,6 +146,47 @@ func TestRuntime_ConcurrentSubmit(t *testing.T) {
 	}
 }
 
+func TestRuntime_ConcurrencyCap(t *testing.T) {
+	// MaxConcurrent=1 with a handler that blocks until released: the first
+	// Submit holds the only slot, so a second concurrent Submit is rejected
+	// with ErrTooManyRequests.
+	release := make(chan struct{})
+	bus := NewBus()
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:       bus,
+		AIGateway: blockingGateway{release: release},
+		MaxAgents: 4,
+	})
+	if err != nil {
+		t.Fatalf("NewCoordinator: %v", err)
+	}
+	rt, err := NewRuntime(RuntimeConfig{
+		Bus: bus, Coordinator: c, MaxConcurrent: 1, SandboxBase: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	_ = rt.Start(context.Background())
+	defer func() { close(release); _ = rt.Stop(context.Background()) }()
+
+	ch1, err := rt.Submit(context.Background(), "q", "s")
+	if err != nil {
+		t.Fatalf("first Submit: %v", err)
+	}
+	_ = ch1
+	// Give the goroutine a moment to acquire the single slot.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if rt.Stats().QueueDepth == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := rt.Submit(context.Background(), "q2", "s"); !errors.Is(err, ErrTooManyRequests) {
+		t.Errorf("second Submit err = %v, want ErrTooManyRequests", err)
+	}
+}
+
 // slowGateway is an AIGateway whose Complete blocks for delay or until the
 // context is cancelled. It is used to verify Stop cancels and drains in-flight
 // work promptly.
@@ -150,6 +196,19 @@ func (g slowGateway) Complete(ctx context.Context, _, _ string) (string, error) 
 	select {
 	case <-time.After(g.delay):
 		return "done", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// blockingGateway blocks Complete until release is closed (or ctx is done),
+// used to hold a concurrency slot open while testing the cap.
+type blockingGateway struct{ release chan struct{} }
+
+func (g blockingGateway) Complete(ctx context.Context, _, _ string) (string, error) {
+	select {
+	case <-g.release:
+		return "ok", nil
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
