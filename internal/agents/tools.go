@@ -214,14 +214,56 @@ func (t ReadFileTool) Execute(_ context.Context, params map[string]any) (any, er
 // --- RunCommandTool ---------------------------------------------------------
 
 // DefaultAllowedCommands is the whitelist used when none is supplied.
+//
+// Interpreters and package managers (python3, npm, pip3) are deliberately
+// EXCLUDED: they execute arbitrary code from a single flag (python3 -c, npm run,
+// pip3 install <pkg-with-setup.py>), so name-based whitelisting gives no real
+// containment without an OS-level sandbox. The remaining binaries still need
+// per-argument validation (see validateArgs) because even they have code-exec
+// flags (git core.sshCommand, tar --to-command, go -exec).
 var DefaultAllowedCommands = []string{
-	"go", "flutter", "npm", "python3", "pip3", "git", "curl", "tar", "unzip",
+	"go", "flutter", "git", "tar", "unzip",
 }
+
+// ErrApprovalRequired is returned by RunCommandTool when RequireApproval is set.
+// It carries the full command so a human-in-the-loop approver can review it.
+var ErrApprovalRequired = errors.New("agents: command requires human approval")
+
+// ApprovalRequest describes a command awaiting human approval. It is the value
+// wrapped by an *ApprovalError so callers can extract the details.
+type ApprovalRequest struct {
+	Command string
+	Args    []string
+}
+
+// ApprovalError wraps ErrApprovalRequired with the command details.
+type ApprovalError struct {
+	Request ApprovalRequest
+}
+
+// Error implements error.
+func (e *ApprovalError) Error() string {
+	return fmt.Sprintf("%v: %s %v", ErrApprovalRequired, e.Request.Command, e.Request.Args)
+}
+
+// Unwrap lets errors.Is(err, ErrApprovalRequired) succeed.
+func (e *ApprovalError) Unwrap() error { return ErrApprovalRequired }
 
 // RunCommandTool runs a whitelisted command in the sandbox directory.
 type RunCommandTool struct {
 	SandboxDir      string
 	AllowedCommands []string
+	// RequireApproval, when true, makes Execute return an *ApprovalError
+	// instead of running — the coordinator routes this to a human approver
+	// (M10.7). It defaults to true via NewRunCommandTool until an OS-level
+	// sandbox makes unattended execution safe.
+	RequireApproval bool
+}
+
+// NewRunCommandTool builds a RunCommandTool with RequireApproval defaulted to
+// true (safe by default). Callers that have an OS sandbox can clear it.
+func NewRunCommandTool(sandboxDir string, allowed []string) RunCommandTool {
+	return RunCommandTool{SandboxDir: sandboxDir, AllowedCommands: allowed, RequireApproval: true}
 }
 
 // Name returns the tool name.
@@ -244,6 +286,36 @@ func (t RunCommandTool) allowed(name string) bool {
 	return false
 }
 
+// dangerousArgPatterns maps a command to substrings that, if present in any
+// argument, indicate a code-execution or sandbox-escape attempt.
+var dangerousArgPatterns = map[string][]string{
+	"curl": {"file://", "/etc", "/proc", ".aws", ".ssh", "169.254",
+		"127.0.0.1", "localhost", "10.", "192.168.", "172.16.", "172.17.",
+		"172.18.", "172.19.", "172.2", "172.30.", "172.31."},
+	"git": {"core.sshCommand", "core.hookspath", "core.fsmonitor",
+		"--upload-pack", "--receive-pack", "remote-ext", "ext::"},
+	"go":  {"-exec", "run http", "run ftp"},
+	"tar": {"--to-command", "-I", "--use-compress-program"},
+}
+
+// validateArgs rejects arguments matching known dangerous patterns for command.
+func validateArgs(command string, args []string) error {
+	patterns := dangerousArgPatterns[command]
+	if len(patterns) == 0 {
+		return nil
+	}
+	for _, a := range args {
+		la := strings.ToLower(a)
+		for _, p := range patterns {
+			if strings.Contains(la, strings.ToLower(p)) {
+				return fmt.Errorf("%w: %s argument %q contains disallowed pattern %q",
+					ErrSandboxViolation, command, a, p)
+			}
+		}
+	}
+	return nil
+}
+
 // Execute runs params["command"] with params["args"] ([]string or []any).
 func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any, error) {
 	command, err := strParam(params, "command")
@@ -256,6 +328,12 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 	args, err := stringSlice(params["args"])
 	if err != nil {
 		return nil, err
+	}
+	if verr := validateArgs(command, args); verr != nil {
+		return nil, verr
+	}
+	if t.RequireApproval {
+		return nil, &ApprovalError{Request: ApprovalRequest{Command: command, Args: args}}
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = t.SandboxDir
@@ -471,7 +549,7 @@ func RegisterBuiltins(registry *ToolRegistry, sandboxDir string, allowedCommands
 		HTTPGetTool{},
 		WriteFileTool{SandboxDir: sandboxDir},
 		ReadFileTool{SandboxDir: sandboxDir},
-		RunCommandTool{SandboxDir: sandboxDir, AllowedCommands: allowedCommands},
+		NewRunCommandTool(sandboxDir, allowedCommands),
 		VortexAPITool{BaseURL: apiBaseURL},
 		SendMessageTool{Bus: bus, From: agentName},
 	}
