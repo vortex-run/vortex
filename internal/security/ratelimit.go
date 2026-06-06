@@ -64,6 +64,16 @@ func NewHTTPRateLimiter(cfg HTTPRateLimiterConfig) *HTTPRateLimiter {
 	}
 }
 
+// SetClock overrides the limiter's time source. It is intended for tests so
+// rate-limit behaviour can be asserted deterministically without real waits.
+func (r *HTTPRateLimiter) SetClock(now func() time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if now != nil {
+		r.now = now
+	}
+}
+
 // Allow reports whether a request from ip may proceed, consuming one token. When
 // the limiter is disabled it always allows.
 func (r *HTTPRateLimiter) Allow(ip string) bool {

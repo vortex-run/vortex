@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/vortex-run/vortex/internal/security"
 )
 
 // ErrAgentBusy signals the agent runtime's concurrency cap is reached; the
@@ -33,6 +35,10 @@ type AgentRuntimeStats struct {
 // SetAgentRuntime wires the agent runtime backing the /api/agents endpoints.
 // When nil, those endpoints return 503.
 func (s *Server) SetAgentRuntime(rt AgentRuntime) { s.agentRuntime = rt }
+
+// agentRateLimiter exposes the submit rate limiter so tests can freeze its
+// clock for deterministic assertions.
+func (s *Server) agentRateLimiter() *security.HTTPRateLimiter { return s.agentLimiter }
 
 // agentSubmitRequest is the POST /api/agents/submit body.
 type agentSubmitRequest struct {

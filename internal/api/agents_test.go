@@ -178,20 +178,29 @@ func TestAgentSubmit_WithValidKeySucceeds(t *testing.T) {
 
 func TestAgentSubmit_RateLimited(t *testing.T) {
 	s, secret := newAuthedAgentServer(t, stubRuntime{response: "hi"})
-	got429 := false
+	// Freeze the limiter clock so the token bucket cannot refill mid-loop; this
+	// makes the burst boundary deterministic regardless of CI load / -race
+	// timing (the previous wall-clock version was flaky and could refill).
+	frozen := time.Now()
+	s.agentRateLimiter().SetClock(func() time.Time { return frozen })
+
+	statuses := make([]int, 0, 12)
 	for i := 0; i < 12; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/agents/submit",
 			strings.NewReader(`{"message":"x"}`))
 		req.Header.Set("X-API-Key", secret)
 		req.RemoteAddr = "198.51.100.9:5555"
-		rec := serve(s, req)
-		if rec.Code == http.StatusTooManyRequests {
+		statuses = append(statuses, serve(s, req).Code)
+	}
+	got429 := false
+	for _, code := range statuses {
+		if code == http.StatusTooManyRequests {
 			got429 = true
 			break
 		}
 	}
 	if !got429 {
-		t.Error("expected a 429 within 12 rapid submits (limit 10/min burst 5)")
+		t.Errorf("expected a 429 within 12 rapid submits with frozen clock (burst 5); statuses=%v", statuses)
 	}
 }
 
