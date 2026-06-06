@@ -19,6 +19,7 @@ import (
 	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 )
 
@@ -351,6 +352,87 @@ func TestManager_MetricsRecordedOnHTTPRoute(t *testing.T) {
 	body, _ := io.ReadAll(rec.Body)
 	if !strings.Contains(string(body), `route="web"`) {
 		t.Errorf("metrics should record a request labelled route=web:\n%s", body)
+	}
+}
+
+func TestManager_NamespaceQuotaEnforced(t *testing.T) {
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	reg := tenancy.NewRegistry()
+	if _, err := reg.Create(tenancy.NamespaceConfig{
+		ID: "ns-1", OrgID: "org-a", Quotas: tenancy.QuotaConfig{MaxConnections: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	enf := tenancy.NewEnforcer(reg)
+
+	port := freePort(t)
+	m, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}, NamespaceID: "ns-1"},
+		}},
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		Registry: reg, Enforcer: enf, Logger: discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+
+	// A normal request succeeds (quota of 1 connection allows it).
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("namespaced route status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestManager_NoNamespaceNoEnforcement(t *testing.T) {
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	reg := tenancy.NewRegistry()
+	enf := tenancy.NewEnforcer(reg)
+	port := freePort(t)
+	m, err := NewManager(ManagerConfig{
+		// Route has no NamespaceID, so the enforcer middleware is not attached.
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
+		}},
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		Registry: reg, Enforcer: enf, Logger: discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+
+	for i := 0; i < 20; i++ {
+		resp, err := http.Get("http://" + addr + "/")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200 (no tenancy)", i, resp.StatusCode)
+		}
 	}
 }
 
