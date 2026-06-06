@@ -267,6 +267,13 @@ func (m *Manager) buildHookChain(rc config.Route) (*plugins.HookChain, error) {
 	for i, name := range rc.Plugins {
 		wasm, manifest, err := m.cfg.PluginRegistry.Get(name, "latest")
 		if err != nil {
+			// A missing (not-installed) plugin is non-fatal: log and skip so a
+			// declared-but-uninstalled plugin can't take down the whole boot.
+			// Any other error (corrupt WASM, unreadable manifest) is still fatal.
+			if errors.Is(err, plugins.ErrPluginNotFound) {
+				m.log.Warn("plugin not found, skipping", "plugin", name, "route", rc.Name)
+				continue
+			}
 			return nil, fmt.Errorf("route %q plugin %q: %w", rc.Name, name, err)
 		}
 		hookType := plugins.HookPreRequest
@@ -281,6 +288,10 @@ func (m *Manager) buildHookChain(rc config.Route) (*plugins.HookChain, error) {
 			return nil, fmt.Errorf("route %q plugin %q: %w", rc.Name, name, err)
 		}
 		chain.Register(hook, i)
+	}
+	// If every declared plugin was missing and skipped, behave as no-plugins.
+	if chain.Len() == 0 {
+		return nil, nil
 	}
 	return chain, nil
 }

@@ -12,11 +12,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/vortex-run/vortex/internal/plugins"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	"github.com/vortex-run/vortex/internal/tenancy"
@@ -447,4 +449,129 @@ func waitTCP(t *testing.T, addr string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("nothing listening on %s", addr)
+}
+
+// captureHandler is a slog.Handler that records WARN+ records for assertions.
+type captureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *captureHandler) hasWarn(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestManager_MissingPluginIsWarningNotFatal verifies a route that declares an
+// uninstalled plugin starts cleanly, logging a WARN and skipping the plugin
+// rather than aborting boot (hardening fix C1).
+func TestManager_MissingPluginIsWarningNotFatal(t *testing.T) {
+	rt, err := plugins.NewRuntime(context.Background(), plugins.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close(context.Background()) }()
+	reg, err := plugins.NewRegistry(t.TempDir()) // empty store → every plugin missing
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	capH := &captureHandler{}
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "backend")
+	}))
+	defer be.Close()
+
+	port := freePort(t)
+	m, err := NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: port,
+				Backends: []config.Backend{backendOf(t, be)},
+				Plugins:  []string{"request-logger"}},
+		}},
+		TCPPool:        tcp.NewPool(tcp.PoolConfig{}),
+		Runtime:        rt,
+		PluginRegistry: reg,
+		Logger:         slog.New(capH),
+	})
+	if err != nil {
+		t.Fatalf("NewManager with missing plugin should succeed, got: %v", err)
+	}
+	if !capH.hasWarn("plugin not found") {
+		t.Error("expected a WARN log for the missing plugin")
+	}
+
+	// The route must actually serve traffic with the plugin skipped.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = m.Start(ctx) }()
+	addr := "127.0.0.1:" + strconv.Itoa(port)
+	waitTCP(t, addr)
+	resp, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("route with skipped plugin status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestManager_CorruptPluginStillErrors verifies an installed but invalid-WASM
+// plugin is a fatal error (distinct from a missing plugin).
+func TestManager_CorruptPluginStillErrors(t *testing.T) {
+	rt, err := plugins.NewRuntime(context.Background(), plugins.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	defer func() { _ = rt.Close(context.Background()) }()
+	store := t.TempDir()
+	reg, err := plugins.NewRegistry(store)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	// Install a plugin whose WASM bytes are not a valid module.
+	badWASM := []byte("this is not wasm")
+	manifest := plugins.PluginManifest{
+		Name: "broken", Version: "1.0.0",
+		Checksum:  reg.Checksum(badWASM),
+		HookTypes: []plugins.HookType{plugins.HookPreRequest},
+	}
+	if err := reg.Install(manifest, badWASM); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	be := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer be.Close()
+
+	_, err = NewManager(ManagerConfig{
+		Config: &config.Config{Routes: []config.Route{
+			{Name: "web", Protocol: "http", Listen: freePort(t),
+				Backends: []config.Backend{backendOf(t, be)},
+				Plugins:  []string{"broken"}},
+		}},
+		TCPPool:        tcp.NewPool(tcp.PoolConfig{}),
+		Runtime:        rt,
+		PluginRegistry: reg,
+		Logger:         discardLogger(),
+	})
+	if err == nil {
+		t.Fatal("corrupt plugin should produce a fatal error, got nil")
+	}
 }

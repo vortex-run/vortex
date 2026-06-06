@@ -23,6 +23,11 @@ type PluginManifest struct {
 	Signature   string     `json:"signature"` // ed25519 signature (future use)
 }
 
+// ErrPluginNotFound indicates the named plugin is not installed in the
+// registry. Callers can distinguish "not installed" (skippable) from other
+// errors such as a corrupt manifest or unreadable file via errors.Is.
+var ErrPluginNotFound = errors.New("plugins: plugin not found")
+
 // Registry stores installed plugins on disk under storePath, laid out as
 // <name>/<version>/{plugin.wasm,manifest.json}.
 type Registry struct {
@@ -87,6 +92,9 @@ func (r *Registry) Get(name, version string) ([]byte, *PluginManifest, error) {
 
 	wasm, err := os.ReadFile(filepath.Join(dir, "plugin.wasm")) //nolint:gosec // path from registry layout
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("%w: %s@%s", ErrPluginNotFound, name, version)
+		}
 		return nil, nil, fmt.Errorf("plugins: reading plugin %s@%s: %w", name, version, err)
 	}
 	manifest, err := readManifest(filepath.Join(dir, "manifest.json"))
@@ -137,6 +145,9 @@ func (r *Registry) Remove(name, version string) error {
 func (r *Registry) latestVersion(name string) (string, error) {
 	entries, err := os.ReadDir(filepath.Join(r.storePath, name))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%w: %s", ErrPluginNotFound, name)
+		}
 		return "", fmt.Errorf("plugins: no versions for %s: %w", name, err)
 	}
 	var versions []string
@@ -146,7 +157,7 @@ func (r *Registry) latestVersion(name string) (string, error) {
 		}
 	}
 	if len(versions) == 0 {
-		return "", fmt.Errorf("plugins: no versions installed for %s", name)
+		return "", fmt.Errorf("%w: %s (no versions installed)", ErrPluginNotFound, name)
 	}
 	sort.Slice(versions, func(i, j int) bool {
 		return compareSemver(versions[i], versions[j]) < 0
