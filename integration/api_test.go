@@ -87,13 +87,13 @@ func TestAPI_ShutdownEndpoint_LocalhostOnly(t *testing.T) {
 	// The process should exit cleanly within 5s.
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if r, e := http.Get(p.APIAddr + "/health"); e != nil {
+		r, e := http.Get(p.APIAddr + "/health")
+		if e != nil {
 			// Connection refused → server is gone.
 			p.MarkStopped()
 			return
-		} else {
-			_ = r.Body.Close()
 		}
+		_ = r.Body.Close()
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Error("server did not shut down within 5s after /internal/shutdown")

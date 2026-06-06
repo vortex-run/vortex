@@ -65,6 +65,13 @@ jobs:
           # lint a module that targets a newer `go` version (exit code 3).
           install-mode: goinstall
 
+      - name: golangci-lint (integration build tag)
+        # The action above lints with default build tags, so //go:build
+        # integration files are skipped. Re-run with the tag so those files
+        # (integration/*) are checked too. golangci-lint is on PATH from the
+        # step above.
+        run: golangci-lint run --build-tags integration ./...
+
   integration:
     name: Integration
     runs-on: ubuntu-latest
@@ -78,4 +85,6 @@ jobs:
           cache: true
 
       - name: Run integration tests
-        run: go test -v -tags integration -timeout 300s ./integration/...
+        # -race so the concurrent agent/bus/runtime paths exercised end-to-end
+        # are race-checked (ubuntu-latest has a C toolchain for cgo).
+        run: go test -v -race -tags integration -timeout 300s ./integration/...
