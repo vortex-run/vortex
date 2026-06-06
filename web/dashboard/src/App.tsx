@@ -4,6 +4,7 @@ import { Layout } from "./components/layout/Layout";
 import { Overview } from "./pages/Overview";
 import { RoutesPage } from "./pages/Routes";
 import { RouteBuilder } from "./pages/RouteBuilder";
+import { Namespaces } from "./pages/Namespaces";
 import { Metrics } from "./pages/Metrics";
 import { Security } from "./pages/Security";
 import { AuditLog } from "./pages/AuditLog";
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="nodes" element={<Nodes />} />
             <Route path="routes" element={<RoutesPage />} />
             <Route path="routes/new" element={<RouteBuilder />} />
+            <Route path="namespaces" element={<Namespaces />} />
             <Route path="traffic" element={<Stub name="Traffic" />} />
             <Route path="security" element={<Security />} />
             <Route path="metrics" element={<Metrics />} />

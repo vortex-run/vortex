@@ -8,6 +8,7 @@ function titleFor(pathname: string): string {
     "/dashboard": "Overview",
     "/dashboard/nodes": "Nodes",
     "/dashboard/routes": "Routes",
+    "/dashboard/namespaces": "Namespaces",
     "/dashboard/traffic": "Traffic",
     "/dashboard/security": "Security",
     "/dashboard/metrics": "Metrics",
