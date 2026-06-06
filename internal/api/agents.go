@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // ErrAgentBusy signals the agent runtime's concurrency cap is reached; the
@@ -132,9 +133,19 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// wantsSSE reports whether the client requested Server-Sent Events.
+// wantsSSE reports whether the client requested Server-Sent Events. It parses
+// the comma-separated Accept header (with optional ;q= params) rather than
+// matching exactly, so real clients sending "text/event-stream, */*" are
+// recognised.
 func wantsSSE(r *http.Request) bool {
-	return r.Header.Get("Accept") == "text/event-stream"
+	accept := r.Header.Get("Accept")
+	for _, part := range strings.Split(accept, ",") {
+		mediaType := strings.TrimSpace(strings.Split(part, ";")[0])
+		if strings.EqualFold(mediaType, "text/event-stream") {
+			return true
+		}
+	}
+	return false
 }
 
 // requireAPIKey enforces API-key authentication with NO localhost bypass. The

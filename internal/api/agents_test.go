@@ -207,3 +207,26 @@ func TestAgentSubmit_ConcurrencyCap503(t *testing.T) {
 		t.Errorf("busy runtime = %d, want 503", rec.Code)
 	}
 }
+
+func TestWantsSSE(t *testing.T) {
+	cases := []struct {
+		accept string
+		want   bool
+	}{
+		{"text/event-stream", true},
+		{"text/event-stream, */*", true},
+		{"application/json, text/event-stream", true},
+		{"text/event-stream;q=0.9", true},
+		{"application/json", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/api/agents/submit", nil)
+		if c.accept != "" {
+			req.Header.Set("Accept", c.accept)
+		}
+		if got := wantsSSE(req); got != c.want {
+			t.Errorf("wantsSSE(%q) = %v, want %v", c.accept, got, c.want)
+		}
+	}
+}
