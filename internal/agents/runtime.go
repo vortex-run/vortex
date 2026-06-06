@@ -13,6 +13,9 @@ import (
 // ErrTooManyRequests is returned by Submit when the concurrency cap is reached.
 var ErrTooManyRequests = errors.New("agents: too many concurrent submissions")
 
+// ErrRuntimeStopped is returned by Submit after the runtime has been stopped.
+var ErrRuntimeStopped = errors.New("agents: runtime is stopped")
+
 // defaultMaxConcurrent bounds simultaneous in-flight Submits when MaxConcurrent
 // is not set.
 const defaultMaxConcurrent = 5
@@ -39,6 +42,14 @@ type Runtime struct {
 	// submitSem caps concurrent in-flight Submits (DoS guard).
 	submitSem chan struct{}
 
+	// Lifecycle: ctx is cancelled by Stop so in-flight HandleMessage calls
+	// unwind; wg tracks Submit goroutines so Stop can drain them; stopped
+	// rejects new Submits once Stop begins.
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	stopped atomic.Bool
+
 	messages atomic.Int64
 	queue    atomic.Int64
 }
@@ -58,10 +69,13 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Runtime{
 		cfg:       cfg,
 		log:       log,
 		submitSem: make(chan struct{}, cfg.MaxConcurrent),
+		ctx:       ctx,
+		cancel:    cancel,
 	}, nil
 }
 
@@ -91,6 +105,9 @@ func (r *Runtime) Start(_ context.Context) error {
 // receives the response (then closes). Processing is asynchronous; the call
 // itself does not block on the coordinator.
 func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan string, error) {
+	if r.stopped.Load() {
+		return nil, ErrRuntimeStopped
+	}
 	r.mu.Lock()
 	started := r.started
 	r.mu.Unlock()
@@ -107,12 +124,27 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 
 	out := make(chan string, 1)
 	r.queue.Add(1)
+	r.wg.Add(1)
 	go func() {
+		defer r.wg.Done()
 		defer func() { <-r.submitSem }()
 		defer close(out)
 		defer r.queue.Add(-1)
 		r.messages.Add(1)
-		resp, err := r.cfg.Coordinator.HandleMessage(ctx, userMsg, sessionID)
+
+		// Merge the runtime's lifecycle context with the caller's: the call
+		// unwinds if EITHER the caller cancels or Stop cancels the runtime.
+		mctx, cancel := context.WithCancel(r.ctx)
+		defer cancel()
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancel()
+			case <-mctx.Done():
+			}
+		}()
+
+		resp, err := r.cfg.Coordinator.HandleMessage(mctx, userMsg, sessionID)
 		if err != nil {
 			out <- "error: " + err.Error()
 			return
@@ -122,22 +154,44 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 	return out, nil
 }
 
-// Stop gracefully stops all active sub-agents (coordinator last) and marks the
-// runtime stopped.
-func (r *Runtime) Stop(_ context.Context) error {
+// Stop rejects new Submits, cancels the runtime context so in-flight
+// HandleMessage calls unwind, and waits (up to ctx's deadline) for those
+// goroutines to drain before unregistering agents. Sub-agents are unregistered
+// first, the coordinator last.
+func (r *Runtime) Stop(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if !r.started {
+		r.mu.Unlock()
 		return nil
 	}
+	r.started = false
+	r.mu.Unlock()
+
+	// Reject new Submits and cancel in-flight work.
+	r.stopped.Store(true)
+	r.cancel()
+
+	// Wait for in-flight Submit goroutines to finish, bounded by ctx.
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+	var drainErr error
+	select {
+	case <-done:
+	case <-ctx.Done():
+		drainErr = ctx.Err()
+		r.log.Warn("agent runtime stop timed out waiting for in-flight work", "err", drainErr)
+	}
+
 	active := r.cfg.Coordinator.ActiveAgents()
 	for _, name := range active {
 		r.cfg.Bus.Unregister(name)
 	}
 	r.cfg.Bus.Unregister(coordinatorName)
-	r.started = false
 	r.log.Info("agent runtime stopped", "agents_stopped", len(active))
-	return nil
+	return drainErr
 }
 
 // RuntimeStats is a snapshot of runtime activity.
