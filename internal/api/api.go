@@ -78,6 +78,8 @@ type Server struct {
 	// webhooks maps /webhook/<platform> paths to rate-limited, signature-self-
 	// verifying handlers (Telegram/WhatsApp/Slack). Set via SetWebhooks.
 	webhooks map[string]http.Handler
+	// studioHandler serves the VORTEX Studio tree under /studio/ (auth-gated).
+	studioHandler http.Handler
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -253,6 +255,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// signature), per-IP rate limited. Both GET (WhatsApp verification) and POST
 	// route through the same dispatcher.
 	mux.HandleFunc("/webhook/", s.handleWebhook)
+
+	// VORTEX Studio (M12): browser IDE/terminal/db/git, auth-gated.
+	mux.HandleFunc("/studio/", s.handleStudio)
 
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))

@@ -30,6 +30,7 @@ import (
 	"github.com/vortex-run/vortex/internal/proxy/tcp"
 	"github.com/vortex-run/vortex/internal/secrets"
 	"github.com/vortex-run/vortex/internal/security"
+	"github.com/vortex-run/vortex/internal/studio"
 	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
@@ -291,6 +292,11 @@ func runStart(ctx context.Context, pidfile string) error {
 		// Register messaging webhooks (each with its own per-IP rate limit) now
 		// that the runtime exists to receive their messages.
 		registerMessagingWebhooks(apiSrv, msg, agentRuntime, log)
+	}
+
+	// --- VORTEX Studio (M12): browser IDE/terminal/db/git -------------------
+	if h := buildStudio(ctx, cfg, auditLog, mgr, log); h != nil {
+		apiSrv.SetStudioHandler(h)
 	}
 
 	// ACME HTTP-01 challenge handler must be reachable on :80 for cert issuance.
@@ -984,6 +990,87 @@ func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *ag
 		apiSrv.SetWebhooks(specs)
 		log.Info("messaging webhooks registered", "count", len(specs))
 	}
+}
+
+// buildStudio constructs the VORTEX Studio handler tree (code-server proxy,
+// terminal, DB studio, git panel) when VORTEX_STUDIO_WORKSPACE is set. code-
+// server degrades gracefully when its binary is absent. Returns nil when Studio
+// is not configured.
+func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, mgr *lifecycle.Manager, log *slog.Logger) http.Handler {
+	workspace := os.Getenv("VORTEX_STUDIO_WORKSPACE")
+	if workspace == "" {
+		log.Info("studio disabled")
+		return nil
+	}
+
+	mux := http.NewServeMux()
+
+	// code-server (optional — graceful degradation when not installed).
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	cs, cerr := studio.NewCodeServer(studio.CodeServerConfig{
+		WorkspaceDir: workspace,
+		DataDir:      filepath.Join(cacheDir, "vortex", "code-server"),
+		Logger:       log,
+	})
+	codeServerOK := false
+	if cerr != nil {
+		if errors.Is(cerr, studio.ErrCodeServerNotInstalled) {
+			log.Info("studio: code-server not installed, IDE panel disabled")
+		} else {
+			log.Warn("studio: code-server unavailable", "err", cerr)
+		}
+	} else if serr := cs.Start(ctx); serr != nil {
+		log.Warn("studio: code-server failed to start", "err", serr)
+	} else {
+		codeServerOK = true
+		mux.Handle("/studio/", cs.ProxyHandler())
+		mgr.OnShutdown("code-server", func(context.Context) error { return cs.Stop() })
+	}
+
+	// Terminal.
+	term := studio.NewTerminalManager(studio.TerminalConfig{
+		WorkDir:  workspace,
+		AuditLog: auditLog,
+		Logger:   log,
+	})
+	mux.Handle("/studio/terminal", term.Handler())
+	mgr.OnShutdown("studio-terminal", func(context.Context) error { return term.CloseSessions() })
+
+	// DB studio from mTLS-enabled TCP routes.
+	var dbRoutes []studio.DBRoute
+	for _, rc := range cfg.Routes {
+		if rc.Protocol == "tcp" && rc.MTLS {
+			dbRoutes = append(dbRoutes, studio.DBRoute{
+				Name:       rc.Name,
+				Kind:       studio.KindForPort(rc.Listen),
+				ListenAddr: fmt.Sprintf("127.0.0.1:%d", rc.Listen),
+			})
+		}
+	}
+	db, _ := studio.NewDBStudio(studio.DBStudioConfig{
+		Routes:   dbRoutes,
+		ReadOnly: os.Getenv("VORTEX_STUDIO_DB_READONLY") != "false",
+		AuditLog: auditLog,
+		Logger:   log,
+	})
+	mux.Handle("/studio/db/", db.Handler())
+
+	// Git panel (when the workspace is a git repo).
+	if gp, gerr := studio.NewGitPanel(studio.GitPanelConfig{
+		RepoPath: workspace, AuditLog: auditLog, Logger: log,
+	}); gerr == nil {
+		mux.Handle("/studio/git/", gp.Handler())
+	} else {
+		log.Info("studio: git panel disabled", "reason", gerr.Error())
+	}
+
+	log.Info("studio started",
+		"workspace", workspace, "code_server", codeServerOK,
+		"db_connections", len(dbRoutes))
+	return mux
 }
 
 // parseInt64List parses a comma-separated list of int64s, skipping invalid
