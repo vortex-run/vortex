@@ -34,12 +34,25 @@ type TelegramConfig struct {
 	Client *http.Client
 }
 
+// CallbackResolver consumes an inline-button callback. It returns true if the
+// callback was a recognised approval decision (and therefore should not be
+// re-submitted to the agent runtime as a free-form directive). The
+// ApprovalManager implements this.
+type CallbackResolver interface {
+	Resolve(callbackData string) bool
+}
+
 // TelegramBot is a Telegram Bot API client + webhook handler.
 type TelegramBot struct {
-	cfg     TelegramConfig
-	baseURL string
-	client  *http.Client
+	cfg      TelegramConfig
+	baseURL  string
+	client   *http.Client
+	resolver CallbackResolver
 }
+
+// SetCallbackResolver wires a resolver (e.g. the ApprovalManager) that gets
+// first refusal on inline-button callbacks.
+func (t *TelegramBot) SetCallbackResolver(r CallbackResolver) { t.resolver = r }
 
 // NewTelegramBot constructs a bot. It returns an error if the token is empty.
 func NewTelegramBot(cfg TelegramConfig) (*TelegramBot, error) {
@@ -210,10 +223,14 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			// Acknowledge the button press; the data carries the directive.
+			// Acknowledge the button press.
 			_ = t.post(r.Context(), "answerCallbackQuery",
 				map[string]any{"callback_query_id": upd.CallbackQuery.ID})
-			t.dispatch(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
+			// An approval decision is consumed by the resolver; anything else is
+			// dispatched to the runtime as a directive.
+			if t.resolver == nil || !t.resolver.Resolve(upd.CallbackQuery.Data) {
+				t.dispatch(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
+			}
 			w.WriteHeader(http.StatusOK)
 		case upd.Message != nil:
 			chatID := upd.Message.Chat.ID

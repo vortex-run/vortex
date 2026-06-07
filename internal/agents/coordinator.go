@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -56,12 +57,19 @@ const intentSystemPrompt = `You are the VORTEX coordinator. Classify the user's 
 
 const answerSystemPrompt = `You are the VORTEX assistant. Answer the user's question concisely.`
 
+// ApprovalFunc requests human approval for an action (e.g. a run_command).
+// It returns true if approved, false if rejected or timed out. The messaging
+// layer supplies the real implementation (Telegram approve/reject buttons);
+// when nil, approval-gated actions are denied by default (fail safe).
+type ApprovalFunc func(ctx context.Context, req ApprovalRequest) bool
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
 	Bus       *Bus
 	Tools     *SandboxedToolRegistry
 	AIGateway AIGateway
-	MaxAgents int // concurrent sub-agent limit (default 8)
+	MaxAgents int          // concurrent sub-agent limit (default 8)
+	Approval  ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
 }
 
 // Coordinator is the single user-facing agent. It classifies user messages,
@@ -101,6 +109,31 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		active: make(map[string]Agent),
 	}
 	return c, nil
+}
+
+// RunTool executes a named tool through the sandboxed registry, handling the
+// human-in-the-loop approval flow: if the tool returns an *ApprovalError, the
+// coordinator asks the configured ApprovalFunc; on approval it re-runs the
+// action with approval granted, and on rejection (or a nil ApprovalFunc) it
+// returns an error without executing. Tools that don't require approval run
+// directly.
+func (c *Coordinator) RunTool(ctx context.Context, name string, params map[string]any) (any, error) {
+	if c.cfg.Tools == nil {
+		return nil, fmt.Errorf("agents: coordinator has no tool registry")
+	}
+	result, err := c.cfg.Tools.Execute(ctx, name, params)
+
+	var ae *ApprovalError
+	if !errors.As(err, &ae) {
+		return result, err // success, or a non-approval error
+	}
+
+	// The action needs human sign-off.
+	if c.cfg.Approval == nil || !c.cfg.Approval(ctx, ae.Request) {
+		return nil, fmt.Errorf("agents: action rejected by user")
+	}
+	// Approved: re-run the command without the approval gate.
+	return c.cfg.Tools.ExecuteApproved(ctx, name, params)
 }
 
 // HandleMessage is the main entry point for a user message. It classifies the

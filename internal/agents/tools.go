@@ -717,6 +717,31 @@ func (s *SandboxedToolRegistry) Execute(ctx context.Context, name string, params
 	return result, execErr
 }
 
+// ExecuteApproved runs a tool with the human-approval gate disabled. It is
+// called only after an approver has granted permission for an action that
+// returned an *ApprovalError. For a RunCommandTool this re-runs the same
+// command with RequireApproval cleared; other tools execute normally. The
+// execution is audit-logged as an approved action.
+func (s *SandboxedToolRegistry) ExecuteApproved(ctx context.Context, name string, params map[string]any) (any, error) {
+	tool, err := s.registry.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if rc, ok := tool.(RunCommandTool); ok {
+		rc.RequireApproval = false
+		tool = rc
+	}
+	result, execErr := tool.Execute(ctx, params)
+	if s.audit != nil {
+		detail := map[string]any{"tool": name, "ok": execErr == nil, "approved": true}
+		if execErr != nil {
+			detail["error"] = execErr.Error()
+		}
+		_ = s.audit.Append(ctx, s.actor, "tool.execute.approved", name, detail)
+	}
+	return result, execErr
+}
+
 // RegisterBuiltins populates registry with the built-in tools bound to the
 // given sandbox dir, command whitelist, bus, and management API base URL. It is
 // a convenience for wiring (used by the runtime and start.go).

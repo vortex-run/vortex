@@ -75,6 +75,9 @@ type Server struct {
 	agentRuntime AgentRuntime
 	// agentLimiter rate-limits POST /api/agents/submit per source IP.
 	agentLimiter *security.HTTPRateLimiter
+	// webhooks maps /webhook/<platform> paths to rate-limited, signature-self-
+	// verifying handlers (Telegram/WhatsApp/Slack). Set via SetWebhooks.
+	webhooks map[string]http.Handler
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -245,6 +248,11 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/agents/submit",
 		s.requireAPIKey(s.rateLimitAgents(http.HandlerFunc(s.handleAgentSubmit))))
 	mux.Handle("GET /api/agents/status", s.requireAPIKey(http.HandlerFunc(s.handleAgentStatus)))
+
+	// Messaging webhooks (M11): no API-key auth (each verifies its own platform
+	// signature), per-IP rate limited. Both GET (WhatsApp verification) and POST
+	// route through the same dispatcher.
+	mux.HandleFunc("/webhook/", s.handleWebhook)
 
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))

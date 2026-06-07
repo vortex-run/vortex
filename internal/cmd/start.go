@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/perf"
 	"github.com/vortex-run/vortex/internal/plugins"
@@ -271,11 +273,24 @@ func runStart(ctx context.Context, pidfile string) error {
 	wireDashboardProviders(apiSrv, cfgMgr, auditLog, pluginRegistry, policyEngine)
 	wireNamespaceHooks(apiSrv, tenantRegistry, tenantEnforcer)
 
-	// --- agent runtime (M10) ------------------------------------------------
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog)
+	// --- messaging (M11): AI gateway + notification router + approval -------
+	msg := buildMessaging(log)
+
+	// --- agent runtime (M10/M11) --------------------------------------------
+	// Use the real AI gateway when configured; otherwise the stub. Wire the
+	// human-in-the-loop approval function when an approver is configured.
+	var gateway agents.AIGateway = agents.StubAIGateway{}
+	if msg.gateway != nil {
+		gateway = msg.gateway
+	}
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn)
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
+
+		// Register messaging webhooks (each with its own per-IP rate limit) now
+		// that the runtime exists to receive their messages.
+		registerMessagingWebhooks(apiSrv, msg, agentRuntime, log)
 	}
 
 	// ACME HTTP-01 challenge handler must be reachable on :80 for cert issuance.
@@ -762,10 +777,10 @@ func atoiDefault(s string, def int) int {
 }
 
 // buildAgentRuntime constructs and starts the agent runtime: a message bus, a
-// sandboxed tool registry wired to the audit log, a coordinator (using a stub
-// AI gateway until M11 wires real providers), and the supervising runtime. It
+// sandboxed tool registry wired to the audit log, a coordinator (using the
+// given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -787,8 +802,9 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
 		Bus:       bus,
 		Tools:     sandboxed,
-		AIGateway: agents.StubAIGateway{}, // real gateway wired in M11
+		AIGateway: gateway,
 		MaxAgents: 8,
+		Approval:  approval,
 	})
 	if err != nil {
 		log.Warn("agent runtime disabled: coordinator init failed", "err", err)
@@ -831,6 +847,170 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 		TotalMessages: s.TotalMessages,
 		QueueDepth:    s.QueueDepth,
 	}
+}
+
+// messagingComponents holds the messaging subsystem built from environment
+// configuration. Any field may be nil when not configured.
+type messagingComponents struct {
+	gateway    *messaging.AIGateway
+	router     *messaging.Router
+	telegram   *messaging.TelegramBot
+	whatsapp   *messaging.WhatsAppBot
+	slack      *messaging.SlackBot
+	approval   *messaging.ApprovalManager
+	approvalFn agents.ApprovalFunc
+}
+
+// buildMessaging constructs the AI gateway, notification router, and platform
+// bots from environment variables. All credentials come from the environment,
+// never from the config file. Returns a struct whose fields are nil when the
+// corresponding integration is not configured.
+func buildMessaging(log *slog.Logger) messagingComponents {
+	var m messagingComponents
+
+	// --- AI gateway: assemble providers from env keys -----------------------
+	var providers []messaging.AIProvider
+	if k := os.Getenv("VORTEX_ANTHROPIC_KEY"); k != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderClaude, APIKey: k,
+			Models: []string{"claude-opus-4-8"}, Priority: 0,
+		})
+	}
+	if k := os.Getenv("VORTEX_OPENAI_KEY"); k != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderOpenAI, APIKey: k,
+			Models: []string{"gpt-4o"}, Priority: 1,
+		})
+	}
+	if u := os.Getenv("VORTEX_OLLAMA_URL"); u != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderOllama, Endpoint: u,
+			Models: []string{"llama3"}, Priority: 2,
+		})
+	}
+	if len(providers) > 0 {
+		gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
+		if err != nil {
+			log.Warn("AI gateway disabled", "err", err)
+		} else {
+			m.gateway = gw
+			log.Info("AI gateway configured", "providers", gw.ProviderNames())
+		}
+	}
+
+	// --- platform bots ------------------------------------------------------
+	if tok := os.Getenv("VORTEX_TELEGRAM_TOKEN"); tok != "" {
+		bot, err := messaging.NewTelegramBot(messaging.TelegramConfig{
+			Token:       tok,
+			AllowedIDs:  parseInt64List(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS")),
+			SecretToken: os.Getenv("VORTEX_TELEGRAM_SECRET"),
+		})
+		if err != nil {
+			log.Warn("telegram disabled", "err", err)
+		} else {
+			m.telegram = bot
+		}
+	}
+	if pid, tok := os.Getenv("VORTEX_WA_PHONE_ID"), os.Getenv("VORTEX_WA_TOKEN"); pid != "" && tok != "" {
+		bot, err := messaging.NewWhatsAppBot(messaging.WhatsAppConfig{
+			PhoneNumberID: pid, AccessToken: tok,
+			VerifyToken: os.Getenv("VORTEX_WA_VERIFY_TOKEN"),
+			AppSecret:   os.Getenv("VORTEX_WA_APP_SECRET"),
+		})
+		if err != nil {
+			log.Warn("whatsapp disabled", "err", err)
+		} else {
+			m.whatsapp = bot
+		}
+	}
+	if wh := os.Getenv("VORTEX_SLACK_WEBHOOK"); wh != "" {
+		bot, _ := messaging.NewSlackBot(messaging.SlackConfig{
+			WebhookURL:    wh,
+			SigningSecret: os.Getenv("VORTEX_SLACK_SIGNING_SECRET"),
+		})
+		m.slack = bot
+	}
+
+	// --- notification router ------------------------------------------------
+	m.router = messaging.NewRouter(messaging.NotificationConfig{
+		Telegram:      m.telegram,
+		WhatsApp:      m.whatsapp,
+		Slack:         m.slack,
+		DefaultChatID: atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0),
+		DefaultPhone:  os.Getenv("VORTEX_WA_DEFAULT_PHONE"),
+	})
+	if chans := m.router.ConfiguredChannels(); len(chans) > 0 {
+		log.Info("messaging configured", "channels", chans)
+	} else {
+		log.Info("messaging disabled")
+	}
+
+	// --- human-in-the-loop approval (M10.7) ---------------------------------
+	// Approval routes to Telegram when a default chat is set; the resolver
+	// consumes approve/reject button callbacks before they reach the runtime.
+	if m.telegram != nil {
+		chat := atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0)
+		if chat != 0 {
+			m.approval = messaging.NewApprovalManager(m.telegram, chat, 0)
+			m.telegram.SetCallbackResolver(m.approval)
+			m.approvalFn = m.approval.ApprovalFunc()
+			log.Info("agent approval gate enabled", "channel", "telegram")
+		}
+	}
+
+	return m
+}
+
+// registerMessagingWebhooks mounts the configured platform webhooks with their
+// own per-IP rate limits (Telegram 30/min, WhatsApp 30/min, Slack 60/min).
+func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *agents.Runtime, log *slog.Logger) {
+	var specs []api.WebhookSpec
+	if m.telegram != nil {
+		specs = append(specs, api.WebhookSpec{
+			Path: "/webhook/telegram", Handler: m.telegram.HandleWebhook(rt), RPM: 30,
+		})
+	}
+	if m.whatsapp != nil {
+		specs = append(specs, api.WebhookSpec{
+			Path: "/webhook/whatsapp", Handler: m.whatsapp.HandleWebhook(rt), RPM: 30,
+		})
+	}
+	if m.slack != nil {
+		specs = append(specs, api.WebhookSpec{
+			Path: "/webhook/slack", Handler: m.slack.HandleSlashCommand(rt), RPM: 60,
+		})
+	}
+	if len(specs) > 0 {
+		apiSrv.SetWebhooks(specs)
+		log.Info("messaging webhooks registered", "count", len(specs))
+	}
+}
+
+// parseInt64List parses a comma-separated list of int64s, skipping invalid
+// entries. Used for VORTEX_TELEGRAM_ALLOWED_IDS.
+func parseInt64List(s string) []int64 {
+	if s == "" {
+		return nil
+	}
+	var out []int64
+	for _, part := range strings.Split(s, ",") {
+		if n, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// atoi64Default parses s as int64, returning def on empty/parse failure.
+func atoi64Default(s string, def int64) int64 {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // buildTenancy opens the namespace registry and builds the quota enforcer.
