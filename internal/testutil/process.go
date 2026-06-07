@@ -16,11 +16,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -152,6 +154,12 @@ func (b *syncBuffer) String() string {
 // process is stopped on test cleanup.
 func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 	t.Helper()
+	// The management API binds a fixed port (:9090). Wait for any previous
+	// test's process to release it, so this process — not a lingering stale one
+	// — is the one that answers /health. Without this, back-to-back tests can
+	// observe the wrong server's responses (e.g. one without Studio wired).
+	waitPortFree(t, "127.0.0.1:9090", 10*time.Second)
+
 	cmd := exec.Command(bin, "start", "--config", configPath, "--log-level", "debug")
 	p := &VortexProcess{
 		ConfigPath: configPath,
@@ -174,19 +182,45 @@ func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 		}
 	})
 
-	deadline := time.Now().Add(5 * time.Second)
+	// Readiness is tied to THIS child's own log output, not just a /health 200
+	// (a stale predecessor still holding :9090 would also answer 200, yielding
+	// the wrong server). We wait until this process logs that its management API
+	// is listening, then confirm /health.
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(apiBase + "/health")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return p
+		if strings.Contains(p.logBuf.String(), "management API listening") {
+			resp, err := http.Get(apiBase + "/health")
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return p
+				}
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("vortex did not become healthy within 5s")
+	t.Fatalf("vortex did not become healthy within 15s:\n%s", p.logBuf.String())
 	return nil
+}
+
+// waitPortFree blocks until addr can be bound (a prior server has fully released
+// it, including any TIME_WAIT) or the timeout elapses. It actually listens on
+// the port rather than dialing, so a predecessor in TIME_WAIT does not pass.
+func waitPortFree(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			_ = ln.Close()
+			// Briefly let the kernel release the just-closed listener before the
+			// child binds it.
+			time.Sleep(50 * time.Millisecond)
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// Don't fail hard: the start readiness check surfaces a real problem.
 }
 
 // Stop stops the running process and waits up to 10s for it to exit cleanly.
