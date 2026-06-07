@@ -48,6 +48,13 @@ func NewGitPanel(cfg GitPanelConfig) (*GitPanel, error) {
 
 // git runs a git command in the repo directory and returns trimmed stdout.
 func (g *GitPanel) git(ctx context.Context, args ...string) (string, error) {
+	out, err := g.gitRaw(ctx, args...)
+	return strings.TrimSpace(out), err
+}
+
+// gitRaw is like git but does not trim stdout — used for porcelain output where
+// the leading status columns (which can be spaces) are significant.
+func (g *GitPanel) gitRaw(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.cfg.RepoPath
 	var stdout, stderr bytes.Buffer
@@ -56,7 +63,7 @@ func (g *GitPanel) git(ctx context.Context, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // Handler returns the Git panel HTTP handler.
@@ -77,7 +84,7 @@ func (g *GitPanel) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	out, err := g.git(r.Context(), "status", "--porcelain")
+	out, err := g.gitRaw(r.Context(), "status", "--porcelain")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
@@ -85,7 +92,7 @@ func (g *GitPanel) handleStatus(w http.ResponseWriter, r *http.Request) {
 	staged, unstaged := parsePorcelain(out)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"branch":   branch,
-		"clean":    out == "",
+		"clean":    strings.TrimSpace(out) == "",
 		"staged":   staged,
 		"unstaged": unstaged,
 	})
