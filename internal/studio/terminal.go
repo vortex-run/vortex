@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -40,12 +41,37 @@ type TerminalConfig struct {
 	Authorize func(r *http.Request) bool
 }
 
-// TerminalSession is one active shell session bound to a WebSocket.
+// TerminalSession is one active shell session bound to a WebSocket. Its fields
+// are guarded by mu because the serving goroutine and CloseSessions/SessionCount
+// callers touch it concurrently.
 type TerminalSession struct {
 	ID        string
 	StartedAt time.Time
-	LastUsed  time.Time
-	cmd       *exec.Cmd
+
+	mu       sync.Mutex
+	lastUsed time.Time
+	proc     *os.Process
+}
+
+// touch records activity and stores the process handle.
+func (s *TerminalSession) setProc(p *os.Process) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.proc = p
+}
+
+func (s *TerminalSession) touch() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastUsed = time.Now()
+}
+
+func (s *TerminalSession) kill() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.proc != nil {
+		_ = s.proc.Kill()
+	}
 }
 
 // TerminalManager serves browser terminals over WebSocket.
@@ -128,29 +154,31 @@ func (m *TerminalManager) serveSession(ctx context.Context, conn *wsConn) {
 	stdout, _ := cmd.StdoutPipe()
 	cmd.Stderr = cmd.Stdout
 
-	sess := &TerminalSession{ID: id, StartedAt: time.Now(), LastUsed: time.Now(), cmd: cmd}
-	m.mu.Lock()
-	m.sessions[id] = sess
-	m.mu.Unlock()
-	m.audit(ctx, "studio.terminal.start", id)
-	m.log.Info("terminal session started", "id", id, "shell", m.cfg.Shell)
+	sess := &TerminalSession{ID: id, StartedAt: time.Now(), lastUsed: time.Now()}
 
 	defer func() {
 		m.mu.Lock()
 		delete(m.sessions, id)
 		m.mu.Unlock()
 		_ = stdin.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		sess.kill()
 		m.audit(ctx, "studio.terminal.end", id)
 		m.log.Info("terminal session ended", "id", id)
 	}()
 
+	// Start the shell BEFORE registering the session, so concurrent callers
+	// (CloseSessions/SessionCount) never observe a half-started process.
 	if err := cmd.Start(); err != nil {
 		_ = conn.WriteText([]byte("failed to start shell: " + err.Error()))
 		return
 	}
+	sess.setProc(cmd.Process)
+
+	m.mu.Lock()
+	m.sessions[id] = sess
+	m.mu.Unlock()
+	m.audit(ctx, "studio.terminal.start", id)
+	m.log.Info("terminal session started", "id", id, "shell", m.cfg.Shell)
 
 	// shell stdout → websocket
 	go func() {
@@ -175,7 +203,7 @@ func (m *TerminalManager) serveSession(ctx context.Context, conn *wsConn) {
 		if err != nil {
 			return
 		}
-		sess.LastUsed = time.Now()
+		sess.touch()
 		if _, err := stdin.Write(data); err != nil {
 			return
 		}
@@ -187,9 +215,7 @@ func (m *TerminalManager) CloseSessions() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, s := range m.sessions {
-		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
+		s.kill()
 		delete(m.sessions, id)
 	}
 	return nil
