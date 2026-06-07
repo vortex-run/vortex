@@ -2,6 +2,8 @@ package agents
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -132,5 +134,89 @@ func TestReap_RemovesCompletedAgent(t *testing.T) {
 	c.Reap("done")
 	if len(c.ActiveAgents()) != 0 {
 		t.Errorf("ActiveAgents after reap = %v, want empty", c.ActiveAgents())
+	}
+}
+
+func TestCoordinator_RunToolApprovalApproved(t *testing.T) {
+	reg := NewToolRegistry()
+	dir := t.TempDir()
+	_ = reg.Register(NewRunCommandTool(dir, []string{"go"})) // RequireApproval=true
+	tools := NewSandboxedRegistry(reg, dir, []string{"go"}, nil)
+
+	var asked bool
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		Tools:     tools,
+		AIGateway: StubAIGateway{},
+		Approval: func(_ context.Context, req ApprovalRequest) bool {
+			asked = true
+			return req.Command == "go" // approve go commands
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.RunTool(context.Background(), "run_command",
+		map[string]any{"command": "go", "args": []string{"version"}})
+	if err != nil {
+		t.Fatalf("RunTool approved: %v", err)
+	}
+	if !asked {
+		t.Error("approval function should have been consulted")
+	}
+	if m, ok := res.(map[string]any); !ok || m["exit_code"].(int) != 0 {
+		t.Errorf("expected successful run after approval, got %v", res)
+	}
+}
+
+func TestCoordinator_RunToolApprovalRejected(t *testing.T) {
+	reg := NewToolRegistry()
+	dir := t.TempDir()
+	_ = reg.Register(NewRunCommandTool(dir, []string{"go"}))
+	tools := NewSandboxedRegistry(reg, dir, []string{"go"}, nil)
+
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus: NewBus(), Tools: tools, AIGateway: StubAIGateway{},
+		Approval: func(context.Context, ApprovalRequest) bool { return false },
+	})
+	if _, err := c.RunTool(context.Background(), "run_command",
+		map[string]any{"command": "go", "args": []string{"version"}}); err == nil {
+		t.Error("RunTool should error when approval is rejected")
+	}
+}
+
+func TestCoordinator_RunToolNilApprovalDenies(t *testing.T) {
+	reg := NewToolRegistry()
+	dir := t.TempDir()
+	_ = reg.Register(NewRunCommandTool(dir, []string{"go"}))
+	tools := NewSandboxedRegistry(reg, dir, []string{"go"}, nil)
+
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus: NewBus(), Tools: tools, AIGateway: StubAIGateway{}, // no Approval
+	})
+	if _, err := c.RunTool(context.Background(), "run_command",
+		map[string]any{"command": "go", "args": []string{"version"}}); err == nil {
+		t.Error("RunTool should deny a gated command when no approver is configured")
+	}
+}
+
+func TestCoordinator_RunToolNoApprovalNeeded(t *testing.T) {
+	reg := NewToolRegistry()
+	dir := t.TempDir()
+	_ = reg.Register(ReadFileTool{SandboxDir: dir})
+	tools := NewSandboxedRegistry(reg, dir, nil, nil)
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus: NewBus(), Tools: tools, AIGateway: StubAIGateway{},
+	})
+	res, err := c.RunTool(context.Background(), "read_file", map[string]any{"path": "f.txt"})
+	if err != nil {
+		t.Fatalf("read_file (no approval needed): %v", err)
+	}
+	if res.(map[string]any)["content"].(string) != "hi" {
+		t.Errorf("unexpected content: %v", res)
 	}
 }
