@@ -9,6 +9,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/audit"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/observability"
 )
 
 // dashServer builds a server with dashboard providers and an audit log wired,
@@ -121,6 +122,85 @@ func TestAPI_AuditVerifyValid(t *testing.T) {
 	}
 	if !body.Valid {
 		t.Error("verify on a clean log should be valid")
+	}
+}
+
+func TestAPI_StatusReturnsAllFields(t *testing.T) {
+	holder := config.NewHolder(&config.Config{Cluster: config.Cluster{Name: "c1"}})
+	s := New("127.0.0.1:0", holder, "v9", discardLogger())
+	s.SetStatusProvider(func() StatusInfo {
+		return StatusInfo{
+			NodeID: "n1", TrustDomain: "c1.vortex", TLSProvider: "internal",
+			SecretBackend: "local", PolicyDefault: true, PluginCount: 2,
+			AuditEntryCount: 5, ClusterName: "c1", Version: "v9",
+		}
+	})
+	rec := serve(s, loopbackReq(http.MethodGet, "/api/status"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var b StatusInfo
+	if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.NodeID != "n1" || b.TrustDomain != "c1.vortex" || b.TLSProvider != "internal" ||
+		b.SecretBackend != "local" || !b.PolicyDefault || b.PluginCount != 2 ||
+		b.AuditEntryCount != 5 || b.ClusterName != "c1" || b.Version != "v9" {
+		t.Errorf("/api/status missing required fields: %+v", b)
+	}
+}
+
+func TestAPI_AuditReturnsEntries(t *testing.T) {
+	s := dashServer(t)
+	// Append two entries, then confirm the API returns them.
+	for i := 0; i < 2; i++ {
+		if err := s.auditLog.Append(t.Context(), "tester", "test.event", "res", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := serve(s, loopbackReq(http.MethodGet, "/api/audit?limit=10"))
+	var body struct {
+		Entries []audit.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(body.Entries))
+	}
+	if body.Entries[0].Actor != "tester" || body.Entries[0].Action != "test.event" {
+		t.Errorf("entry shape wrong: %+v", body.Entries[0])
+	}
+}
+
+func TestAPI_AuditLimitRespected(t *testing.T) {
+	s := dashServer(t)
+	for i := 0; i < 5; i++ {
+		_ = s.auditLog.Append(t.Context(), "a", "e", "r", nil)
+	}
+	rec := serve(s, loopbackReq(http.MethodGet, "/api/audit?limit=3"))
+	var body struct {
+		Entries []audit.Entry `json:"entries"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Entries) != 3 {
+		t.Errorf("limit=3 returned %d entries, want 3", len(body.Entries))
+	}
+}
+
+func TestAPI_MetricsPrometheusFormat(t *testing.T) {
+	holder := config.NewHolder(&config.Config{Cluster: config.Cluster{Name: "c"}})
+	s := New("127.0.0.1:0", holder, "v", discardLogger())
+	s.SetMetricsHandler(observability.NewMetrics("vortex").Handler())
+
+	rec := serve(s, loopbackReq(http.MethodGet, "/metrics"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/metrics = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	// Prometheus exposition: HELP/TYPE comment lines and a vortex_ metric.
+	if !contains(body, "# HELP") || !contains(body, "# TYPE") || !contains(body, "vortex_") {
+		t.Errorf("/metrics not Prometheus format:\n%s", body[:min(len(body), 300)])
 	}
 }
 
