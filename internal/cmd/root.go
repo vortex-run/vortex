@@ -90,6 +90,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newPluginCommand())
 	root.AddCommand(newNamespaceCommand())
 	root.AddCommand(newTuneCommand())
+	root.AddCommand(newSetupCommand())
 
 	return root
 }

@@ -44,15 +44,26 @@ import (
 // blocks until a shutdown signal — removing the PID file on the way out.
 func newStartCommand() *cobra.Command {
 	var pidfile string
+	var setup bool
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the VORTEX server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Run the first-run wizard when --setup is given, or automatically on
+			// first start when no AI provider is configured AND stdin is an
+			// interactive terminal (never block a non-interactive/scripted start,
+			// e.g. integration tests or systemd).
+			if setup || (!providerConfigured() && isInteractive()) {
+				if err := runSetup(cmd.OutOrStdout(), cmd.InOrStdin()); err != nil {
+					return err
+				}
+			}
 			return runStart(cmd.Context(), pidfile)
 		},
 	}
 	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	return c
 }
 
@@ -960,6 +971,35 @@ type messagingComponents struct {
 	approvalFn agents.ApprovalFunc
 }
 
+// providerFromFile builds an AIProvider from the saved `vortex setup` config
+// (decrypting its API key), or nil when no usable config exists. Env vars take
+// precedence; this is only consulted when none are set.
+func providerFromFile(log *slog.Logger) *messaging.AIProvider {
+	cfg, ok := loadProviderConfig()
+	if !ok || cfg.Provider == "" || cfg.Provider == "none" {
+		return nil
+	}
+	key, err := decryptKey(cfg.APIKeyEnc)
+	if err != nil {
+		log.Warn("could not decrypt saved AI key, ignoring setup config", "err", err)
+		return nil
+	}
+	if cfg.Provider != messaging.ProviderOllama && key == "" {
+		return nil
+	}
+	models := []string(nil)
+	if cfg.Model != "" {
+		models = []string{cfg.Model}
+	}
+	log.Info("AI provider loaded from setup config", "provider", cfg.Provider)
+	return &messaging.AIProvider{
+		Name:     cfg.Provider,
+		APIKey:   key,
+		Endpoint: cfg.Endpoint,
+		Models:   models,
+	}
+}
+
 // buildMessaging constructs the AI gateway, notification router, and platform
 // bots from environment variables. All credentials come from the environment,
 // never from the config file. Returns a struct whose fields are nil when the
@@ -998,6 +1038,13 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			Name: messaging.ProviderGemini, APIKey: k,
 			Models: []string{"gemini-1.5-flash"}, Priority: 3,
 		})
+	}
+	// Fall back to the saved `vortex setup` config only when NO provider env var
+	// was set — env vars always override the file.
+	if len(providers) == 0 {
+		if p := providerFromFile(log); p != nil {
+			providers = append(providers, *p)
+		}
 	}
 	if len(providers) > 0 {
 		gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
