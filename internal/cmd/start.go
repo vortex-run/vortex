@@ -45,6 +45,7 @@ import (
 func newStartCommand() *cobra.Command {
 	var pidfile string
 	var setup bool
+	var withUI bool
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the VORTEX server",
@@ -59,11 +60,17 @@ func newStartCommand() *cobra.Command {
 					return err
 				}
 			}
+			if withUI {
+				// Start the server in the background, then open the TUI; the TUI
+				// owns the foreground until the user quits.
+				return runUI(cmd.Context(), "http://localhost:9090", "", true)
+			}
 			return runStart(cmd.Context(), pidfile)
 		},
 	}
 	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
+	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
 	return c
 }
 
