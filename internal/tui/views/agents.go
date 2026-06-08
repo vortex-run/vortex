@@ -23,15 +23,24 @@ type ChatMessage struct {
 
 // AgentsModel is the interactive chat with the VORTEX coordinator.
 type AgentsModel struct {
-	client    *tui.Client
-	messages  []ChatMessage
-	input     textinput.Model
-	viewport  viewport.Model
-	spinner   spinner.Model
-	thinking  bool
-	sessionID string
-	width     int
-	height    int
+	client     *tui.Client
+	messages   []ChatMessage
+	input      textinput.Model
+	viewport   viewport.Model
+	spinner    spinner.Model
+	thinking   bool
+	sessionID  string
+	awaiting   bool   // an approval is pending (awaiting Y/N)
+	approvalID string // session the pending approval belongs to
+	width      int
+	height     int
+}
+
+// slashCommands are the Claude-Code-style quick commands shown when the input
+// begins with "/". Each maps to an agent action.
+var slashCommands = []string{
+	"/ls", "/read", "/run", "/create", "/edit", "/project",
+	"/forge", "/status", "/reload", "/help",
 }
 
 // commandCompletions are tab-completed command prefixes.
@@ -105,13 +114,41 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			content = "⚠ " + msg.err.Error()
 		}
+		// An [APPROVAL_REQUIRED] line means the agent is waiting on a Y/N.
+		if strings.Contains(content, "[APPROVAL_REQUIRED]") {
+			m.awaiting = true
+			m.approvalID = m.sessionID
+			content = strings.ReplaceAll(content, "[APPROVAL_REQUIRED]", "⚠ Agent wants approval —")
+			content += "\n\n[Y] Approve    [N] Reject"
+		}
 		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		m.input.Focus()
 		return m, nil
 
+	case approvalResult:
+		m.awaiting = false
+		verb := "rejected"
+		if msg.approved {
+			verb = "approved"
+		}
+		m.messages = append(m.messages, ChatMessage{Role: "system", Content: "Action " + verb + ".", Timestamp: time.Now()})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+
 	case tea.KeyMsg:
+		// While an approval is pending, Y/N resolve it (and nothing else types).
+		if m.awaiting {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				return m, m.sendApproval(true)
+			case "n":
+				return m, m.sendApproval(false)
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
@@ -184,19 +221,48 @@ func (m AgentsModel) renderMessages() string {
 	return b.String()
 }
 
+// approvalResult is emitted after an approve/reject decision is sent.
+type approvalResult struct {
+	approved bool
+}
+
+// sendApproval posts the user's approve/reject decision to the agent runtime.
+func (m AgentsModel) sendApproval(approved bool) tea.Cmd {
+	c := m.client
+	sid := m.approvalID
+	return func() tea.Msg {
+		if c != nil {
+			_ = c.Approve(sid, approved)
+		}
+		return approvalResult{approved: approved}
+	}
+}
+
 // autocomplete returns the first command completion matching the current input.
+// When the input begins with "/", it cycles the slash commands instead.
 func autocomplete(current string) string {
-	current = strings.TrimSpace(current)
-	if current == "" {
+	trimmed := strings.TrimSpace(current)
+	if strings.HasPrefix(trimmed, "/") {
+		for _, c := range slashCommands {
+			if strings.HasPrefix(c, trimmed) && c != trimmed {
+				return c + " "
+			}
+		}
+		return trimmed
+	}
+	if trimmed == "" {
 		return commandCompletions[0]
 	}
 	for _, c := range commandCompletions {
-		if strings.HasPrefix(c, current) && c != current {
+		if strings.HasPrefix(c, trimmed) && c != trimmed {
 			return c
 		}
 	}
-	return current
+	return trimmed
 }
+
+// Awaiting reports whether an approval is pending (for tests).
+func (m AgentsModel) Awaiting() bool { return m.awaiting }
 
 // Messages exposes the conversation (for tests).
 func (m AgentsModel) Messages() []ChatMessage { return m.messages }
