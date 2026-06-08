@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchHealth } from "./api";
+import { fetchHealth, fetchStatus, fetchAudit } from "./api";
 
 // useHealth polls the management /health endpoint every 5 seconds.
 export function useHealth() {
@@ -7,6 +7,25 @@ export function useHealth() {
     queryKey: ["health"],
     queryFn: fetchHealth,
     refetchInterval: 5000,
+  });
+}
+
+// useStatus polls extended /api/status (node id, trust domain, tls provider,
+// secret backend, counts) every 5 seconds.
+export function useStatus() {
+  return useQuery({
+    queryKey: ["status"],
+    queryFn: fetchStatus,
+    refetchInterval: 5000,
+  });
+}
+
+// useAudit polls recent audit entries every 10 seconds.
+export function useAudit(limit = 50) {
+  return useQuery({
+    queryKey: ["audit", limit],
+    queryFn: () => fetchAudit(limit),
+    refetchInterval: 10000,
   });
 }
 

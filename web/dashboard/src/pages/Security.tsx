@@ -1,25 +1,51 @@
-import { useHealth } from "../lib/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { useStatus } from "../lib/hooks";
 import { StatusDot } from "../components/ui/StatusDot";
 import { MetricCard } from "../components/ui/MetricCard";
 
+interface SecretStatus {
+  name: string;
+  set: boolean;
+}
+
+// fetchSecretStatus returns declared secret names + set state (never values).
+async function fetchSecretStatus(): Promise<SecretStatus[]> {
+  const res = await fetch("/api/secrets/status", { headers: { Accept: "application/json" } });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`/api/secrets/status returned ${res.status}`);
+  const body = (await res.json()) as { secrets?: SecretStatus[] };
+  return body.secrets ?? [];
+}
+
 export function Security() {
-  const { data: health } = useHealth();
+  const { data: status, isLoading, isError, error } = useStatus();
+  const { data: secrets = [] } = useQuery({ queryKey: ["secrets"], queryFn: fetchSecretStatus });
+
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground">Loading security status…</div>;
+  }
+  if (isError) {
+    return <div className="text-sm text-red-400">Failed to load: {(error as Error).message}</div>;
+  }
+
+  const mtlsOn = Boolean(status?.trust_domain);
+  const setCount = secrets.filter((s) => s.set).length;
 
   return (
     <div className="space-y-6">
       {/* TLS certificates */}
       <Section title="TLS certificates">
         <div className="text-sm text-muted-foreground">
-          No public certificates issued (internal CA / no public routes).
+          TLS provider: <span className="font-mono">{status?.tls_provider ?? "—"}</span>
         </div>
       </Section>
 
       {/* mTLS status */}
       <Section title="mTLS identity">
         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
-          <Field label="Node identity (SPIFFE)" value="not enabled" />
-          <Field label="Trust domain" value={`${health?.cluster_name ?? "—"}.vortex`} />
-          <Field label="Cert expiry" value="—" />
+          <Field label="Node identity" value={mtlsOn ? (status?.node_id ?? "—") : "not enabled"} />
+          <Field label="Trust domain" value={status?.trust_domain || "—"} />
+          <Field label="mTLS" value={mtlsOn ? "enabled" : "off"} />
         </div>
       </Section>
 
@@ -48,8 +74,9 @@ export function Security() {
       {/* Secret store */}
       <Section title="Secret store">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <MetricCard label="store backend" value="local" />
-          <MetricCard label="secrets configured" value={health ? "0" : "—"} />
+          <MetricCard label="store backend" value={status?.secret_backend ?? "—"} />
+          <MetricCard label="secrets configured" value={String(secrets.length)} />
+          <MetricCard label="secrets set" value={String(setCount)} />
         </div>
         <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
           <StatusDot status="green" />

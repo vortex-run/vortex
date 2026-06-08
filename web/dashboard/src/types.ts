@@ -18,6 +18,30 @@ export interface HealthResponse {
   routes?: RouteHealth[];
 }
 
+// StatusInfo mirrors api.StatusInfo (GET /api/status).
+export interface StatusInfo {
+  node_id: string;
+  trust_domain: string;
+  tls_provider: string;
+  secret_backend: string;
+  policy_default: boolean;
+  plugin_count: number;
+  audit_entry_count: number;
+  cluster_name: string;
+  version: string;
+}
+
+// AuditEntry mirrors audit.Entry (GET /api/audit entries[]).
+export interface AuditEntry {
+  seq: number;
+  timestamp: string;
+  actor: string;
+  action: string;
+  resource: string;
+  detail?: Record<string, unknown>;
+  hash: string;
+}
+
 // ClusterInfo is a derived view of cluster state for the UI.
 export interface ClusterInfo {
   name: string;

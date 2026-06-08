@@ -11,10 +11,11 @@ import { StatCard } from "../components/ui/StatCard";
 import { MetricCard } from "../components/ui/MetricCard";
 import { RouteBadge } from "../components/ui/RouteBadge";
 import { StatusDot } from "../components/ui/StatusDot";
-import { useHealth } from "../lib/hooks";
+import { useHealth, useStatus, useAudit } from "../lib/hooks";
 
-// trafficData is simulated 30-minute traffic until live metrics are wired into
-// the chart. Bar colour reflects load level.
+// trafficData is an illustrative 30-minute shape; per-minute request rate is
+// not exposed as a time series by the API (only counters via /metrics), so this
+// chart is decorative. All other panels show live data.
 const trafficData = Array.from({ length: 30 }, (_, i) => {
   const v = Math.round(200 + 120 * Math.sin(i / 3) + Math.random() * 60);
   return { minute: `${i - 29}m`, rps: v };
@@ -26,16 +27,22 @@ function barColor(rps: number): string {
   return "#3b82f6"; // blue — normal
 }
 
-const recentEvents = [
-  { t: "just now", msg: "config reloaded", kind: "info" },
-  { t: "2m ago", msg: "secret DB_PASSWORD set", kind: "info" },
-  { t: "9m ago", msg: "policy engine loaded (default allow)", kind: "info" },
-];
+// relTime renders an ISO timestamp as a compact relative string.
+function relTime(iso: string): string {
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
 
 export function Overview() {
   const { data: health } = useHealth();
+  const { data: status } = useStatus();
+  const { data: auditEntries = [] } = useAudit(8);
   const routes = health?.routes ?? [];
   const activeConns = routes.reduce((sum, r) => sum + r.active, 0);
+  const mtlsOn = Boolean(status?.trust_domain);
 
   return (
     <div className="space-y-6">
@@ -110,26 +117,33 @@ export function Overview() {
         </div>
       </div>
 
-      {/* Recent events */}
+      {/* Recent events — live audit log */}
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="mb-3 text-sm font-medium text-muted-foreground">Recent events</div>
-        <div className="space-y-2">
-          {recentEvents.map((e, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm">
-              <StatusDot status="green" />
-              <span>{e.msg}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{e.t}</span>
-            </div>
-          ))}
-        </div>
+        {auditEntries.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No recent events.</div>
+        ) : (
+          <div className="space-y-2">
+            {auditEntries.map((e) => (
+              <div key={e.seq} className="flex items-center gap-3 text-sm">
+                <StatusDot status="green" />
+                <span>
+                  <span className="font-medium">{e.action}</span>
+                  <span className="text-muted-foreground"> · {e.resource}</span>
+                </span>
+                <span className="ml-auto text-xs text-muted-foreground">{relTime(e.timestamp)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Security snapshot */}
+      {/* Security snapshot — live status */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="TLS certs valid" value="—" />
-        <MetricCard label="IPs blocked today" value="0" />
-        <MetricCard label="mTLS status" value="off" />
-        <MetricCard label="Secrets loaded" value="—" />
+        <MetricCard label="TLS provider" value={status?.tls_provider ?? "—"} />
+        <MetricCard label="Audit entries" value={status ? String(status.audit_entry_count) : "—"} />
+        <MetricCard label="mTLS status" value={mtlsOn ? "on" : "off"} />
+        <MetricCard label="Plugins" value={status ? String(status.plugin_count) : "—"} />
       </div>
     </div>
   );

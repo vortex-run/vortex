@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useHealth } from "../lib/hooks";
+import { useHealth, useStatus } from "../lib/hooks";
 import { reloadConfig } from "../lib/api";
 
 export function Settings() {
   const { data: health } = useHealth();
+  const { data: status } = useStatus();
   const [msg, setMsg] = useState("");
   const [confirmShutdown, setConfirmShutdown] = useState(false);
 
@@ -25,15 +26,16 @@ export function Settings() {
   return (
     <div className="max-w-2xl space-y-6">
       <Section title="Cluster">
-        <ReadOnly label="Cluster name" value={health?.cluster_name ?? "—"} />
-        <ReadOnly label="Node ID" value="—" />
-        <ReadOnly label="Trust domain" value={`${health?.cluster_name ?? "—"}.vortex`} />
+        <ReadOnly label="Cluster name" value={status?.cluster_name ?? health?.cluster_name ?? "—"} />
+        <ReadOnly label="Node ID" value={status?.node_id ?? "—"} />
+        <ReadOnly label="Trust domain" value={status?.trust_domain ?? "—"} />
+        <ReadOnly label="Version" value={status?.version ?? health?.version ?? "—"} />
       </Section>
 
       <Section title="TLS">
-        <ReadOnly label="Provider" value="internal" />
-        <ReadOnly label="ACME email" value="—" />
-        <ReadOnly label="Minimum TLS version" value="TLS1.2" />
+        <ReadOnly label="Provider" value={status?.tls_provider ?? "—"} />
+        <ReadOnly label="Secret backend" value={status?.secret_backend ?? "—"} />
+        <ReadOnly label="Default policy" value={status ? (status.policy_default ? "allow-all" : "restrictive") : "—"} />
       </Section>
 
       <Section title="Observability">
