@@ -82,3 +82,50 @@ func TestDependency_Timeout(t *testing.T) {
 		t.Error("expected a timeout error with a 1ns timeout")
 	}
 }
+
+func TestCheckCompiler_GoAlwaysPresent(t *testing.T) {
+	found, bin, hint := CheckCompiler("go")
+	if !found {
+		t.Error("go compiler should be found in the test environment")
+	}
+	if bin != "go" || hint != "" {
+		t.Errorf("go: bin=%q hint=%q", bin, hint)
+	}
+}
+
+func TestCheckCompiler_MissingReturnsHint(t *testing.T) {
+	// A bogus language maps to no spec → found=true (nothing to enforce).
+	if found, _, _ := CheckCompiler("cobol"); !found {
+		t.Error("unknown language should not be gated")
+	}
+}
+
+func TestCheckCompiler_UnknownNotGated(t *testing.T) {
+	found, _, _ := CheckCompiler("")
+	if !found {
+		t.Error("empty language should not be gated")
+	}
+}
+
+func TestRequestedLanguage(t *testing.T) {
+	cases := map[string]string{
+		"create a calculator in c++": "c++",
+		"write a cpp program":        "c++",
+		"build a rust cli":           "rust",
+		"make a python script":       "", // interpreted, not gated here
+		"a go web server":            "", // go not in the keyword set
+		"just say hello":             "",
+	}
+	for msg, want := range cases {
+		if got := RequestedLanguage(msg); got != want {
+			t.Errorf("RequestedLanguage(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestCompilerGate_PresentLanguageOK(t *testing.T) {
+	// No specific compiled language → ok.
+	if msg, ok := CompilerGate("build a go app"); !ok || msg != "" {
+		t.Errorf("go request should pass the gate: ok=%v msg=%q", ok, msg)
+	}
+}

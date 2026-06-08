@@ -200,9 +200,15 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✗ Action rejected", Timestamp: time.Now()})
 		}
-		// Show the server-side execution transcript (e.g. "✓ File created: …").
+		// Show the server-side execution transcript line by line, so command
+		// output (stdout/stderr from /run) appears as separate chat lines.
 		if strings.TrimSpace(msg.result) != "" {
-			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: msg.result, Timestamp: time.Now()})
+			for _, line := range strings.Split(msg.result, "\n") {
+				if strings.TrimSpace(line) == "" {
+					continue
+				}
+				m.messages = append(m.messages, ChatMessage{Role: "agent", Content: line, Timestamp: time.Now()})
+			}
 		}
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()

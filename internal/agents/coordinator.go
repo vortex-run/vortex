@@ -347,8 +347,15 @@ func toolDoneLine(name string, result any) string {
 		return "✓ File edited"
 	case "run_terminal":
 		if code, ok := m["exit_code"].(int); ok {
-			out, _ := m["stdout"].(string)
-			return strings.TrimRight(out, "\n") + fmt.Sprintf("\n✓ Command completed (exit %d)", code)
+			var b strings.Builder
+			if out := strings.TrimRight(stringOr(m["stdout"]), "\n"); out != "" {
+				b.WriteString(out + "\n")
+			}
+			if errOut := strings.TrimRight(stringOr(m["stderr"]), "\n"); errOut != "" {
+				b.WriteString("⚠ " + errOut + "\n")
+			}
+			b.WriteString(fmt.Sprintf("✓ Completed (exit %d)", code))
+			return b.String()
 		}
 	case "create_project":
 		if files, ok := m["files"].([]string); ok {
@@ -358,6 +365,12 @@ func toolDoneLine(name string, result any) string {
 		return "✓ Directory listed"
 	}
 	return "✓ Done"
+}
+
+// stringOr returns v as a string, or "" if it is not a string.
+func stringOr(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 // strParamOr extracts a string param or returns def.

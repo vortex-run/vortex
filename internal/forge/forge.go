@@ -157,6 +157,14 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 	if err != nil {
 		return fmt.Errorf("forge: parse intent: %w", err)
 	}
+	// 1b. Compiler gate: if the user asked for a compiled language whose
+	// toolchain is missing, suggest installed alternatives and stop BEFORE any
+	// build attempt (don't fail QA twice on a missing compiler).
+	if gate, ok := CompilerGate(userMsg); !ok {
+		f.setProgress(progressFn, "❓ "+gate)
+		f.setResult(gate)
+		return nil
+	}
 	// 2. Clarifying questions short-circuit (caller handles the Q&A loop).
 	if len(intent.ClarifyingQs) > 0 {
 		for _, q := range intent.ClarifyingQs {

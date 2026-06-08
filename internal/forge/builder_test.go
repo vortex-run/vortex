@@ -96,3 +96,21 @@ func TestBuild_FlutterSkippedWhenAbsent(t *testing.T) {
 	_, _ = b.Build(context.Background())
 	_ = runtime.GOOS
 }
+
+func TestBuild_FailsFastOnMissingCompiler(t *testing.T) {
+	// The flutter toolchain is absent in CI; Build must fail fast with a clear,
+	// actionable error and NOT attempt the build.
+	if _, err := exec.LookPath("flutter"); err == nil {
+		t.Skip("flutter is installed; cannot test the missing-compiler path")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "pubspec.yaml", "name: app\n")
+	b := NewBuildAgent(BuildConfig{SandboxDir: dir, Stack: StackChoice{Frontend: "flutter"}, Timeout: 30 * time.Second})
+	_, err := b.Build(context.Background())
+	if err == nil {
+		t.Fatal("Build should fail fast when flutter is missing")
+	}
+	if !strings.Contains(err.Error(), "not found") || !strings.Contains(err.Error(), "already installed") {
+		t.Errorf("error should be actionable, got: %v", err)
+	}
+}

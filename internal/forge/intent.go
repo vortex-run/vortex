@@ -96,6 +96,55 @@ func (p *AIIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, 
 	return intent, nil
 }
 
+// languageKeywords maps a requested language to the words that imply it.
+var languageKeywords = map[string][]string{
+	"c++":  {"c++", "cpp", " cplus plus"},
+	"c":    {" in c", "c program", "c language"},
+	"rust": {"rust"},
+	"java": {"java "},
+}
+
+// RequestedLanguage returns the explicit compiled language the user asked for
+// (c, c++, rust, java), or "" when none is detected. It only matches languages
+// that need a toolchain check; interpreted languages are not returned.
+func RequestedLanguage(userMsg string) string {
+	msg := " " + strings.ToLower(userMsg) + " "
+	for lang, kws := range languageKeywords {
+		for _, kw := range kws {
+			if strings.Contains(msg, kw) {
+				return lang
+			}
+		}
+	}
+	return ""
+}
+
+// CompilerGate checks whether the language explicitly requested in userMsg has
+// an available toolchain. When a compiled language is requested but its compiler
+// is missing, it returns a user-facing message suggesting installed
+// alternatives and ok=false (the orchestrator should NOT start a build). When
+// no specific language is requested, or its compiler is present, ok=true.
+func CompilerGate(userMsg string) (msg string, ok bool) {
+	lang := RequestedLanguage(userMsg)
+	if lang == "" {
+		return "", true
+	}
+	found, _, hint := CheckCompiler(lang)
+	if found {
+		return "", true
+	}
+	spec := compilerSpecs[lang]
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s compiler not found on this machine.\n", spec.Language)
+	b.WriteString("I can write the same program in:\n")
+	for _, alt := range availableLanguages() {
+		b.WriteString("  • " + alt + " (installed ✓)\n")
+	}
+	fmt.Fprintf(&b, "Or install %s: %s\n", spec.Language, hint)
+	b.WriteString("Which would you prefer?")
+	return b.String(), false
+}
+
 // extractJSON returns the first {...} object found in s (models sometimes wrap
 // JSON in prose or code fences).
 func extractJSON(s string) string {

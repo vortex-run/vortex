@@ -53,6 +53,19 @@ func (b *BuildAgent) Build(ctx context.Context) (BuildOutput, error) {
 		return BuildOutput{}, fmt.Errorf("forge: no build command for stack %+v", b.cfg.Stack)
 	}
 
+	// Fail fast if the build toolchain is missing — don't attempt the build and
+	// fail QA twice; return a clear, actionable error immediately.
+	if _, err := exec.LookPath(command); err != nil {
+		hint := command
+		if _, _, h := CheckCompiler(command); h != "" {
+			hint = h
+		}
+		avail := strings.Join(availableLanguages(), ", ")
+		return BuildOutput{}, fmt.Errorf(
+			"forge: build failed: %q not found. Install it (%s) or use a language already installed: %s",
+			command, hint, avail)
+	}
+
 	cctx, cancel := context.WithTimeout(ctx, b.cfg.Timeout)
 	defer cancel()
 

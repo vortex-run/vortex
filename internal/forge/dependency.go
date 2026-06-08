@@ -150,3 +150,53 @@ func (d *DependencyAgent) CheckInstalled(name string) (bool, string, error) {
 	}
 	return ok, ver, nil
 }
+
+// CompilerSpec describes the toolchain needed for a language: the candidate
+// binaries (any one suffices) and an install hint shown when none is found.
+type CompilerSpec struct {
+	Language    string
+	Candidates  []string // first found on PATH wins
+	InstallHint string
+}
+
+// compilerSpecs maps a language key to its toolchain. Keys are lowercase.
+var compilerSpecs = map[string]CompilerSpec{
+	"c":      {"C", []string{"gcc", "clang", "cl"}, "winget install GnuWin32.Gcc (or install MSVC build tools)"},
+	"c++":    {"C++", []string{"g++", "clang++", "cl"}, "winget install GnuWin32.Gcc (or install MSVC build tools)"},
+	"cpp":    {"C++", []string{"g++", "clang++", "cl"}, "winget install GnuWin32.Gcc (or install MSVC build tools)"},
+	"java":   {"Java", []string{"javac"}, "install a JDK (e.g. winget install Microsoft.OpenJDK.21)"},
+	"rust":   {"Rust", []string{"rustc"}, "install via https://rustup.rs"},
+	"python": {"Python", []string{"python3", "python"}, "winget install Python.Python.3"},
+	"go":     {"Go", []string{"go"}, "install from https://go.dev/dl"},
+	"node":   {"Node", []string{"node"}, "winget install OpenJS.NodeJS"},
+}
+
+// CheckCompiler reports whether a usable toolchain exists for language. found is
+// true when one candidate binary is on PATH; binary is that binary; hint is the
+// install hint (set when not found). Unknown languages return found=true (no
+// known toolchain requirement to enforce).
+func CheckCompiler(language string) (found bool, binary, hint string) {
+	spec, ok := compilerSpecs[strings.ToLower(strings.TrimSpace(language))]
+	if !ok {
+		return true, "", ""
+	}
+	for _, c := range spec.Candidates {
+		if _, err := exec.LookPath(c); err == nil {
+			return true, c, ""
+		}
+	}
+	return false, "", spec.InstallHint
+}
+
+// availableLanguages returns the languages whose toolchain is installed (for
+// suggesting alternatives).
+func availableLanguages() []string {
+	var out []string
+	for _, lang := range []string{"go", "python", "node", "rust", "java", "c++"} {
+		key := strings.ToLower(lang)
+		if ok, _, _ := CheckCompiler(key); ok {
+			out = append(out, compilerSpecs[key].Language)
+		}
+	}
+	return out
+}

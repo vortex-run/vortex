@@ -560,3 +560,46 @@ func TestLanguageForPath(t *testing.T) {
 		}
 	}
 }
+
+func TestToolDoneLine_RunTerminalIncludesOutput(t *testing.T) {
+	line := toolDoneLine("run_terminal", map[string]any{
+		"stdout": "hello world\n", "stderr": "", "exit_code": 0,
+	})
+	if !strings.Contains(line, "hello world") {
+		t.Errorf("done line should include stdout: %q", line)
+	}
+	if !strings.Contains(line, "Completed (exit 0)") {
+		t.Errorf("done line should include exit code: %q", line)
+	}
+}
+
+func TestToolDoneLine_RunTerminalIncludesStderr(t *testing.T) {
+	line := toolDoneLine("run_terminal", map[string]any{
+		"stdout": "", "stderr": "boom\n", "exit_code": 1,
+	})
+	if !strings.Contains(line, "⚠ boom") {
+		t.Errorf("done line should include stderr with warning: %q", line)
+	}
+	if !strings.Contains(line, "exit 1") {
+		t.Errorf("done line should include exit 1: %q", line)
+	}
+}
+
+func TestApproveAction_RunTerminalReturnsOutput(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewToolRegistry()
+	if err := RegisterLocalTools(reg, LocalFSConfig{Root: dir}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}, LocalTools: reg, WorkingDir: dir})
+	// Stash a run_terminal action (echo), then approve → output in transcript.
+	_, _ = c.ExecuteLocalTool(context.Background(), "sess", "run_terminal",
+		map[string]any{"command": "echo vortexout"}, func(string) {})
+	transcript, matched := c.ApproveAction("sess", true)
+	if !matched {
+		t.Fatal("run approval should match")
+	}
+	if !strings.Contains(transcript, "vortexout") {
+		t.Errorf("approve transcript should contain command output: %q", transcript)
+	}
+}
