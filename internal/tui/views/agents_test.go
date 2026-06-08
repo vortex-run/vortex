@@ -111,3 +111,95 @@ func TestAgents_EnterIgnoredWhileThinking(t *testing.T) {
 		}
 	}
 }
+
+func TestAgents_ApprovalRequiredEntersAwaiting(t *testing.T) {
+	m := NewAgents(nil)
+	m.thinking = true
+	updated, _ := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] write file x"})
+	am := updated.(AgentsModel)
+	if !am.Awaiting() {
+		t.Error("an [APPROVAL_REQUIRED] reply should enter awaiting state")
+	}
+	out := am.renderMessages()
+	if !strings.Contains(out, "[Y] Approve") || !strings.Contains(out, "[N] Reject") {
+		t.Errorf("approval reply should show Y/N prompt:\n%s", out)
+	}
+	// The raw marker should not leak.
+	if strings.Contains(out, "[APPROVAL_REQUIRED]") {
+		t.Error("raw [APPROVAL_REQUIRED] marker should be rewritten")
+	}
+}
+
+func TestAgents_ApproveKeySendsDecision(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if cmd == nil {
+		t.Fatal("Y should send an approval command")
+	}
+	msg := cmd()
+	res, ok := msg.(approvalResult)
+	if !ok || !res.approved {
+		t.Errorf("Y should produce approvalResult{approved:true}, got %#v", msg)
+	}
+}
+
+func TestAgents_RejectKeySendsDecision(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd == nil {
+		t.Fatal("N should send a rejection command")
+	}
+	if res := cmd().(approvalResult); res.approved {
+		t.Error("N should produce approvalResult{approved:false}")
+	}
+}
+
+func TestAgents_AwaitingIgnoresTyping(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	// A normal letter key while awaiting should not type into the input.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	if updated.(AgentsModel).input.Value() != "" {
+		t.Error("typing should be ignored while awaiting approval")
+	}
+}
+
+func TestAgents_ApprovalResultClearsAwaiting(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	updated, _ := m.Update(approvalResult{approved: true})
+	am := updated.(AgentsModel)
+	if am.Awaiting() {
+		t.Error("approvalResult should clear awaiting")
+	}
+	last := am.Messages()[len(am.Messages())-1]
+	if last.Role != "system" || !strings.Contains(last.Content, "approved") {
+		t.Errorf("expected an 'approved' system line, got %+v", last)
+	}
+}
+
+func TestAgents_SlashAutocomplete(t *testing.T) {
+	if got := autocomplete("/l"); got != "/ls " {
+		t.Errorf("autocomplete(/l) = %q, want '/ls '", got)
+	}
+	if got := autocomplete("/pro"); got != "/project " {
+		t.Errorf("autocomplete(/pro) = %q, want '/project '", got)
+	}
+	// Non-slash still uses the prose completions.
+	if got := autocomplete("buil"); got != "build me a " {
+		t.Errorf("autocomplete(buil) = %q, want 'build me a '", got)
+	}
+}
+
+// applyApprovalPending drives the model into the awaiting state.
+func applyApprovalPending(t *testing.T, m AgentsModel) (AgentsModel, tea.Cmd) {
+	t.Helper()
+	updated, cmd := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] run command"})
+	am := updated.(AgentsModel)
+	if !am.Awaiting() {
+		t.Fatal("setup: model should be awaiting")
+	}
+	return am, cmd
+}
