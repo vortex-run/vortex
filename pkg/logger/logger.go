@@ -66,6 +66,16 @@ type Config struct {
 	// Sampling enables windowed sampling of Debug/Info records (Warn/Error
 	// always pass). Enable in production when a route processes >10k req/s.
 	Sampling bool
+	// Buffer, when set, also receives every emitted record (in addition to the
+	// normal sink) — used to feed the TUI/API log viewer. Optional.
+	Buffer BufferSink
+}
+
+// BufferSink receives structured log records for the in-memory log viewer. It
+// is satisfied by *api.LogBuffer via an adapter (logger stays decoupled from
+// the api package).
+type BufferSink interface {
+	Record(time, level, msg string, fields map[string]string)
 }
 
 // New builds a *slog.Logger from cfg. It installs a handler that automatically
@@ -99,7 +109,11 @@ func New(cfg Config) *slog.Logger {
 		base = slog.NewJSONHandler(out, opts)
 	}
 
-	return slog.New(applySampling(&correlationHandler{inner: base}, cfg))
+	var wrapped slog.Handler = &correlationHandler{inner: base}
+	if cfg.Buffer != nil {
+		wrapped = &bufferHandler{inner: wrapped, buf: cfg.Buffer}
+	}
+	return slog.New(applySampling(wrapped, cfg))
 }
 
 // applySampling wraps h with a SamplingHandler when cfg.Sampling is set, using
@@ -174,4 +188,38 @@ func (h *correlationHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 func (h *correlationHandler) WithGroup(name string) slog.Handler {
 	return &correlationHandler{inner: h.inner.WithGroup(name)}
+}
+
+// bufferHandler tees every record to a BufferSink (the in-memory log viewer)
+// in addition to the wrapped handler.
+type bufferHandler struct {
+	inner slog.Handler
+	buf   BufferSink
+	attrs []slog.Attr
+}
+
+func (h *bufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.inner.Enabled(ctx, level)
+}
+
+func (h *bufferHandler) Handle(ctx context.Context, r slog.Record) error {
+	fields := map[string]string{}
+	for _, a := range h.attrs {
+		fields[a.Key] = a.Value.String()
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		fields[a.Key] = a.Value.String()
+		return true
+	})
+	h.buf.Record(r.Time.Format("15:04:05"), r.Level.String(), r.Message, fields)
+	return h.inner.Handle(ctx, r)
+}
+
+func (h *bufferHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	merged := append(append([]slog.Attr{}, h.attrs...), attrs...)
+	return &bufferHandler{inner: h.inner.WithAttrs(attrs), buf: h.buf, attrs: merged}
+}
+
+func (h *bufferHandler) WithGroup(name string) slog.Handler {
+	return &bufferHandler{inner: h.inner.WithGroup(name), buf: h.buf, attrs: h.attrs}
 }

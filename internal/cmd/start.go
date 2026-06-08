@@ -139,8 +139,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		return os.Remove(pidfile)
 	})
 
+	// In-memory log ring buffer feeding GET /api/logs (the TUI log viewer).
+	logBuffer := api.NewLogBuffer(1000)
+	apiSrv.SetLogBuffer(logBuffer)
+
 	// Re-derive the logger from the loaded config now that observability
-	// settings (level, sink, file, sampling) are known.
+	// settings (level, sink, file, sampling) are known. Tee records into the
+	// ring buffer too.
 	format := logger.FormatText
 	if flags.jsonLog {
 		format = logger.FormatJSON
@@ -151,6 +156,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		Sink:     logger.Sink(cfg.Observability.LogSink),
 		Path:     cfg.Observability.LogFile,
 		Sampling: cfg.Observability.LogSampling,
+		Buffer:   &logBufferAdapter{buf: logBuffer},
 	})
 
 	// --- secrets: validate declared keys, open store, load injectable env ---
@@ -858,6 +864,14 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		return nil
 	}
 	return rt
+}
+
+// logBufferAdapter bridges *api.LogBuffer to logger.BufferSink so the logger
+// can tee records into the ring buffer without pkg/logger importing api.
+type logBufferAdapter struct{ buf *api.LogBuffer }
+
+func (a *logBufferAdapter) Record(t, level, msg string, fields map[string]string) {
+	a.buf.Write(api.LogEntry{Time: t, Level: level, Msg: msg, Fields: fields})
 }
 
 // agentRuntimeAdapter adapts *agents.Runtime to the api.AgentRuntime interface,

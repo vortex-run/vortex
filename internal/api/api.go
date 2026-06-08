@@ -82,6 +82,8 @@ type Server struct {
 	studioHandler http.Handler
 	// forgeRuntime backs the /api/forge endpoints. Optional; nil yields 503.
 	forgeRuntime ForgeRuntime
+	// logBuffer backs GET /api/logs (recent structured log lines). Optional.
+	logBuffer *LogBuffer
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -257,6 +259,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/forge/build", s.requireAPIKey(http.HandlerFunc(s.handleForgeBuild)))
 	mux.Handle("GET /api/forge/status/{id}", s.requireAPIKey(http.HandlerFunc(s.handleForgeStatus)))
 	mux.Handle("GET /api/forge/jobs", s.requireAPIKey(http.HandlerFunc(s.handleForgeJobs)))
+
+	// Recent structured logs (for the TUI log viewer), auth-gated.
+	mux.Handle("GET /api/logs", s.requireAPIKey(http.HandlerFunc(s.handleLogs)))
 
 	// Messaging webhooks (M11): no API-key auth (each verifies its own platform
 	// signature), per-IP rate limited. Both GET (WhatsApp verification) and POST
