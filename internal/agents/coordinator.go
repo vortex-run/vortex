@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // AIGateway is the interface the coordinator uses to reach a language model. It
@@ -71,12 +73,22 @@ type BuildAppFunc func(ctx context.Context, userMsg, sessionID string) (string, 
 
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
-	Bus       *Bus
-	Tools     *SandboxedToolRegistry
-	AIGateway AIGateway
-	MaxAgents int          // concurrent sub-agent limit (default 8)
-	Approval  ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
-	BuildApp  BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
+	Bus        *Bus
+	Tools      *SandboxedToolRegistry
+	LocalTools *ToolRegistry // local FS + terminal tools (real machine access)
+	AIGateway  AIGateway
+	MaxAgents  int          // concurrent sub-agent limit (default 8)
+	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
+	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
+	WorkingDir string       // directory relative paths resolve against
+}
+
+// pendingApproval holds a tool action awaiting the user's approve/reject via
+// ApproveAction (e.g. the TUI's [Y]/[N]).
+type pendingApproval struct {
+	tool   string
+	params map[string]any
+	result chan bool
 }
 
 // Coordinator is the single user-facing agent. It classifies user messages,
@@ -86,9 +98,13 @@ type Coordinator struct {
 	*BaseAgent
 	cfg CoordinatorConfig
 
-	mu     sync.Mutex
-	active map[string]Agent
+	mu      sync.Mutex
+	active  map[string]Agent
+	pending map[string]*pendingApproval // session → action awaiting approval
 }
+
+// WorkingDir returns the directory the agent resolves relative paths against.
+func (c *Coordinator) WorkingDir() string { return c.cfg.WorkingDir }
 
 // coordinatorName is the reserved name of the coordinator on the bus.
 const coordinatorName = "coordinator"
@@ -112,8 +128,12 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 			Name: coordinatorName, Type: TypePersistent,
 			Description: "user-facing coordinator",
 		}),
-		cfg:    cfg,
-		active: make(map[string]Agent),
+		cfg:     cfg,
+		active:  make(map[string]Agent),
+		pending: make(map[string]*pendingApproval),
+	}
+	if c.cfg.WorkingDir == "" {
+		c.cfg.WorkingDir, _ = os.Getwd()
 	}
 	return c, nil
 }
@@ -141,6 +161,192 @@ func (c *Coordinator) RunTool(ctx context.Context, name string, params map[strin
 	}
 	// Approved: re-run the command without the approval gate.
 	return c.cfg.Tools.ExecuteApproved(ctx, name, params)
+}
+
+// localApprovalTimeout bounds how long a local-tool action waits for the user's
+// approve/reject before it is treated as rejected (fail-safe).
+const localApprovalTimeout = 10 * time.Minute
+
+// ExecuteLocalTool runs a local FS/terminal tool, streaming human-readable
+// progress lines via emit (each becomes a chat message). Read-only tools run
+// immediately; mutating tools that return an *ApprovalError are routed for
+// approval — via the Approval callback if set, otherwise via a session-keyed
+// pending request resolved by ApproveAction (the TUI [Y]/[N]). If NEITHER an
+// approver nor a pending resolver can grant approval, the action is DENIED
+// (fail-safe — never auto-executed).
+func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string, params map[string]any, emit func(string)) (any, error) {
+	if c.cfg.LocalTools == nil {
+		return nil, fmt.Errorf("agents: no local tools configured")
+	}
+	tool, err := c.cfg.LocalTools.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	emit(toolStartLine(name, params))
+
+	result, err := tool.Execute(ctx, params)
+
+	var ae *ApprovalError
+	if !errors.As(err, &ae) {
+		if err != nil {
+			emit("⚠ " + err.Error())
+			return nil, err
+		}
+		emit(toolDoneLine(name, result))
+		return result, nil
+	}
+
+	// Approval required — surface the preview, then obtain a decision.
+	emit("[APPROVAL_REQUIRED] " + ae.Request.Description)
+	if ae.Request.Preview != "" {
+		emit(ae.Request.Preview)
+	}
+	approved := c.awaitApproval(ctx, session, ae.Request)
+	if !approved {
+		emit("✗ Action rejected by user")
+		return nil, fmt.Errorf("agents: action rejected by user")
+	}
+
+	// Re-run with the approval gate cleared.
+	approvedResult, aerr := executeApprovedLocal(ctx, tool, params)
+	if aerr != nil {
+		emit("⚠ " + aerr.Error())
+		return nil, aerr
+	}
+	emit(toolDoneLine(name, approvedResult))
+	return approvedResult, nil
+}
+
+// awaitApproval resolves a pending action: it prefers the synchronous Approval
+// callback (Telegram/inline); otherwise it registers a session-keyed pending
+// request that ApproveAction resolves, blocking up to localApprovalTimeout. With
+// neither available it returns false (deny).
+func (c *Coordinator) awaitApproval(ctx context.Context, session string, req ApprovalRequest) bool {
+	if c.cfg.Approval != nil {
+		return c.cfg.Approval(ctx, req)
+	}
+	p := &pendingApproval{tool: req.Tool, params: req.Params, result: make(chan bool, 1)}
+	c.mu.Lock()
+	c.pending[session] = p
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, session)
+		c.mu.Unlock()
+	}()
+
+	timer := time.NewTimer(localApprovalTimeout)
+	defer timer.Stop()
+	select {
+	case ok := <-p.result:
+		return ok
+	case <-timer.C:
+		return false // timeout → deny
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// ApproveAction resolves a pending approval for a session (called by the
+// /api/agents/approve handler). It returns true when a pending action matched.
+func (c *Coordinator) ApproveAction(session string, approved bool) bool {
+	c.mu.Lock()
+	p, ok := c.pending[session]
+	c.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case p.result <- approved:
+	default:
+	}
+	return true
+}
+
+// HasPendingApproval reports whether a session has an action awaiting approval.
+func (c *Coordinator) HasPendingApproval(session string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.pending[session]
+	return ok
+}
+
+// executeApprovedLocal re-runs a local mutating tool with its RequireApproval
+// flag cleared.
+func executeApprovedLocal(ctx context.Context, tool Tool, params map[string]any) (any, error) {
+	switch tl := tool.(type) {
+	case WriteLocalFileTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
+	case EditFileTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
+	case RunTerminalTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
+	case CreateProjectTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
+	default:
+		return tool.Execute(ctx, params) // read-only tool; no gate
+	}
+}
+
+// toolStartLine renders the "starting" chat line for a tool action.
+func toolStartLine(name string, params map[string]any) string {
+	switch name {
+	case "list_directory":
+		return "📂 Listing " + strParamOr(params, "path", ".")
+	case "read_file":
+		return "📁 Reading file: " + strParamOr(params, "path", "")
+	case "write_file":
+		return "📝 Writing file: " + strParamOr(params, "path", "")
+	case "edit_file":
+		return "✏️ Editing file: " + strParamOr(params, "path", "")
+	case "run_terminal":
+		return "$ " + strParamOr(params, "command", "")
+	case "create_project":
+		return "📦 Creating project: " + strParamOr(params, "name", "")
+	default:
+		return "→ " + name
+	}
+}
+
+// toolDoneLine renders the "done" chat line for a tool action.
+func toolDoneLine(name string, result any) string {
+	m, _ := result.(map[string]any)
+	switch name {
+	case "read_file":
+		if sz, ok := m["size"].(int); ok {
+			return fmt.Sprintf("✓ File read (%d bytes)", sz)
+		}
+	case "write_file":
+		if n, ok := m["bytes_written"].(int); ok {
+			return fmt.Sprintf("✓ File created (%d bytes)", n)
+		}
+	case "edit_file":
+		return "✓ File edited"
+	case "run_terminal":
+		if code, ok := m["exit_code"].(int); ok {
+			out, _ := m["stdout"].(string)
+			return strings.TrimRight(out, "\n") + fmt.Sprintf("\n✓ Command completed (exit %d)", code)
+		}
+	case "create_project":
+		if files, ok := m["files"].([]string); ok {
+			return "✓ Project created: " + strings.Join(files, ", ")
+		}
+	case "list_directory":
+		return "✓ Directory listed"
+	}
+	return "✓ Done"
+}
+
+// strParamOr extracts a string param or returns def.
+func strParamOr(params map[string]any, key, def string) string {
+	if v, ok := params[key].(string); ok && v != "" {
+		return v
+	}
+	return def
 }
 
 // HandleMessage is the main entry point for a user message. It classifies the
