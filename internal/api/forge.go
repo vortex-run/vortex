@@ -9,11 +9,14 @@ import (
 // ForgeJob mirrors a forge.Job for the API (kept here so api stays decoupled
 // from the forge package).
 type ForgeJob struct {
-	ID       string `json:"id"`
-	Message  string `json:"message"`
-	State    string `json:"state"`
-	Progress string `json:"progress"`
-	Error    string `json:"error,omitempty"`
+	ID              string   `json:"id"`
+	Message         string   `json:"message"`
+	State           string   `json:"state"`
+	Progress        string   `json:"progress"`
+	ProgressHistory []string `json:"progress_history,omitempty"`
+	Result          string   `json:"result,omitempty"`
+	DurationMs      int64    `json:"duration_ms,omitempty"`
+	Error           string   `json:"error,omitempty"`
 }
 
 // ForgeRuntime is the subset of the forge job manager the API needs. The wiring

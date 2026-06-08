@@ -961,7 +961,11 @@ func (a *forgeRuntimeAdapter) Get(id string) (api.ForgeJob, bool) {
 	if !ok {
 		return api.ForgeJob{}, false
 	}
-	return api.ForgeJob{ID: j.ID, Message: j.Message, State: string(j.State), Progress: j.Progress, Error: j.Error}, true
+	return api.ForgeJob{
+		ID: j.ID, Message: j.Message, State: string(j.State), Progress: j.Progress,
+		ProgressHistory: j.ProgressHistory, Result: j.Result, DurationMs: j.DurationMs,
+		Error: j.Error,
+	}, true
 }
 
 func (a *forgeRuntimeAdapter) List() []api.ForgeJob {

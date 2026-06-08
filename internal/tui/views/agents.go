@@ -2,6 +2,7 @@ package views
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ type AgentsModel struct {
 	sessionID  string
 	awaiting   bool   // an approval is pending (awaiting Y/N)
 	approvalID string // session the pending approval belongs to
+	forgeJob   string // active forge job id being polled ("" = none)
+	forgeSeen  int    // count of progress-history lines already shown
 	width      int
 	height     int
 }
@@ -73,6 +76,36 @@ func NewAgents(client *tui.Client) AgentsModel {
 type agentResponse struct {
 	content string
 	err     error
+}
+
+// forgeProgress carries a poll of a forge job's status.
+type forgeProgress struct {
+	job *tui.ForgeJobData
+	err error
+}
+
+// jobIDPattern extracts a forge job id from a reply line like "Job ID: job-abc".
+var jobIDPattern = regexp.MustCompile(`Job ID:\s*(job-[A-Za-z0-9_-]+|[A-Za-z0-9]{8,})`)
+
+// extractJobID returns the forge job id mentioned in s, or "".
+func extractJobID(s string) string {
+	if m := jobIDPattern.FindStringSubmatch(s); len(m) == 2 {
+		return m[1]
+	}
+	return ""
+}
+
+// pollForge schedules a single status poll of the active forge job after 2s.
+func (m AgentsModel) pollForge() tea.Cmd {
+	c := m.client
+	job := m.forgeJob
+	if c == nil || job == "" {
+		return nil
+	}
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		d, err := c.ForgeStatus(job)
+		return forgeProgress{job: d, err: err}
+	})
 }
 
 // Init starts the spinner ticking.
@@ -125,7 +158,16 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		m.input.Focus()
+		// If the reply started a forge build, begin polling its progress.
+		if id := extractJobID(content); id != "" {
+			m.forgeJob = id
+			m.forgeSeen = 0
+			return m, m.pollForge()
+		}
 		return m, nil
+
+	case forgeProgress:
+		return m.handleForgeProgress(msg)
 
 	case approvalResult:
 		m.awaiting = false
@@ -220,6 +262,48 @@ func (m AgentsModel) renderMessages() string {
 	}
 	return b.String()
 }
+
+// handleForgeProgress appends any new progress lines and keeps polling until the
+// job reaches a terminal state.
+func (m AgentsModel) handleForgeProgress(msg forgeProgress) (tea.Model, tea.Cmd) {
+	if msg.err != nil || msg.job == nil {
+		m.forgeJob = "" // stop polling on error
+		return m, nil
+	}
+	// Append only history lines we haven't shown yet.
+	for i := m.forgeSeen; i < len(msg.job.ProgressHistory); i++ {
+		m.messages = append(m.messages, ChatMessage{
+			Role: "agent", Content: "⠸ " + msg.job.ProgressHistory[i], Timestamp: time.Now(), JobID: msg.job.ID,
+		})
+	}
+	m.forgeSeen = len(msg.job.ProgressHistory)
+
+	switch msg.job.State {
+	case "complete":
+		summary := msg.job.Result
+		if summary == "" {
+			summary = "Build complete"
+		}
+		if msg.job.DurationMs > 0 {
+			summary += fmt.Sprintf(" (%.1fs)", float64(msg.job.DurationMs)/1000)
+		}
+		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: "✓ " + summary, Timestamp: time.Now()})
+		m.forgeJob = ""
+	case "failed":
+		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: "✗ Build failed: " + msg.job.Error, Timestamp: time.Now()})
+		m.forgeJob = ""
+	}
+
+	m.viewport.SetContent(m.renderMessages())
+	m.viewport.GotoBottom()
+	if m.forgeJob != "" {
+		return m, m.pollForge() // keep polling
+	}
+	return m, nil
+}
+
+// ForgePolling reports whether a forge job is being polled (for tests).
+func (m AgentsModel) ForgePolling() bool { return m.forgeJob != "" }
 
 // approvalResult is emitted after an approve/reject decision is sent.
 type approvalResult struct {

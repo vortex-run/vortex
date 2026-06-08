@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
 )
@@ -57,10 +58,14 @@ type ForgeConfig struct {
 type Forge struct {
 	cfg ForgeConfig
 
-	mu      sync.Mutex
-	active  bool
-	current string
-	prog    string
+	mu       sync.Mutex
+	active   bool
+	current  string
+	prog     string
+	history  []string  // every progress step, in order
+	result   string    // final result summary (set on completion)
+	started  time.Time // build start, for duration
+	duration int64     // final duration in ms (set on completion)
 }
 
 // NewForge constructs the orchestrator.
@@ -79,26 +84,45 @@ func NewForge(cfg ForgeConfig) (*Forge, error) {
 //
 //nolint:revive // ForgeStatus name is mandated by the M13 spec
 type ForgeStatus struct {
-	Active       bool   `json:"active"`
-	CurrentBuild string `json:"current_build"`
-	Progress     string `json:"progress"`
+	Active          bool     `json:"active"`
+	CurrentBuild    string   `json:"current_build"`
+	Progress        string   `json:"progress"`
+	ProgressHistory []string `json:"progress_history"`
+	Result          string   `json:"result"`
+	DurationMs      int64    `json:"duration_ms"`
 }
 
 // Status returns a snapshot of the current build state.
 func (f *Forge) Status() ForgeStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return ForgeStatus{Active: f.active, CurrentBuild: f.current, Progress: f.prog}
+	hist := append([]string(nil), f.history...)
+	return ForgeStatus{
+		Active: f.active, CurrentBuild: f.current, Progress: f.prog,
+		ProgressHistory: hist, Result: f.result, DurationMs: f.duration,
+	}
 }
 
-// setProgress updates the progress field and invokes progressFn.
+// setProgress updates the progress field, appends to the history, and invokes
+// progressFn.
 func (f *Forge) setProgress(progressFn func(string), msg string) {
 	f.mu.Lock()
 	f.prog = msg
+	f.history = append(f.history, msg)
 	f.mu.Unlock()
 	if progressFn != nil {
 		progressFn(msg)
 	}
+}
+
+// setResult records the final result summary + duration.
+func (f *Forge) setResult(result string) {
+	f.mu.Lock()
+	f.result = result
+	if !f.started.IsZero() {
+		f.duration = time.Since(f.started).Milliseconds()
+	}
+	f.mu.Unlock()
 }
 
 // maxBuildCycles bounds the QA fix→rebuild loop.
@@ -116,6 +140,10 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 	}
 	f.active = true
 	f.current = userMsg
+	f.history = nil
+	f.result = ""
+	f.duration = 0
+	f.started = time.Now()
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()
@@ -207,6 +235,7 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 		return fmt.Errorf("forge: build did not pass QA after %d cycles (nothing delivered)", maxBuildCycles)
 	}
 	f.setProgress(progressFn, "✅ Done")
+	f.setResult(fmt.Sprintf("Build complete: %s → %s", intent.Description, output.ArtifactPath))
 	return nil
 }
 
