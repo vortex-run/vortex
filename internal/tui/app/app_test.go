@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -97,4 +98,14 @@ func connectedApp(t *testing.T) *App {
 	a.activeView = ViewOverview
 	a.selected = 0
 	return a
+}
+
+func TestApp_TopBarShowsWorkingDir(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	a.workingDir = "/tmp/details"
+	a.health = &tui.HealthData{Version: "v1", ClusterName: "c1", Uptime: "1h"}
+	if !strings.Contains(a.View(), "/tmp/details") {
+		t.Errorf("top bar should show the working dir:\n%s", a.View())
+	}
 }

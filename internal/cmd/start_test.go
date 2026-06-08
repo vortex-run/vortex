@@ -54,3 +54,32 @@ func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 		t.Errorf("pidfile should be removed after shutdown, stat err = %v", err)
 	}
 }
+
+func TestResolveWorkingDir_DefaultsToCwd(t *testing.T) {
+	agentWorkingDir = "" // reset
+	wd := resolveWorkingDir()
+	if wd == "" || wd == "." {
+		// On any normal system os.Getwd works; "." only on error.
+		t.Logf("resolveWorkingDir returned %q", wd)
+	}
+	cwd, _ := os.Getwd()
+	if wd != cwd && wd != "." {
+		t.Errorf("resolveWorkingDir = %q, want cwd %q", wd, cwd)
+	}
+}
+
+func TestResolveWorkingDir_HonorsOverride(t *testing.T) {
+	orig := agentWorkingDir
+	t.Cleanup(func() { agentWorkingDir = orig })
+	agentWorkingDir = "/tmp/details"
+	if got := resolveWorkingDir(); got != "/tmp/details" {
+		t.Errorf("resolveWorkingDir = %q, want the override", got)
+	}
+}
+
+func TestStartCommand_HasCwdFlag(t *testing.T) {
+	c := newStartCommand()
+	if c.Flags().Lookup("cwd") == nil {
+		t.Error("start should have a --cwd flag")
+	}
+}
