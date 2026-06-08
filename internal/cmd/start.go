@@ -987,6 +987,18 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			Models: []string{"llama3"}, Priority: 2,
 		})
 	}
+	if k := os.Getenv("VORTEX_DEEPSEEK_KEY"); k != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderDeepSeek, APIKey: k,
+			Models: []string{"deepseek-chat"}, Priority: 2,
+		})
+	}
+	if k := os.Getenv("VORTEX_GEMINI_KEY"); k != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderGemini, APIKey: k,
+			Models: []string{"gemini-1.5-flash"}, Priority: 3,
+		})
+	}
 	if len(providers) > 0 {
 		gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
 		if err != nil {

@@ -14,9 +14,11 @@ import (
 
 // Provider names.
 const (
-	ProviderClaude = "claude"
-	ProviderOpenAI = "openai"
-	ProviderOllama = "ollama"
+	ProviderClaude   = "claude"
+	ProviderOpenAI   = "openai"
+	ProviderOllama   = "ollama"
+	ProviderDeepSeek = "deepseek"
+	ProviderGemini   = "gemini"
 )
 
 // AIProvider describes one upstream model provider.
@@ -117,9 +119,69 @@ func (g *AIGateway) callProvider(ctx context.Context, p AIProvider, prompt, syst
 		return g.callOpenAI(ctx, p, prompt, systemPrompt)
 	case ProviderOllama:
 		return g.callOllama(ctx, p, prompt, systemPrompt)
+	case ProviderDeepSeek:
+		return g.callDeepSeek(ctx, p, prompt, systemPrompt)
+	case ProviderGemini:
+		return g.callGemini(ctx, p, prompt, systemPrompt)
 	default:
 		return "", 0, fmt.Errorf("messaging: unknown provider %q", p.Name)
 	}
+}
+
+// callDeepSeek calls DeepSeek's OpenAI-compatible chat completions API. It
+// reuses the OpenAI request/response shape against DeepSeek's endpoint.
+func (g *AIGateway) callDeepSeek(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
+	if p.Endpoint == "" {
+		p.Endpoint = "https://api.deepseek.com"
+	}
+	text, tokens, err := g.callOpenAI(ctx, p, prompt, systemPrompt)
+	if err != nil {
+		return "", 0, fmt.Errorf("deepseek: %w", err)
+	}
+	return text, tokens, nil
+}
+
+// callGemini calls Google's Gemini generateContent REST API. The API key is a
+// query parameter; the system prompt goes in systemInstruction.
+func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
+	base := p.Endpoint
+	if base == "" {
+		base = "https://generativelanguage.googleapis.com"
+	}
+	model := g.modelOf(p)
+	if model == "" {
+		model = "gemini-1.5-flash"
+	}
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, model, p.APIKey)
+
+	var out struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		UsageMetadata struct {
+			TotalTokenCount int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	_, err := g.doJSON(ctx, url, nil, map[string]any{
+		"contents": []map[string]any{
+			{"parts": []map[string]any{{"text": prompt}}},
+		},
+		"systemInstruction": map[string]any{
+			"parts": []map[string]any{{"text": systemPrompt}},
+		},
+	}, &out)
+	if err != nil {
+		return "", 0, fmt.Errorf("gemini: %w", err)
+	}
+	text := ""
+	if len(out.Candidates) > 0 && len(out.Candidates[0].Content.Parts) > 0 {
+		text = out.Candidates[0].Content.Parts[0].Text
+	}
+	return text, out.UsageMetadata.TotalTokenCount, nil
 }
 
 // doJSON posts a JSON body to url with the given headers and decodes the
