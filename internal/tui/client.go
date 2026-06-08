@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -355,16 +356,29 @@ func (c *Client) IsConnected() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// LoadAPIKey resolves an API key from VORTEX_API_KEY, then the apikeys.json
-// store (first key's id is not usable; this returns a configured key when one
-// exists in the env). It returns "" when none is found.
+// APIKeyFilePath returns the path where `vortex setup` persists the plaintext
+// API key for the TUI to read back: <user-config>/vortex/tui-key. The apikeys
+// store only holds bcrypt hashes (the raw secret is unrecoverable from it), so
+// the setup wizard writes the secret here once for the local dashboard/TUI.
+func APIKeyFilePath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "vortex", "tui-key")
+}
+
+// LoadAPIKey resolves an API key from VORTEX_API_KEY, then the persisted
+// setup key file (APIKeyFilePath). It returns "" when none is found.
 func (c *Client) LoadAPIKey() string {
 	if k := os.Getenv("VORTEX_API_KEY"); k != "" {
 		return k
 	}
-	// The on-disk key store holds hashes, not recoverable secrets, so we cannot
-	// reconstruct a usable key from it; the env var is the supported source.
-	// (A future enhancement could persist the setup-created key.)
+	if data, err := os.ReadFile(APIKeyFilePath()); err == nil {
+		if k := strings.TrimSpace(string(data)); k != "" {
+			return k
+		}
+	}
 	return ""
 }
 

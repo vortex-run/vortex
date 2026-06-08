@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -170,5 +172,39 @@ func TestParsePrometheus(t *testing.T) {
 	}
 	if d.ClusterMembers != 2 {
 		t.Errorf("cluster_members = %v, want 2", d.ClusterMembers)
+	}
+}
+
+func TestClient_LoadAPIKeyFromFile(t *testing.T) {
+	// No env var; key only in the persisted setup file.
+	t.Setenv("VORTEX_API_KEY", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir (Linux)
+	t.Setenv("AppData", t.TempDir())         // redirect on Windows
+
+	path := APIKeyFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("file-key-123\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClient(ClientConfig{})
+	if got := c.LoadAPIKey(); got != "file-key-123" {
+		t.Errorf("LoadAPIKey from file = %q, want file-key-123", got)
+	}
+}
+
+func TestClient_LoadAPIKeyEnvBeatsFile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	path := APIKeyFilePath()
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	_ = os.WriteFile(path, []byte("file-key"), 0o600)
+
+	t.Setenv("VORTEX_API_KEY", "env-key")
+	c := NewClient(ClientConfig{})
+	if got := c.LoadAPIKey(); got != "env-key" {
+		t.Errorf("env var should win over file: got %q", got)
 	}
 }

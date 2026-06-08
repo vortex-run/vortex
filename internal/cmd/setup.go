@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/chacha20"
 
 	"github.com/vortex-run/vortex/internal/auth"
+	"github.com/vortex-run/vortex/internal/tui"
 )
 
 // AIProviderConfig is the persisted first-run AI provider selection. The API
@@ -284,6 +285,14 @@ func printAPIKey(out io.Writer) {
 	}
 	if serr := store.Save(path); serr != nil {
 		fmt.Fprintf(out, "⚠ Could not persist API key store: %v\n", serr)
+	}
+	// Persist the plaintext secret where the TUI can read it back (the store
+	// only keeps a bcrypt hash). 0600, user-config dir.
+	keyPath := tui.APIKeyFilePath()
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err == nil {
+		if werr := os.WriteFile(keyPath, []byte(secret), 0o600); werr != nil {
+			fmt.Fprintf(out, "⚠ Could not save TUI key file: %v\n", werr)
+		}
 	}
 	fmt.Fprintln(out, apiKeyBanner(secret))
 }
