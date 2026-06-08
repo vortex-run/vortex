@@ -19,9 +19,10 @@ import (
 
 // stubRuntime is a fake AgentRuntime for API tests.
 type stubRuntime struct {
-	response string
-	stats    AgentRuntimeStats
-	subErr   error
+	response     string
+	stats        AgentRuntimeStats
+	subErr       error
+	approveMatch bool // value returned by Approve
 }
 
 func (s stubRuntime) Submit(_ context.Context, _, _ string) (<-chan string, error) {
@@ -35,6 +36,8 @@ func (s stubRuntime) Submit(_ context.Context, _, _ string) (<-chan string, erro
 }
 
 func (s stubRuntime) Stats() AgentRuntimeStats { return s.stats }
+
+func (s stubRuntime) Approve(string, bool) bool { return s.approveMatch }
 
 // newAgentTestServer starts a live management server with the agent runtime
 // wired, returning its address and a cleanup func.
@@ -237,5 +240,56 @@ func TestWantsSSE(t *testing.T) {
 		if got := wantsSSE(req); got != c.want {
 			t.Errorf("wantsSSE(%q) = %v, want %v", c.accept, got, c.want)
 		}
+	}
+}
+
+func TestAgentApprove_Resolves(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{approveMatch: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/approve",
+		strings.NewReader(`{"session_id":"s1","approved":true}`))
+	req.Header.Set("X-API-Key", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var body struct {
+		Resolved bool `json:"resolved"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if !body.Resolved {
+		t.Error("resolved should be true")
+	}
+}
+
+func TestAgentApprove_NoPending404(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{approveMatch: false})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/approve",
+		strings.NewReader(`{"session_id":"ghost","approved":true}`))
+	req.Header.Set("X-API-Key", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("no pending approval = %d, want 404", rec.Code)
+	}
+}
+
+func TestAgentApprove_RequiresSession(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/approve",
+		strings.NewReader(`{"approved":true}`))
+	req.Header.Set("X-API-Key", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing session_id = %d, want 400", rec.Code)
+	}
+}
+
+func TestAgentApprove_RequiresAuth(t *testing.T) {
+	s, _ := newAuthedAgentServer(t, stubRuntime{approveMatch: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/approve",
+		strings.NewReader(`{"session_id":"s1","approved":true}`))
+	req.RemoteAddr = "127.0.0.1:5555" // loopback must NOT bypass
+	rec := serve(s, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("approve without key = %d, want 401", rec.Code)
 	}
 }
