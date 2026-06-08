@@ -125,6 +125,24 @@ func (m *JobManager) Get(id string) (Job, bool) {
 	return *j, true
 }
 
+// SessionClarifying reports whether the most recent job for sessionID is in the
+// needs-clarification state (so the coordinator treats the next message as an
+// answer, not a new build request).
+func (m *JobManager) SessionClarifying(sessionID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var latest *Job
+	for _, j := range m.jobs {
+		if j.SessionID != sessionID {
+			continue
+		}
+		if latest == nil || j.CreatedAt.After(latest.CreatedAt) {
+			latest = j
+		}
+	}
+	return latest != nil && latest.State == JobClarify
+}
+
 // List returns all jobs, newest first.
 func (m *JobManager) List() []Job {
 	m.mu.Lock()

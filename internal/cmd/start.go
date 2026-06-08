@@ -330,7 +330,11 @@ func runStart(ctx context.Context, pidfile string) error {
 		apiSrv.SetForgeRuntime(&forgeRuntimeAdapter{jm: forgeJobs})
 	}
 
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir())
+	var clarifying func(string) bool
+	if forgeJobs != nil {
+		clarifying = forgeJobs.SessionClarifying
+	}
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying)
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -833,7 +837,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying func(string) bool) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -863,14 +867,15 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	}
 
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
-		Bus:        bus,
-		Tools:      sandboxed,
-		LocalTools: localRegistry,
-		AIGateway:  gateway,
-		MaxAgents:  8,
-		Approval:   approval,
-		BuildApp:   buildApp,
-		WorkingDir: workingDir,
+		Bus:               bus,
+		Tools:             sandboxed,
+		LocalTools:        localRegistry,
+		AIGateway:         gateway,
+		MaxAgents:         8,
+		Approval:          approval,
+		BuildApp:          buildApp,
+		SessionClarifying: sessionClarifying,
+		WorkingDir:        workingDir,
 	})
 	if err != nil {
 		log.Warn("agent runtime disabled: coordinator init failed", "err", err)

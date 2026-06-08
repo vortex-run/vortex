@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestCoordinator(t *testing.T, gw AIGateway) *Coordinator {
@@ -601,5 +602,95 @@ func TestApproveAction_RunTerminalReturnsOutput(t *testing.T) {
 	}
 	if !strings.Contains(transcript, "vortexout") {
 		t.Errorf("approve transcript should contain command output: %q", transcript)
+	}
+}
+
+func TestSession_ClarificationContinuesSameBuild(t *testing.T) {
+	var submitted []string
+	clarifying := true // simulate forge in JobClarify state after the first build
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{IntentReply: string(IntentBuildApp)},
+		BuildApp: func(_ context.Context, msg, _ string) (string, error) {
+			submitted = append(submitted, msg)
+			return "🛠 Build started. Job ID: job-1", nil
+		},
+		SessionClarifying: func(string) bool { return clarifying },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn 1: the build request → dispatched as a new build.
+	if _, err := c.HandleMessage(context.Background(), "design a calculator app using flutter", "s1"); err != nil {
+		t.Fatal(err)
+	}
+	// Turn 2: forge is clarifying → the answer must CONTINUE the same build with
+	// the original request + the answer, NOT start a fresh unrelated build.
+	if _, err := c.HandleMessage(context.Background(), "yes basic calculator with decimals", "s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(submitted) != 2 {
+		t.Fatalf("expected 2 submits, got %d: %v", len(submitted), submitted)
+	}
+	// The second submission must include BOTH the original request and the answer.
+	if !strings.Contains(submitted[1], "calculator app using flutter") ||
+		!strings.Contains(submitted[1], "basic calculator with decimals") {
+		t.Errorf("clarification submit should combine original + answer, got: %q", submitted[1])
+	}
+}
+
+func TestSession_NewRequestAfterClarificationResolved(t *testing.T) {
+	clarifying := false // job no longer clarifying (e.g. completed)
+	var submitted []string
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{IntentReply: string(IntentBuildApp)},
+		BuildApp: func(_ context.Context, msg, _ string) (string, error) {
+			submitted = append(submitted, msg)
+			return "ok", nil
+		},
+		SessionClarifying: func(string) bool { return clarifying },
+	})
+	_, _ = c.HandleMessage(context.Background(), "build a go api", "s1")
+	// Not clarifying → a second build message is a NEW request, not an answer.
+	_, _ = c.HandleMessage(context.Background(), "build a python script", "s1")
+	if len(submitted) != 2 {
+		t.Fatalf("expected 2 submits, got %v", submitted)
+	}
+	// The second submit must NOT be combined with the first (fresh request).
+	if strings.Contains(submitted[1], "go api") {
+		t.Errorf("a new request should not be merged with the old one: %q", submitted[1])
+	}
+}
+
+func TestSession_PruneIdle(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	c.mu.Lock()
+	c.sessions["old"] = &SessionState{LastActivity: time.Now().Add(-2 * sessionTTL)}
+	c.sessions["fresh"] = &SessionState{LastActivity: time.Now()}
+	c.mu.Unlock()
+	c.pruneIdleSessions()
+	c.mu.Lock()
+	_, oldOK := c.sessions["old"]
+	_, freshOK := c.sessions["fresh"]
+	c.mu.Unlock()
+	if oldOK {
+		t.Error("idle session should be pruned")
+	}
+	if !freshOK {
+		t.Error("fresh session should be kept")
+	}
+}
+
+func TestSession_ClearSession(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	c.mu.Lock()
+	c.sessions["s1"] = &SessionState{LastActivity: time.Now()}
+	c.mu.Unlock()
+	c.ClearSession("s1")
+	if c.isAwaitingClarification("s1") {
+		t.Error("cleared session should not be awaiting")
 	}
 }

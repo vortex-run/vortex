@@ -87,7 +87,11 @@ type CoordinatorConfig struct {
 	MaxAgents  int          // concurrent sub-agent limit (default 8)
 	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
 	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
-	WorkingDir string       // directory relative paths resolve against
+	// SessionClarifying reports whether the most recent build for a session is
+	// awaiting clarifying answers (forge JobClarify state). When it returns true,
+	// the next message is treated as an answer, not a new request. Optional.
+	SessionClarifying func(sessionID string) bool
+	WorkingDir        string // directory relative paths resolve against
 }
 
 // pendingApproval holds a tool action awaiting the user's approve/reject via
@@ -103,6 +107,18 @@ type pendingApproval struct {
 	result   chan bool
 }
 
+// SessionState tracks per-conversation context so a multi-turn build (with
+// clarifying questions) continues the SAME job instead of restarting.
+type SessionState struct {
+	OriginalRequest       string    // the first build message in this session
+	AwaitingClarification bool      // forge asked questions; next msg is an answer
+	Answers               []string  // accumulated clarification answers
+	LastActivity          time.Time // for idle cleanup
+}
+
+// sessionTTL clears idle session state after this long.
+const sessionTTL = 10 * time.Minute
+
 // Coordinator is the single user-facing agent. It classifies user messages,
 // routes them to the appropriate mode handler, and supervises spawned
 // sub-agents. It implements Agent via an embedded BaseAgent.
@@ -110,9 +126,10 @@ type Coordinator struct {
 	*BaseAgent
 	cfg CoordinatorConfig
 
-	mu      sync.Mutex
-	active  map[string]Agent
-	pending map[string]*pendingApproval // session → action awaiting approval
+	mu       sync.Mutex
+	active   map[string]Agent
+	pending  map[string]*pendingApproval // session → action awaiting approval
+	sessions map[string]*SessionState    // session → conversation state
 }
 
 // WorkingDir returns the directory the agent resolves relative paths against.
@@ -140,9 +157,10 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 			Name: coordinatorName, Type: TypePersistent,
 			Description: "user-facing coordinator",
 		}),
-		cfg:     cfg,
-		active:  make(map[string]Agent),
-		pending: make(map[string]*pendingApproval),
+		cfg:      cfg,
+		active:   make(map[string]Agent),
+		pending:  make(map[string]*pendingApproval),
+		sessions: make(map[string]*SessionState),
 	}
 	if c.cfg.WorkingDir == "" {
 		c.cfg.WorkingDir, _ = os.Getwd()
@@ -395,16 +413,23 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
 	defer cancel()
 
+	c.pruneIdleSessions()
+
+	// If this session has a build awaiting clarification, this message is an
+	// ANSWER — continue the SAME build with the original request + the answer,
+	// instead of re-classifying it as a brand-new request (which would restart
+	// the job and re-ask the same questions).
+	if c.isAwaitingClarification(sessionID) {
+		return c.continueClarification(ctx, sessionID, userMsg)
+	}
+
 	// Rule-based fast path FIRST: simple file/terminal operations and slash
 	// commands route to local tools directly — no AI call, instant. Only fall
 	// back to the AI classifier when the rules don't match.
 	if intent := ruleClassify(userMsg); intent == IntentLocalFile {
 		return c.handleLocalFile(ctx, sessionID, userMsg)
 	} else if intent == IntentBuildApp {
-		if c.cfg.BuildApp != nil {
-			return c.cfg.BuildApp(ctx, userMsg, sessionID)
-		}
-		return c.modeStub("BUILD_APP"), nil
+		return c.dispatchBuild(ctx, sessionID, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -413,10 +438,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	case IntentGeneralQuestion:
 		return c.cfg.AIGateway.Complete(ctx, userMsg, answerSystemPrompt)
 	case IntentBuildApp:
-		if c.cfg.BuildApp != nil {
-			return c.cfg.BuildApp(ctx, userMsg, sessionID)
-		}
-		return c.modeStub("BUILD_APP"), nil
+		return c.dispatchBuild(ctx, sessionID, userMsg)
 	case IntentResearch:
 		return c.modeStub("RESEARCH"), nil
 	case IntentDevOpsCheck:
@@ -426,6 +448,79 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	default:
 		return "I'm not sure what you'd like me to do. Could you clarify whether you want me to build an app, research something, run a DevOps check, or answer a question?", nil
 	}
+}
+
+// dispatchBuild submits a fresh build request and records the session's
+// original request so a later clarification turn can continue it.
+func (c *Coordinator) dispatchBuild(ctx context.Context, sessionID, userMsg string) (string, error) {
+	if c.cfg.BuildApp == nil {
+		return c.modeStub("BUILD_APP"), nil
+	}
+	c.mu.Lock()
+	c.sessions[sessionID] = &SessionState{
+		OriginalRequest:       userMsg,
+		AwaitingClarification: true, // forge MAY ask; the live check governs next turn
+		LastActivity:          time.Now(),
+	}
+	c.mu.Unlock()
+	return c.cfg.BuildApp(ctx, userMsg, sessionID)
+}
+
+// continueClarification treats userMsg as an answer to the pending clarifying
+// questions: it resubmits the SAME build with the original request plus the
+// accumulated answers, so forge builds with full context instead of restarting.
+func (c *Coordinator) continueClarification(ctx context.Context, sessionID, answer string) (string, error) {
+	c.mu.Lock()
+	st := c.sessions[sessionID]
+	if st == nil {
+		c.mu.Unlock()
+		return c.dispatchBuild(ctx, sessionID, answer)
+	}
+	st.Answers = append(st.Answers, answer)
+	st.AwaitingClarification = false // answered; don't loop
+	st.LastActivity = time.Now()
+	combined := st.OriginalRequest + "\n\nAdditional details: " + strings.Join(st.Answers, "; ")
+	c.mu.Unlock()
+
+	if c.cfg.BuildApp == nil {
+		return c.modeStub("BUILD_APP"), nil
+	}
+	return c.cfg.BuildApp(ctx, combined, sessionID)
+}
+
+// isAwaitingClarification reports whether the session's build is awaiting an
+// answer. It trusts the live forge state (SessionClarifying) when available,
+// falling back to the stored flag.
+func (c *Coordinator) isAwaitingClarification(sessionID string) bool {
+	c.mu.Lock()
+	st, ok := c.sessions[sessionID]
+	c.mu.Unlock()
+	if !ok {
+		return false
+	}
+	if c.cfg.SessionClarifying != nil {
+		return c.cfg.SessionClarifying(sessionID)
+	}
+	return st.AwaitingClarification
+}
+
+// ClearSession drops a session's state (called when its job completes/fails).
+func (c *Coordinator) ClearSession(sessionID string) {
+	c.mu.Lock()
+	delete(c.sessions, sessionID)
+	c.mu.Unlock()
+}
+
+// pruneIdleSessions clears session state idle longer than sessionTTL.
+func (c *Coordinator) pruneIdleSessions() {
+	cutoff := time.Now().Add(-sessionTTL)
+	c.mu.Lock()
+	for id, st := range c.sessions {
+		if st.LastActivity.Before(cutoff) {
+			delete(c.sessions, id)
+		}
+	}
+	c.mu.Unlock()
 }
 
 // classify asks the AI gateway to classify the message, normalising the reply
