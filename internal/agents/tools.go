@@ -389,11 +389,19 @@ var DefaultAllowedCommands = []string{
 // It carries the full command so a human-in-the-loop approver can review it.
 var ErrApprovalRequired = errors.New("agents: command requires human approval")
 
-// ApprovalRequest describes a command awaiting human approval. It is the value
-// wrapped by an *ApprovalError so callers can extract the details.
+// ApprovalRequest describes an action awaiting human approval. It is the value
+// wrapped by an *ApprovalError so callers (the coordinator/approver) can render
+// a preview and decide. Command/Args describe a run_command; Tool/Description/
+// Preview describe the richer local-filesystem and terminal tools.
 type ApprovalRequest struct {
 	Command string
 	Args    []string
+
+	// Richer fields for the local FS / terminal tools (M-agent local access).
+	Tool        string         // e.g. "write_file", "run_terminal"
+	Description string         // one-line human summary
+	Preview     string         // diff / content / command preview to show
+	Params      map[string]any // the parameters to re-run with on approval
 }
 
 // ApprovalError wraps ErrApprovalRequired with the command details.
@@ -755,6 +763,21 @@ func RegisterBuiltins(registry *ToolRegistry, sandboxDir string, allowedCommands
 		SendMessageTool{Bus: bus, From: agentName},
 	}
 	for _, t := range tools {
+		if err := registry.Register(t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RegisterLocalTools registers the local filesystem + terminal tools (real
+// machine access, approval-gated) into registry, bound to cfg. These provide
+// list_directory/read_file (read-only) and write_file/edit_file/run_terminal/
+// create_project (approval-required). When mixed with RegisterBuiltins, register
+// local tools into a separate registry to avoid read_file/write_file name
+// collisions — the wiring (start.go) chooses one set.
+func RegisterLocalTools(registry *ToolRegistry, cfg LocalFSConfig) error {
+	for _, t := range NewLocalTools(cfg) {
 		if err := registry.Register(t); err != nil {
 			return err
 		}
