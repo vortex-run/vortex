@@ -474,3 +474,85 @@ type failingGateway struct{}
 func (failingGateway) Complete(context.Context, string, string) (string, error) {
 	return "", fmt.Errorf("AI must not be called for local-file intent")
 }
+
+// codegenGateway returns a fixed code body for any codegen prompt, and records
+// whether Complete was called (to prove generation ran BEFORE approval).
+type codegenGateway struct {
+	called *bool
+	body   string
+}
+
+func (g codegenGateway) Complete(_ context.Context, _ string, sys string) (string, error) {
+	if g.called != nil {
+		*g.called = true
+	}
+	if strings.Contains(strings.ToLower(sys), "code generator") {
+		return g.body, nil
+	}
+	return "GENERAL_QUESTION", nil
+}
+
+func TestHandleLocalFile_GeneratesContentBeforeApproval(t *testing.T) {
+	dir := t.TempDir()
+	reg := NewToolRegistry()
+	if err := RegisterLocalTools(reg, LocalFSConfig{Root: dir}); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	var captured ApprovalRequest
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:        NewBus(),
+		AIGateway:  codegenGateway{called: &called, body: "def add(a, b):\n    return a + b\n"},
+		LocalTools: reg,
+		WorkingDir: dir,
+		// Capture the approval request to assert the content is present.
+		Approval: func(_ context.Context, req ApprovalRequest) bool {
+			captured = req
+			return false // reject so nothing is written; we only inspect the box
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := c.HandleMessage(context.Background(),
+		"create a python calculator save it to "+filepath.Join(dir, "calc.py"), "s1")
+	if err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	if !called {
+		t.Fatal("AI codegen should have been called before the approval")
+	}
+	// The approval preview must contain the generated code, not a blank.
+	if !strings.Contains(captured.Preview, "def add") {
+		t.Errorf("approval preview should include generated content, got:\n%s", captured.Preview)
+	}
+	// The transcript should show the generating step.
+	if !strings.Contains(out, "Generating code") {
+		t.Errorf("transcript should show the generating step:\n%s", out)
+	}
+}
+
+func TestStripCodeFences(t *testing.T) {
+	cases := map[string]string{
+		"```python\nprint(1)\n```": "print(1)",
+		"plain code\nline 2":       "plain code\nline 2",
+		"```\nx = 1\n```":          "x = 1",
+	}
+	for in, want := range cases {
+		if got := stripCodeFences(in); got != want {
+			t.Errorf("stripCodeFences(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLanguageForPath(t *testing.T) {
+	cases := map[string]string{
+		"calc.py": "Python", "main.go": "Go", "app.js": "JavaScript", "x.unknownext": "the appropriate language",
+	}
+	for path, want := range cases {
+		if got := languageForPath(path); got != want {
+			t.Errorf("languageForPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

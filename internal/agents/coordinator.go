@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -327,7 +328,8 @@ func toolDoneLine(name string, result any) string {
 		}
 	case "write_file":
 		if n, ok := m["bytes_written"].(int); ok {
-			return fmt.Sprintf("✓ File created (%d bytes)", n)
+			path, _ := m["path"].(string)
+			return fmt.Sprintf("✓ File created: %s (%d bytes)", path, n)
 		}
 	case "edit_file":
 		return "✓ File edited"
@@ -470,14 +472,91 @@ func (c *Coordinator) handleLocalFile(ctx context.Context, sessionID, userMsg st
 	}
 
 	var steps []string
-	_, err := c.ExecuteLocalTool(ctx, sessionID, tool, params, func(s string) {
-		steps = append(steps, s)
-	})
+	emit := func(s string) { steps = append(steps, s) }
+
+	// For a prose "create a file …" with no content, generate the file content
+	// with the AI FIRST and WAIT for it, so the approval box shows the real code
+	// (not a blank preview). Slash /write already carries inline content.
+	if tool == "write_file" {
+		if content, _ := params["content"].(string); strings.TrimSpace(content) == "" {
+			emit("⠸ Generating code…")
+			path, _ := params["path"].(string)
+			generated, gerr := c.generateFileContent(ctx, userMsg, path)
+			if gerr != nil {
+				emit("⚠ Could not generate file content: " + gerr.Error())
+				return strings.Join(steps, "\n"), nil
+			}
+			params["content"] = generated
+		}
+	}
+
+	_, err := c.ExecuteLocalTool(ctx, sessionID, tool, params, emit)
 	transcript := strings.Join(steps, "\n")
 	if err != nil {
 		return transcript, nil // the transcript already carries the failure line
 	}
 	return transcript, nil
+}
+
+// codegenSystemPrompt instructs the model to return raw code only.
+const codegenSystemPrompt = "You are a code generator. Return ONLY the raw code, no markdown, no explanation, no code blocks. Just the code itself."
+
+// generateFileContent asks the AI for the file body, given the user's request
+// and the target path (the extension implies the language). It strips any
+// stray markdown code fences the model may add.
+func (c *Coordinator) generateFileContent(ctx context.Context, userMsg, path string) (string, error) {
+	if c.cfg.AIGateway == nil {
+		return "", fmt.Errorf("no AI gateway configured")
+	}
+	lang := languageForPath(path)
+	filename := filepath.Base(path)
+	prompt := fmt.Sprintf("Generate %s in %s.\nFile: %s", userMsg, lang, filename)
+	reply, err := c.cfg.AIGateway.Complete(ctx, prompt, codegenSystemPrompt)
+	if err != nil {
+		return "", err
+	}
+	return stripCodeFences(reply), nil
+}
+
+// languageForPath maps a file extension to a language name for the prompt.
+func languageForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".py":
+		return "Python"
+	case ".go":
+		return "Go"
+	case ".js":
+		return "JavaScript"
+	case ".ts":
+		return "TypeScript"
+	case ".c":
+		return "C"
+	case ".cpp", ".cc":
+		return "C++"
+	case ".rs":
+		return "Rust"
+	case ".java":
+		return "Java"
+	case ".sh":
+		return "Bash"
+	default:
+		return "the appropriate language"
+	}
+}
+
+// stripCodeFences removes a leading/trailing ```lang fence if the model wrapped
+// its output despite being told not to.
+func stripCodeFences(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	// Drop the first line (```lang) and a trailing ``` line.
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		s = s[nl+1:]
+	}
+	s = strings.TrimSuffix(strings.TrimRight(s, "\n"), "```")
+	return strings.TrimRight(s, "\n")
 }
 
 // parseLocalRequest maps a LOCAL_FILE message to a tool name + params. It

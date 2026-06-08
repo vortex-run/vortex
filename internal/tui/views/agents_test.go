@@ -118,44 +118,85 @@ func TestAgents_EnterIgnoredWhileThinking(t *testing.T) {
 func TestAgents_ApprovalRequiredEntersAwaiting(t *testing.T) {
 	m := NewAgents(nil)
 	m.thinking = true
-	updated, _ := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] write file x"})
+	updated, cmd := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] write file x"})
 	am := updated.(AgentsModel)
 	if !am.Awaiting() {
 		t.Error("an [APPROVAL_REQUIRED] reply should enter awaiting state")
 	}
-	out := am.renderMessages()
-	if !strings.Contains(out, "[Y] Approve") || !strings.Contains(out, "[N] Reject") {
-		t.Errorf("approval reply should show Y/N prompt:\n%s", out)
+	// Y/N must NOT be active yet (race guard) until the readiness tick fires.
+	if am.ApprovalReady() {
+		t.Error("approval should not be ready immediately (race guard)")
 	}
-	// The raw marker should not leak.
+	if cmd == nil {
+		t.Error("entering awaiting should schedule the readiness tick")
+	}
+	out := am.renderMessages()
+	if !strings.Contains(out, "[Y]") || !strings.Contains(out, "Enter to approve") {
+		t.Errorf("approval reply should show the Y/N+Enter prompt:\n%s", out)
+	}
 	if strings.Contains(out, "[APPROVAL_REQUIRED]") {
 		t.Error("raw [APPROVAL_REQUIRED] marker should be rewritten")
 	}
 }
 
-func TestAgents_ApproveKeySendsDecision(t *testing.T) {
+func TestAgents_KeysIgnoredBeforeReady(t *testing.T) {
 	m := NewAgents(nil)
-	m, _ = applyApprovalPending(t, m)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	if cmd == nil {
-		t.Fatal("Y should send an approval command")
+	updated, _ := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] run command"})
+	am := updated.(AgentsModel) // NOT ready yet
+	// A 'y' before the readiness tick must NOT stage or send anything.
+	staged, cmd := am.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if staged.(AgentsModel).ApprovalChoice() != "" {
+		t.Error("Y before ready should not stage a choice")
 	}
-	msg := cmd()
-	res, ok := msg.(approvalResult)
-	if !ok || !res.approved {
-		t.Errorf("Y should produce approvalResult{approved:true}, got %#v", msg)
+	if cmd != nil {
+		t.Error("Y before ready should not send anything")
 	}
 }
 
-func TestAgents_RejectKeySendsDecision(t *testing.T) {
+func TestAgents_StageThenEnterApproves(t *testing.T) {
 	m := NewAgents(nil)
 	m, _ = applyApprovalPending(t, m)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	// Y stages but does NOT send.
+	staged, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	am := staged.(AgentsModel)
+	if cmd != nil {
+		t.Error("Y should only stage, not send")
+	}
+	if am.ApprovalChoice() != "approve" {
+		t.Errorf("choice = %q, want approve", am.ApprovalChoice())
+	}
+	if !strings.Contains(am.renderMessages(), "Approve selected") {
+		t.Errorf("staged approve should be shown:\n%s", am.renderMessages())
+	}
+	// Enter confirms and sends.
+	_, cmd2 := am.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd2 == nil {
+		t.Fatal("Enter after staging Y should send the approval")
+	}
+	if res := cmd2().(approvalResult); !res.approved {
+		t.Error("staged Y + Enter should approve")
+	}
+}
+
+func TestAgents_StageThenEnterRejects(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	staged, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	_, cmd := staged.(AgentsModel).Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("N should send a rejection command")
+		t.Fatal("Enter after staging N should send the rejection")
 	}
 	if res := cmd().(approvalResult); res.approved {
-		t.Error("N should produce approvalResult{approved:false}")
+		t.Error("staged N + Enter should reject")
+	}
+}
+
+func TestAgents_EnterWithoutStageDoesNothing(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Error("Enter with no staged choice should do nothing")
 	}
 }
 
@@ -196,7 +237,8 @@ func TestAgents_SlashAutocomplete(t *testing.T) {
 	}
 }
 
-// applyApprovalPending drives the model into the awaiting state.
+// applyApprovalPending drives the model into the awaiting state AND fires the
+// readiness tick (the 100ms guard) so Y/N are accepted — the common test setup.
 func applyApprovalPending(t *testing.T, m AgentsModel) (AgentsModel, tea.Cmd) {
 	t.Helper()
 	updated, cmd := m.Update(agentResponse{content: "[APPROVAL_REQUIRED] run command"})
@@ -204,7 +246,8 @@ func applyApprovalPending(t *testing.T, m AgentsModel) (AgentsModel, tea.Cmd) {
 	if !am.Awaiting() {
 		t.Fatal("setup: model should be awaiting")
 	}
-	return am, cmd
+	ready, _ := am.Update(approvalReadyMsg{})
+	return ready.(AgentsModel), cmd
 }
 
 func TestAgents_ExtractJobID(t *testing.T) {

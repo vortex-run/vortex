@@ -24,19 +24,21 @@ type ChatMessage struct {
 
 // AgentsModel is the interactive chat with the VORTEX coordinator.
 type AgentsModel struct {
-	client     *tui.Client
-	messages   []ChatMessage
-	input      textinput.Model
-	viewport   viewport.Model
-	spinner    spinner.Model
-	thinking   bool
-	sessionID  string
-	awaiting   bool   // an approval is pending (awaiting Y/N)
-	approvalID string // session the pending approval belongs to
-	forgeJob   string // active forge job id being polled ("" = none)
-	forgeSeen  int    // count of progress-history lines already shown
-	width      int
-	height     int
+	client         *tui.Client
+	messages       []ChatMessage
+	input          textinput.Model
+	viewport       viewport.Model
+	spinner        spinner.Model
+	thinking       bool
+	sessionID      string
+	awaiting       bool   // an approval is pending (awaiting Y/N then Enter)
+	approvalID     string // session the pending approval belongs to
+	approvalReady  bool   // box has rendered a frame; Y/N now accepted
+	approvalChoice string // staged choice: "" | "approve" | "reject"
+	forgeJob       string // active forge job id being polled ("" = none)
+	forgeSeen      int    // count of progress-history lines already shown
+	width          int
+	height         int
 }
 
 // slashCommands are the Claude-Code-style quick commands shown when the input
@@ -154,12 +156,21 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			content = "⚠ " + msg.err.Error()
 		}
-		// An [APPROVAL_REQUIRED] line means the agent is waiting on a Y/N.
+		// An [APPROVAL_REQUIRED] line means the agent is waiting on a decision.
 		if strings.Contains(content, "[APPROVAL_REQUIRED]") {
 			m.awaiting = true
+			m.approvalReady = false // ignore keys until the box has rendered a frame
+			m.approvalChoice = ""
 			m.approvalID = m.sessionID
 			content = strings.ReplaceAll(content, "[APPROVAL_REQUIRED]", "⚠ Agent wants approval —")
-			content += "\n\n[Y] Approve    [N] Reject"
+			content += "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
+			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			m.input.Focus()
+			// Enable Y/N only after a brief delay, so a stray keypress in flight
+			// cannot resolve the approval before the user sees the box.
+			return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return approvalReadyMsg{} })
 		}
 		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
 		m.viewport.SetContent(m.renderMessages())
@@ -173,11 +184,17 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case approvalReadyMsg:
+		m.approvalReady = true
+		return m, nil
+
 	case forgeProgress:
 		return m.handleForgeProgress(msg)
 
 	case approvalResult:
 		m.awaiting = false
+		m.approvalReady = false
+		m.approvalChoice = ""
 		verb := "rejected"
 		if msg.approved {
 			verb = "approved"
@@ -188,13 +205,30 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// While an approval is pending, Y/N resolve it (and nothing else types).
+		// While an approval is pending: Y/N STAGE a choice, Enter CONFIRMS it.
+		// Keys are ignored until the box has had a frame to render (approvalReady),
+		// preventing an in-flight keypress from resolving it prematurely.
 		if m.awaiting {
+			if !m.approvalReady {
+				return m, nil
+			}
 			switch strings.ToLower(msg.String()) {
 			case "y":
-				return m, m.sendApproval(true)
+				m.approvalChoice = "approve"
+				m.viewport.SetContent(m.renderMessages())
+				return m, nil
 			case "n":
-				return m, m.sendApproval(false)
+				m.approvalChoice = "reject"
+				m.viewport.SetContent(m.renderMessages())
+				return m, nil
+			case "enter":
+				switch m.approvalChoice {
+				case "approve":
+					return m, m.sendApproval(true)
+				case "reject":
+					return m, m.sendApproval(false)
+				}
+				return m, nil // Enter with no staged choice: ignore
 			}
 			return m, nil
 		}
@@ -267,6 +301,14 @@ func (m AgentsModel) renderMessages() string {
 	if m.thinking {
 		b.WriteString(tui.ChatAgentStyle.Render("[agent] " + m.spinner.View() + " Thinking…"))
 	}
+	// Show the staged approval choice so the user sees it before confirming.
+	if m.awaiting && m.approvalChoice != "" {
+		label := "▶ Approve selected — press Enter to confirm"
+		if m.approvalChoice == "reject" {
+			label = "▶ Reject selected — press Enter to confirm"
+		}
+		b.WriteString(tui.ChatSystemStyle.Render("[system] " + label))
+	}
 	return b.String()
 }
 
@@ -316,6 +358,15 @@ func (m AgentsModel) ForgePolling() bool { return m.forgeJob != "" }
 type approvalResult struct {
 	approved bool
 }
+
+// approvalReadyMsg fires ~100ms after an approval box renders, enabling Y/N.
+type approvalReadyMsg struct{}
+
+// ApprovalReady reports whether Y/N input is enabled on the box (for tests).
+func (m AgentsModel) ApprovalReady() bool { return m.approvalReady }
+
+// ApprovalChoice returns the staged choice ("approve"/"reject"/"") (for tests).
+func (m AgentsModel) ApprovalChoice() string { return m.approvalChoice }
 
 // sendApproval posts the user's approve/reject decision to the agent runtime.
 func (m AgentsModel) sendApproval(approved bool) tea.Cmd {
