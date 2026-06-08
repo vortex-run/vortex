@@ -270,3 +270,25 @@ func TestForge_RealGoScriptBuild(t *testing.T) {
 		t.Error("a successful real build should deliver a summary")
 	}
 }
+
+func TestForge_StatusHistoryAndResult(t *testing.T) {
+	intent := BuildIntent{AppType: AppTypeScript, DeliveryTargets: []string{"script"}, Stack: StackChoice{Backend: "go"}, Description: "hello"}
+	b, q, c, d := &stubBuilder{}, &stubQA{}, &stubCodegen{}, &stubDeliver{}
+	f := newStubForge(t, intent, b, q, c, d)
+
+	if err := f.Build(context.Background(), "write hello", 1, nil); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	st := f.Status()
+	if len(st.ProgressHistory) < 3 {
+		t.Errorf("history should record every step, got %d: %v", len(st.ProgressHistory), st.ProgressHistory)
+	}
+	// The final "✅ Done" step should be in history.
+	last := st.ProgressHistory[len(st.ProgressHistory)-1]
+	if !strings.Contains(last, "Done") {
+		t.Errorf("last history step = %q, want it to mention Done", last)
+	}
+	if st.Result == "" {
+		t.Error("Result should be set on a completed build")
+	}
+}

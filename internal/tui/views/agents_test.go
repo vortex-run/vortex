@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/vortex-run/vortex/internal/tui"
 )
 
 func TestAgents_Init(t *testing.T) {
@@ -202,4 +204,90 @@ func applyApprovalPending(t *testing.T, m AgentsModel) (AgentsModel, tea.Cmd) {
 		t.Fatal("setup: model should be awaiting")
 	}
 	return am, cmd
+}
+
+func TestAgents_ExtractJobID(t *testing.T) {
+	if got := extractJobID("Starting build... Job ID: job-abc123"); got != "job-abc123" {
+		t.Errorf("extractJobID = %q, want job-abc123", got)
+	}
+	if got := extractJobID("no job here"); got != "" {
+		t.Errorf("extractJobID(no match) = %q, want empty", got)
+	}
+}
+
+func TestAgents_ForgeProgressAppendsNewSteps(t *testing.T) {
+	m := NewAgents(nil)
+	m.forgeJob = "job-1"
+	// First poll: two steps.
+	upd, _ := m.Update(forgeProgress{job: &tui.ForgeJobData{
+		ID: "job-1", State: "running",
+		ProgressHistory: []string{"Parsing intent…", "Generating code…"},
+	}})
+	am := upd.(AgentsModel)
+	out := am.renderMessages()
+	if !strings.Contains(out, "Parsing intent") || !strings.Contains(out, "Generating code") {
+		t.Errorf("forge steps should appear:\n%s", out)
+	}
+	if !am.ForgePolling() {
+		t.Error("should keep polling while running")
+	}
+
+	// Second poll: only the new third step is appended (no duplicates).
+	upd2, _ := am.Update(forgeProgress{job: &tui.ForgeJobData{
+		ID: "job-1", State: "running",
+		ProgressHistory: []string{"Parsing intent…", "Generating code…", "Building…"},
+	}})
+	out2 := upd2.(AgentsModel).renderMessages()
+	if strings.Count(out2, "Parsing intent") != 1 {
+		t.Errorf("steps should not duplicate across polls:\n%s", out2)
+	}
+	if !strings.Contains(out2, "Building…") {
+		t.Errorf("new step should appear:\n%s", out2)
+	}
+}
+
+func TestAgents_ForgeCompleteStopsPolling(t *testing.T) {
+	m := NewAgents(nil)
+	m.forgeJob = "job-1"
+	upd, cmd := m.Update(forgeProgress{job: &tui.ForgeJobData{
+		ID: "job-1", State: "complete", Result: "Build complete: calc", DurationMs: 45000,
+	}})
+	am := upd.(AgentsModel)
+	if am.ForgePolling() {
+		t.Error("should stop polling when complete")
+	}
+	if cmd != nil {
+		t.Error("no further poll command after completion")
+	}
+	out := am.renderMessages()
+	if !strings.Contains(out, "Build complete: calc") || !strings.Contains(out, "45.0s") {
+		t.Errorf("completion should show result + duration:\n%s", out)
+	}
+}
+
+func TestAgents_ForgeFailedShowsError(t *testing.T) {
+	m := NewAgents(nil)
+	m.forgeJob = "job-1"
+	upd, _ := m.Update(forgeProgress{job: &tui.ForgeJobData{
+		ID: "job-1", State: "failed", Error: "compile error",
+	}})
+	am := upd.(AgentsModel)
+	if am.ForgePolling() {
+		t.Error("should stop polling when failed")
+	}
+	if !strings.Contains(am.renderMessages(), "Build failed: compile error") {
+		t.Errorf("failure should show the error:\n%s", am.renderMessages())
+	}
+}
+
+func TestAgents_ForgePollErrorStops(t *testing.T) {
+	m := NewAgents(nil)
+	m.forgeJob = "job-1"
+	upd, cmd := m.Update(forgeProgress{err: errString("network")})
+	if upd.(AgentsModel).ForgePolling() {
+		t.Error("a poll error should stop polling")
+	}
+	if cmd != nil {
+		t.Error("no further poll after error")
+	}
 }
