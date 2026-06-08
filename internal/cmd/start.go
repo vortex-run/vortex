@@ -21,6 +21,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/forge"
 	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/perf"
@@ -284,7 +285,16 @@ func runStart(ctx context.Context, pidfile string) error {
 	if msg.gateway != nil {
 		gateway = msg.gateway
 	}
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn)
+	// --- VORTEX Forge (M13): autonomous app builder ------------------------
+	// Built before the agent runtime so its BUILD_APP handler can be wired into
+	// the coordinator. forge imports agents, so the coordinator reaches forge
+	// only through a callback (no import cycle).
+	forgeJobs := buildForge(gateway, msg, log)
+	if forgeJobs != nil {
+		apiSrv.SetForgeRuntime(&forgeRuntimeAdapter{jm: forgeJobs})
+	}
+
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs))
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -786,7 +796,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -811,6 +821,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		AIGateway: gateway,
 		MaxAgents: 8,
 		Approval:  approval,
+		BuildApp:  buildApp,
 	})
 	if err != nil {
 		log.Warn("agent runtime disabled: coordinator init failed", "err", err)
@@ -853,6 +864,88 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 		TotalMessages: s.TotalMessages,
 		QueueDepth:    s.QueueDepth,
 	}
+}
+
+// buildForge constructs the Forge orchestrator + job manager. The AI gateway is
+// required for real code generation; without it (stub gateway) Forge still
+// builds but the codegen agent has no provider, so it is only enabled when a
+// real gateway is configured. Delivery routes through the notification router
+// when messaging is configured.
+func buildForge(gateway agents.AIGateway, msg messagingComponents, log *slog.Logger) *forge.JobManager {
+	if _, isStub := gateway.(agents.StubAIGateway); isStub || gateway == nil {
+		log.Info("forge disabled (no AI gateway configured)")
+		return nil
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	sandboxBase := filepath.Join(cacheDir, "vortex", "agents", "forge")
+
+	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(cacheDir, "vortex", "forge-serve")}
+	if msg.router != nil {
+		delivery.Sender = &forgeNotifyAdapter{router: msg.router}
+	}
+
+	f, err := forge.NewForge(forge.ForgeConfig{
+		AIGateway:   gateway,
+		SandboxBase: sandboxBase,
+		Delivery:    delivery,
+	})
+	if err != nil {
+		log.Warn("forge disabled: init failed", "err", err)
+		return nil
+	}
+	log.Info("forge enabled", "sandbox_base", sandboxBase)
+	return forge.NewJobManager(f)
+}
+
+// forgeBuildApp returns an agents.BuildAppFunc that submits a BUILD_APP request
+// to the forge job manager, or nil when forge is not configured (the
+// coordinator then falls back to its stub).
+func forgeBuildApp(jm *forge.JobManager) agents.BuildAppFunc {
+	if jm == nil {
+		return nil
+	}
+	return func(ctx context.Context, userMsg, sessionID string) (string, error) {
+		id := jm.Submit(ctx, userMsg, sessionID, 0)
+		return "🛠 Build started. Job ID: " + id, nil
+	}
+}
+
+// forgeRuntimeAdapter adapts *forge.JobManager to api.ForgeRuntime.
+type forgeRuntimeAdapter struct{ jm *forge.JobManager }
+
+func (a *forgeRuntimeAdapter) Submit(ctx context.Context, message, sessionID string, chatID int64) string {
+	return a.jm.Submit(ctx, message, sessionID, chatID)
+}
+
+func (a *forgeRuntimeAdapter) Get(id string) (api.ForgeJob, bool) {
+	j, ok := a.jm.Get(id)
+	if !ok {
+		return api.ForgeJob{}, false
+	}
+	return api.ForgeJob{ID: j.ID, Message: j.Message, State: string(j.State), Progress: j.Progress, Error: j.Error}, true
+}
+
+func (a *forgeRuntimeAdapter) List() []api.ForgeJob {
+	jobs := a.jm.List()
+	out := make([]api.ForgeJob, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, api.ForgeJob{ID: j.ID, Message: j.Message, State: string(j.State), Progress: j.Progress, Error: j.Error})
+	}
+	return out
+}
+
+// forgeNotifyAdapter adapts messaging.Router to forge.NotificationSender.
+type forgeNotifyAdapter struct{ router *messaging.Router }
+
+func (a *forgeNotifyAdapter) SendMessage(ctx context.Context, _ int64, text string) error {
+	return a.router.Send(ctx, messaging.SeverityInfo, "VORTEX Forge", text)
+}
+
+func (a *forgeNotifyAdapter) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
+	return a.router.SendFile(ctx, filename, data, caption)
 }
 
 // messagingComponents holds the messaging subsystem built from environment

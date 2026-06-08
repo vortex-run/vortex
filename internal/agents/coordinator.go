@@ -63,6 +63,12 @@ const answerSystemPrompt = `You are the VORTEX assistant. Answer the user's ques
 // when nil, approval-gated actions are denied by default (fail safe).
 type ApprovalFunc func(ctx context.Context, req ApprovalRequest) bool
 
+// BuildAppFunc handles a BUILD_APP request, returning a user-facing reply (e.g.
+// a job id). VORTEX Forge (M13) supplies the implementation via start.go; the
+// coordinator stays decoupled from the forge package (which imports agents) to
+// avoid an import cycle. When nil, BUILD_APP returns a not-implemented stub.
+type BuildAppFunc func(ctx context.Context, userMsg, sessionID string) (string, error)
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
 	Bus       *Bus
@@ -70,6 +76,7 @@ type CoordinatorConfig struct {
 	AIGateway AIGateway
 	MaxAgents int          // concurrent sub-agent limit (default 8)
 	Approval  ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
+	BuildApp  BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
 }
 
 // Coordinator is the single user-facing agent. It classifies user messages,
@@ -153,6 +160,9 @@ func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID stri
 	case IntentGeneralQuestion:
 		return c.cfg.AIGateway.Complete(ctx, userMsg, answerSystemPrompt)
 	case IntentBuildApp:
+		if c.cfg.BuildApp != nil {
+			return c.cfg.BuildApp(ctx, userMsg, sessionID)
+		}
 		return c.modeStub("BUILD_APP"), nil
 	case IntentResearch:
 		return c.modeStub("RESEARCH"), nil
