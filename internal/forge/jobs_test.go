@@ -1,0 +1,85 @@
+package forge
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+// newJobManagerWithStubs builds a JobManager over a Forge driven by stub steps.
+func newJobManagerWithStubs(t *testing.T, intent BuildIntent, q qaStep) *JobManager {
+	t.Helper()
+	f, err := NewForge(ForgeConfig{
+		SandboxBase: t.TempDir(),
+		Intent:      stubIntent{intent: intent},
+		Deps:        stubDeps{},
+		Codegen:     func(string) codegenStep { return &stubCodegen{} },
+		Builder:     func(string, StackChoice) buildStep { return &stubBuilder{} },
+		QA:          func(string) qaStep { return q },
+		Delivery2:   &stubDeliver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewJobManager(f)
+}
+
+func waitState(t *testing.T, m *JobManager, id string, want JobState) Job {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if j, ok := m.Get(id); ok && j.State == want {
+			return j
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	j, _ := m.Get(id)
+	t.Fatalf("job %s did not reach %q (final: %+v)", id, want, j)
+	return Job{}
+}
+
+func TestJobs_SubmitAndComplete(t *testing.T) {
+	intent := BuildIntent{DeliveryTargets: []string{"script"}, Stack: StackChoice{Backend: "go"}}
+	m := newJobManagerWithStubs(t, intent, &stubQA{})
+
+	id := m.Submit(context.Background(), "build a hello world", "s1", 42)
+	if id == "" {
+		t.Fatal("Submit returned empty job id")
+	}
+	job := waitState(t, m, id, JobComplete)
+	if job.Message != "build a hello world" {
+		t.Errorf("job message = %q", job.Message)
+	}
+}
+
+func TestJobs_FailedBuildRecorded(t *testing.T) {
+	intent := BuildIntent{DeliveryTargets: []string{"script"}, Stack: StackChoice{Backend: "go"}}
+	m := newJobManagerWithStubs(t, intent, &alwaysFail{}) // QA never passes → failed
+
+	id := m.Submit(context.Background(), "x", "s", 1)
+	job := waitState(t, m, id, JobFailed)
+	if job.Error == "" {
+		t.Error("failed job should record an error")
+	}
+}
+
+func TestJobs_GetUnknown(t *testing.T) {
+	m := newJobManagerWithStubs(t, BuildIntent{}, &stubQA{})
+	if _, ok := m.Get("nope"); ok {
+		t.Error("Get of unknown id should return false")
+	}
+}
+
+func TestJobs_List(t *testing.T) {
+	intent := BuildIntent{DeliveryTargets: []string{"script"}, Stack: StackChoice{Backend: "go"}}
+	m := newJobManagerWithStubs(t, intent, &stubQA{})
+	id1 := m.Submit(context.Background(), "first", "s", 1)
+	id2 := m.Submit(context.Background(), "second", "s", 1)
+	waitState(t, m, id1, JobComplete)
+	waitState(t, m, id2, JobComplete)
+
+	jobs := m.List()
+	if len(jobs) != 2 {
+		t.Fatalf("List returned %d jobs, want 2", len(jobs))
+	}
+}

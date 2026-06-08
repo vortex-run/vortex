@@ -239,3 +239,34 @@ func TestForge_Status(t *testing.T) {
 		t.Error("a fresh Forge should not be active")
 	}
 }
+
+// TestForge_RealGoScriptBuild runs the pipeline with the REAL concrete agents
+// (dependency/codegen/build/qa/delivery), driven by a scripted AI gateway that
+// returns valid Go. This actually compiles Go in CI (Go is always present),
+// per the M13 requirement that Go script builds always run.
+func TestForge_RealGoScriptBuild(t *testing.T) {
+	gw := &scriptedGateway{replies: []string{
+		`{"files":[{"path":"go.mod","content":"module hello\n\ngo 1.26\n"},{"path":"main.go","content":"package main\n\nimport \"fmt\"\n\nfunc main(){ fmt.Println(\"hello\") }\n"}]}`,
+	}}
+	sender := &fakeSender{}
+	f, err := NewForge(ForgeConfig{
+		SandboxBase: t.TempDir(),
+		AIGateway:   gw,
+		Intent: stubIntent{intent: BuildIntent{
+			AppType: AppTypeScript, DeliveryTargets: []string{"script"},
+			Stack: StackChoice{Backend: "go"},
+		}},
+		Delivery: DeliveryConfig{Sender: sender},
+		// Deps/Codegen/Builder/QA/Delivery left nil → real concrete agents.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Build(context.Background(), "write a go program that prints hello", 1, nil); err != nil {
+		t.Fatalf("real Go build pipeline: %v", err)
+	}
+	// Delivery sent a summary.
+	if len(sender.messages) == 0 {
+		t.Error("a successful real build should deliver a summary")
+	}
+}

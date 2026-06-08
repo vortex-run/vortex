@@ -144,18 +144,19 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 	}
 	defer func() { _ = os.RemoveAll(sandbox) }() // 9. cleanup
 
-	// 4. Dependencies.
-	f.setProgress(progressFn, "Installing dependencies…")
-	if derr := f.deps(sandbox).Install(ctx, intent.Stack); derr != nil {
-		return fmt.Errorf("forge: dependencies: %w", derr)
-	}
-
-	// 5. Generate code.
+	// 4. Generate code first — dependency setup (e.g. `go mod tidy`) operates on
+	// the generated sources, so it must run after codegen.
 	f.setProgress(progressFn, "Generating code…")
 	codegen := f.codegen(sandbox)
 	files, err := codegen.Generate(ctx, intent, userMsg)
 	if err != nil {
 		return fmt.Errorf("forge: codegen: %w", err)
+	}
+
+	// 5. Dependencies.
+	f.setProgress(progressFn, "Installing dependencies…")
+	if derr := f.deps(sandbox).Install(ctx, intent.Stack); derr != nil {
+		return fmt.Errorf("forge: dependencies: %w", derr)
 	}
 
 	builder := f.builder(sandbox, intent.Stack)

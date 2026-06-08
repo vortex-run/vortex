@@ -35,12 +35,15 @@ type Job struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// JobManager runs forge builds asynchronously and tracks their status.
+// JobManager runs forge builds asynchronously and tracks their status. Builds
+// are serialized (the Forge runs one build at a time) via runMu, so submitted
+// jobs queue rather than colliding.
 type JobManager struct {
 	forge *Forge
 
-	mu   sync.Mutex
-	jobs map[string]*Job
+	runMu sync.Mutex // held while a build runs, serializing the single Forge
+	mu    sync.Mutex
+	jobs  map[string]*Job
 }
 
 // NewJobManager constructs a manager over a Forge.
@@ -63,8 +66,12 @@ func (m *JobManager) Submit(ctx context.Context, message, sessionID string, chat
 	return id
 }
 
-// run executes the build, updating job state as it progresses.
+// run executes the build, updating job state as it progresses. It holds runMu
+// so concurrently-submitted jobs queue behind the single Forge instead of
+// failing with "build already in progress".
 func (m *JobManager) run(ctx context.Context, job *Job) {
+	m.runMu.Lock()
+	defer m.runMu.Unlock()
 	m.update(job.ID, func(j *Job) { j.State = JobRunning })
 
 	progress := func(msg string) {
