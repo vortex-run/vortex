@@ -46,17 +46,11 @@ func newStartCommand() *cobra.Command {
 	var pidfile string
 	var setup bool
 	var withUI bool
-	var cwd string
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the VORTEX server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Set the agent's working directory (where relative paths and the
-			// local FS/terminal tools resolve against). Defaults to the cwd.
-			if cwd != "" {
-				agentWorkingDir = cwd
-			}
 			// Run the first-run wizard when --setup is given, or automatically on
 			// first start when no AI provider is configured AND stdin is an
 			// interactive terminal (never block a non-interactive/scripted start,
@@ -77,20 +71,14 @@ func newStartCommand() *cobra.Command {
 	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
-	c.Flags().StringVar(&cwd, "cwd", "", "working directory for the agent's local file/terminal tools (default: current dir)")
 	return c
 }
 
-// agentWorkingDir is the directory the agent's local FS/terminal tools resolve
-// relative paths against (set by `vortex start --cwd`; defaults to os.Getwd).
-var agentWorkingDir string
-
-// resolveWorkingDir returns the configured agent working directory, defaulting
-// to the process cwd.
+// resolveWorkingDir returns the process working directory. It is shown in the
+// TUI top bar as INFORMATION ONLY — the agent's local FS/terminal tools have no
+// path confinement (the approval gate is the security control), so this never
+// restricts where files may be written.
 func resolveWorkingDir() string {
-	if agentWorkingDir != "" {
-		return agentWorkingDir
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return "."

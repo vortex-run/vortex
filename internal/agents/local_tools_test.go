@@ -44,11 +44,22 @@ func TestReadLocalFile_ReadsContent(t *testing.T) {
 	}
 }
 
-func TestReadLocalFile_OutsideRootRejected(t *testing.T) {
-	cfg, _ := localCfg(t)
-	_, err := ReadLocalFileTool{cfg: cfg}.Execute(context.Background(), map[string]any{"path": "../../etc/passwd"})
-	if !errors.Is(err, ErrDangerousAction) {
-		t.Errorf("read outside root: err = %v, want ErrDangerousAction", err)
+func TestReadLocalFile_AbsolutePathAllowed(t *testing.T) {
+	// No path confinement: an absolute path anywhere is readable (the approval
+	// gate, not a cwd boundary, is the control — and reads need no approval).
+	dir := t.TempDir()
+	target := filepath.Join(dir, "anywhere.txt")
+	if err := os.WriteFile(target, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A coordinator rooted at a DIFFERENT directory can still read it.
+	cfg := LocalFSConfig{Root: t.TempDir()}
+	res, err := ReadLocalFileTool{cfg: cfg}.Execute(context.Background(), map[string]any{"path": target})
+	if err != nil {
+		t.Fatalf("absolute read should be allowed: %v", err)
+	}
+	if res.(map[string]any)["content"] != "data" {
+		t.Errorf("content = %v", res.(map[string]any)["content"])
 	}
 }
 
@@ -81,12 +92,32 @@ func TestWriteLocalFile_ExecutesAfterApproval(t *testing.T) {
 	}
 }
 
-func TestWriteLocalFile_OutsideRootRejected(t *testing.T) {
-	cfg, _ := localCfg(t)
+func TestWriteLocalFile_AbsolutePathAllowed(t *testing.T) {
+	// After approval (RequireApproval=false here), a write to ANY absolute path
+	// is allowed — there is no cwd confinement. Write to a sibling temp dir, not
+	// the configured Root.
+	other := t.TempDir()
+	target := filepath.Join(other, "calc.py")
+	cfg := LocalFSConfig{Root: t.TempDir()} // a DIFFERENT root
 	_, err := WriteLocalFileTool{cfg: cfg, RequireApproval: false}.Execute(context.Background(),
-		map[string]any{"path": "../escape.txt", "content": "x"})
-	if !errors.Is(err, ErrDangerousAction) {
-		t.Errorf("write outside root: err = %v, want ErrDangerousAction", err)
+		map[string]any{"path": target, "content": "print('hi')"})
+	if err != nil {
+		t.Fatalf("absolute write outside Root should be allowed: %v", err)
+	}
+	data, _ := os.ReadFile(target)
+	if string(data) != "print('hi')" {
+		t.Errorf("file not written to the absolute path: %q", data)
+	}
+}
+
+func TestWriteLocalFile_ProtectedSystemPathBlocked(t *testing.T) {
+	cfg := LocalFSConfig{Root: t.TempDir()}
+	for _, p := range []string{`C:\Windows\System32\drivers\etc\hosts`, `C:\Windows\notepad.exe`} {
+		_, err := WriteLocalFileTool{cfg: cfg, RequireApproval: false}.Execute(context.Background(),
+			map[string]any{"path": p, "content": "x"})
+		if !errors.Is(err, ErrDangerousAction) {
+			t.Errorf("write to %q: err = %v, want ErrDangerousAction (protected)", p, err)
+		}
 	}
 }
 
@@ -158,11 +189,28 @@ func TestRunTerminal_ExecutesAfterApproval(t *testing.T) {
 
 func TestRunTerminal_DangerousBlocked(t *testing.T) {
 	cfg, _ := localCfg(t)
-	for _, cmd := range []string{"rm -rf /", "rm -rf /*", ":(){ :|:& };:", "mkfs.ext4 /dev/sda"} {
+	blocked := []string{
+		"rm -rf /", "rm -rf /*", "rm -rf *", "rm -rf ~",
+		"del /f /s /q C:\\", "del /f /s /q D:\\",
+		"format C:", "format D:",
+		":(){ :|:& };:", "mkfs.ext4 /dev/sda",
+		"dd if=/dev/zero of=/dev/sda", "chmod -R 777 /",
+	}
+	for _, cmd := range blocked {
 		_, err := RunTerminalTool{cfg: cfg, RequireApproval: false}.Execute(context.Background(),
 			map[string]any{"command": cmd})
 		if !errors.Is(err, ErrDangerousAction) {
 			t.Errorf("command %q: err = %v, want ErrDangerousAction", cmd, err)
+		}
+	}
+}
+
+func TestRunTerminal_NormalCommandsAllowed(t *testing.T) {
+	// Commands that merely *contain* scary words but aren't catastrophic must
+	// still be allowed (e.g. removing a specific project file).
+	for _, cmd := range []string{"rm -rf ./build", "del myfile.txt", "go build ./...", "python calc.py"} {
+		if isDangerousCommand(cmd) {
+			t.Errorf("command %q should NOT be blocked", cmd)
 		}
 	}
 }

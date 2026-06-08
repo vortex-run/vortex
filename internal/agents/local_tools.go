@@ -21,17 +21,27 @@ import (
 // the guardrails below. This deliberately re-opens audit findings C2/C3 behind
 // an approval gate, with guardrails as defence in depth (owner-approved).
 
-// ErrDangerousAction is returned when an action is blocked by the guardrails
-// even though it would otherwise be approvable (e.g. rm -rf /, a fork bomb, or
-// a write outside the working-directory tree).
-var ErrDangerousAction = fmt.Errorf("agents: action blocked by safety guardrails")
+// ErrDangerousAction is returned when an action matches a catastrophic,
+// always-blocked pattern (e.g. rm -rf /, a fork bomb, formatting a disk, or
+// writing into a Windows system directory). These are refused EVEN WITH user
+// approval — they are non-recoverable system destruction, not normal edits.
+// There is no path/working-directory confinement: the approval gate is the
+// security control (the Claude Code model). Any other path is allowed once the
+// user approves the action.
+var ErrDangerousAction = fmt.Errorf("agents: action blocked (catastrophic system destruction)")
 
-// dangerousCommandPatterns are command substrings refused even after approval.
+// dangerousCommandPatterns are commands refused even after approval.
 var dangerousCommandPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\brm\s+-rf\s+/(\s|$)`),         // rm -rf /
-	regexp.MustCompile(`(?i)\brm\s+-rf\s+/\*`),             // rm -rf /*
-	regexp.MustCompile(`:\(\)\s*\{\s*:\|:&\s*\}\s*;`),      // classic fork bomb :(){ :|:& };:
+	regexp.MustCompile(`(?i)\brm\s+-rf\s+/(\s|$)`),          // rm -rf /
+	regexp.MustCompile(`(?i)\brm\s+-rf\s+/\*`),              // rm -rf /*
+	regexp.MustCompile(`(?i)\brm\s+-rf\s+\*`),               // rm -rf * with no specific path
+	regexp.MustCompile(`(?i)\brm\s+-rf\s+~`),                // rm -rf ~ (home)
+	regexp.MustCompile(`(?i)\bdel\s+/[fsq].*[A-Za-z]:\\?$`), // del /f /s /q C:\  (root of a drive)
+	regexp.MustCompile(`(?i)\bdel\s+/[fsq].*\b[CD]:\\?(\s|$)`),
+	regexp.MustCompile(`(?i)\bformat\s+[A-Za-z]:`),         // format C: / format D:
+	regexp.MustCompile(`:\(\)\s*\{\s*:\|:&\s*\}\s*;`),      // fork bomb :(){ :|:& };:
 	regexp.MustCompile(`(?i)\bmkfs\b`),                     // format a filesystem
+	regexp.MustCompile(`(?i)\bdd\b.*\bif=/dev/zero`),       // dd if=/dev/zero …
 	regexp.MustCompile(`(?i)\bdd\b.*\bof=/dev/`),           // dd to a device
 	regexp.MustCompile(`(?i)>\s*/dev/sd[a-z]`),             // overwrite a disk
 	regexp.MustCompile(`(?i)\bchmod\s+-R\s+777\s+/(\s|$)`), // chmod -R 777 /
@@ -47,34 +57,41 @@ func isDangerousCommand(command string) bool {
 	return false
 }
 
-// LocalFSConfig configures the confinement of the local FS/terminal tools.
+// protectedWritePrefixes are absolute path prefixes that may never be written
+// to or edited, even with approval — overwriting them bricks the OS.
+var protectedWritePrefixes = []string{
+	`c:\windows\system32`,
+	`c:\windows`,
+}
+
+// isProtectedPath reports whether abs falls inside a protected system directory.
+func isProtectedPath(abs string) bool {
+	lower := strings.ToLower(filepath.Clean(abs))
+	for _, p := range protectedWritePrefixes {
+		if lower == p || strings.HasPrefix(lower, p+`\`) {
+			return true
+		}
+	}
+	return false
+}
+
+// LocalFSConfig configures the local FS/terminal tools. There is NO path
+// confinement — the approval gate is the security model. Root is informational
+// only: it is the base for resolving *relative* paths (defaults to the process
+// working directory) and is shown in the TUI top bar.
 type LocalFSConfig struct {
-	// Root, when set, confines write_file/edit_file/create_project to this tree
-	// (and run_terminal's cwd). Empty means no path confinement (full FS), which
-	// still requires approval per action.
+	// Root is the base for resolving relative paths (default: os.Getwd). It does
+	// NOT restrict where files may be written; absolute paths anywhere are
+	// allowed once the user approves the action.
 	Root string
 	// RequireApproval gates mutating tools (default true via NewLocalTools).
 	RequireApproval bool
 }
 
-// withinRoot reports whether p is inside cfg.Root (or true when Root is empty).
-func (cfg LocalFSConfig) withinRoot(p string) bool {
-	if cfg.Root == "" {
-		return true
-	}
-	root, err := filepath.Abs(cfg.Root)
-	if err != nil {
-		return false
-	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return false
-	}
-	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
-}
-
-// resolveLocal resolves rel against the config Root (or CWD), returning an
-// absolute path and rejecting paths outside Root when confinement is on.
+// resolveLocal resolves p to an absolute path. Relative paths resolve against
+// Root (or the process cwd). Absolute paths are accepted as-is. No path is
+// rejected for being "outside" anything — only catastrophic system paths are
+// blocked, by isProtectedPath at the write site.
 func (cfg LocalFSConfig) resolveLocal(p string) (string, error) {
 	if p == "" {
 		p = "."
@@ -86,14 +103,7 @@ func (cfg LocalFSConfig) resolveLocal(p string) (string, error) {
 		}
 		p = filepath.Join(base, p)
 	}
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return "", err
-	}
-	if !cfg.withinRoot(abs) {
-		return "", fmt.Errorf("%w: %q is outside the allowed root %q", ErrDangerousAction, abs, cfg.Root)
-	}
-	return abs, nil
+	return filepath.Abs(p)
 }
 
 // --- ListDirectoryTool (read-only) ------------------------------------------
@@ -199,6 +209,9 @@ func (t WriteLocalFileTool) Execute(_ context.Context, params map[string]any) (a
 	if err != nil {
 		return nil, err
 	}
+	if isProtectedPath(abs) {
+		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
+	}
 	if t.RequireApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
@@ -252,6 +265,9 @@ func (t EditFileTool) Execute(_ context.Context, params map[string]any) (any, er
 	abs, err := t.cfg.resolveLocal(p)
 	if err != nil {
 		return nil, err
+	}
+	if isProtectedPath(abs) {
+		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
 	}
 	data, err := os.ReadFile(abs) //nolint:gosec // user-approved local read
 	if err != nil {
@@ -408,6 +424,9 @@ func (t CreateProjectTool) Execute(_ context.Context, params map[string]any) (an
 	dir, err := t.cfg.resolveLocal(filepath.Join(path, name))
 	if err != nil {
 		return nil, err
+	}
+	if isProtectedPath(dir) {
+		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, dir)
 	}
 	files := projectFiles(name, typ, description)
 

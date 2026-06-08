@@ -55,31 +55,22 @@ func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestResolveWorkingDir_DefaultsToCwd(t *testing.T) {
-	agentWorkingDir = "" // reset
-	wd := resolveWorkingDir()
-	if wd == "" || wd == "." {
-		// On any normal system os.Getwd works; "." only on error.
-		t.Logf("resolveWorkingDir returned %q", wd)
-	}
+func TestResolveWorkingDir_IsProcessCwd(t *testing.T) {
+	// Working dir is informational only: always the process cwd, no override.
 	cwd, _ := os.Getwd()
-	if wd != cwd && wd != "." {
-		t.Errorf("resolveWorkingDir = %q, want cwd %q", wd, cwd)
+	if got := resolveWorkingDir(); got != cwd && got != "." {
+		t.Errorf("resolveWorkingDir = %q, want cwd %q", got, cwd)
 	}
 }
 
-func TestResolveWorkingDir_HonorsOverride(t *testing.T) {
-	orig := agentWorkingDir
-	t.Cleanup(func() { agentWorkingDir = orig })
-	agentWorkingDir = "/tmp/details"
-	if got := resolveWorkingDir(); got != "/tmp/details" {
-		t.Errorf("resolveWorkingDir = %q, want the override", got)
-	}
-}
-
-func TestStartCommand_HasCwdFlag(t *testing.T) {
+func TestStartCommand_NoCwdOrAllowPathFlag(t *testing.T) {
+	// The path-restriction flags were removed — the approval gate is the only
+	// control over where the agent writes.
 	c := newStartCommand()
-	if c.Flags().Lookup("cwd") == nil {
-		t.Error("start should have a --cwd flag")
+	if c.Flags().Lookup("cwd") != nil {
+		t.Error("--cwd flag should have been removed")
+	}
+	if c.Flags().Lookup("allow-path") != nil {
+		t.Error("--allow-path flag should not exist")
 	}
 }
