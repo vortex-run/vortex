@@ -22,6 +22,9 @@ var ErrAgentBusy = errors.New("api: agent runtime busy")
 type AgentRuntime interface {
 	Submit(ctx context.Context, userMsg, sessionID string) (<-chan string, error)
 	Stats() AgentRuntimeStats
+	// Approve resolves a pending tool-action approval for a session (the TUI
+	// [Y]/[N]). Returns true when a pending action matched.
+	Approve(sessionID string, approved bool) bool
 }
 
 // AgentRuntimeStats mirrors the runtime's stats for the API. The wiring in
@@ -125,6 +128,36 @@ func (s *Server) streamAgentSSE(w http.ResponseWriter, r *http.Request, ch <-cha
 			flusher.Flush()
 		}
 	}
+}
+
+// agentApproveRequest is the POST /api/agents/approve body.
+type agentApproveRequest struct {
+	SessionID string `json:"session_id"`
+	Approved  bool   `json:"approved"`
+}
+
+// handleAgentApprove resolves a pending tool-action approval for a session.
+func (s *Server) handleAgentApprove(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuntime == nil {
+		http.Error(w, "agent runtime not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var req agentApproveRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" {
+		http.Error(w, "session_id is required", http.StatusBadRequest)
+		return
+	}
+	matched := s.agentRuntime.Approve(req.SessionID, req.Approved)
+	if !matched {
+		http.Error(w, "no pending approval for session", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"resolved": true})
 }
 
 // handleAgentStatus returns the runtime stats.

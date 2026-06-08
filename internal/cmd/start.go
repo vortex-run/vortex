@@ -898,6 +898,10 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 	}
 }
 
+func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) bool {
+	return a.rt.Approve(sessionID, approved)
+}
+
 // buildForge constructs the Forge orchestrator + job manager. The AI gateway is
 // required for real code generation; without it (stub gateway) Forge still
 // builds but the codegen agent has no provider, so it is only enabled when a

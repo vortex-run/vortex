@@ -201,6 +201,15 @@ type RuntimeStats struct {
 	QueueDepth    int
 }
 
+// Approve resolves a pending tool-action approval for a session, delegating to
+// the coordinator. Returns true when a pending action matched.
+func (r *Runtime) Approve(sessionID string, approved bool) bool {
+	return r.cfg.Coordinator.ApproveAction(sessionID, approved)
+}
+
+// Coordinator returns the runtime's coordinator (for wiring local-tool calls).
+func (r *Runtime) Coordinator() *Coordinator { return r.cfg.Coordinator }
+
 // Stats returns a snapshot of runtime activity.
 func (r *Runtime) Stats() RuntimeStats {
 	r.mu.Lock()

@@ -254,6 +254,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/agents/submit",
 		s.requireAPIKey(s.rateLimitAgents(http.HandlerFunc(s.handleAgentSubmit))))
 	mux.Handle("GET /api/agents/status", s.requireAPIKey(http.HandlerFunc(s.handleAgentStatus)))
+	mux.Handle("POST /api/agents/approve", s.requireAPIKey(http.HandlerFunc(s.handleAgentApprove)))
 
 	// VORTEX Forge (M13) — autonomous app builder. Data-plane: requires a key.
 	mux.Handle("POST /api/forge/build", s.requireAPIKey(http.HandlerFunc(s.handleForgeBuild)))
