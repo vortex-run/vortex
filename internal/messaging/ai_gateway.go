@@ -184,6 +184,12 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 	return text, out.UsageMetadata.TotalTokenCount, nil
 }
 
+// minAICallTimeout is the floor for any provider HTTP call. Providers like
+// DeepSeek can take tens of seconds to respond; the caller's context (e.g. a
+// TUI request) may be cancelled when the user navigates away, so we decouple
+// the HTTP call onto a fresh background context with at least this deadline.
+const minAICallTimeout = 60 * time.Second
+
 // doJSON posts a JSON body to url with the given headers and decodes the
 // response into out, returning the raw response bytes for token estimation.
 func (g *AIGateway) doJSON(ctx context.Context, url string, headers map[string]string, payload, out any) ([]byte, error) {
@@ -191,7 +197,16 @@ func (g *AIGateway) doJSON(ctx context.Context, url string, headers map[string]s
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	// Use a fresh background context with a 60s floor so a short-lived caller
+	// context (cancelled by the TUI on navigation) cannot abort a slow provider
+	// mid-request. If the caller's deadline is already longer, honour it.
+	callCtx, cancel := context.WithTimeout(context.Background(), minAICallTimeout)
+	defer cancel()
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) > minAICallTimeout {
+		callCtx, cancel = context.WithDeadline(context.Background(), dl)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

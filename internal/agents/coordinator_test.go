@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -370,4 +371,106 @@ func waitForPendingApproval(t *testing.T, c *Coordinator, session string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("no pending approval appeared")
+}
+
+func TestRuleClassify_LocalFile(t *testing.T) {
+	cases := []string{
+		"/ls", "/read main.go", "/run echo hi", "/create x.py print",
+		`create a file at S:\DETAILS\calc.py`,
+		"please write a file here",
+		"save it to /tmp/out.txt",
+		"list files in this folder",
+		"read the file main.go",
+	}
+	for _, msg := range cases {
+		if got := ruleClassify(msg); got != IntentLocalFile {
+			t.Errorf("ruleClassify(%q) = %q, want LOCAL_FILE", msg, got)
+		}
+	}
+}
+
+func TestRuleClassify_BuildApp(t *testing.T) {
+	cases := []string{
+		"build me an app for cricket scores",
+		"build an android app",
+		"build a web app with login",
+		"create a project called shop",
+	}
+	for _, msg := range cases {
+		if got := ruleClassify(msg); got != IntentBuildApp {
+			t.Errorf("ruleClassify(%q) = %q, want BUILD_APP", msg, got)
+		}
+	}
+}
+
+func TestRuleClassify_UnknownFallsThrough(t *testing.T) {
+	for _, msg := range []string{"what is the capital of France?", "hello", "explain mTLS"} {
+		if got := ruleClassify(msg); got != IntentUnknown {
+			t.Errorf("ruleClassify(%q) = %q, want UNKNOWN (AI fallback)", msg, got)
+		}
+	}
+}
+
+func TestParseLocalRequest_SlashCommands(t *testing.T) {
+	cases := []struct {
+		msg, tool, key, val string
+	}{
+		{"/ls /tmp", "list_directory", "path", "/tmp"},
+		{"/read main.go", "read_file", "path", "main.go"},
+		{"/run echo hi", "run_terminal", "command", "echo hi"},
+	}
+	for _, c := range cases {
+		tool, params := parseLocalRequest(c.msg)
+		if tool != c.tool {
+			t.Errorf("parseLocalRequest(%q) tool = %q, want %q", c.msg, tool, c.tool)
+		}
+		if params[c.key] != c.val {
+			t.Errorf("parseLocalRequest(%q) %s = %v, want %q", c.msg, c.key, params[c.key], c.val)
+		}
+	}
+}
+
+func TestParseLocalRequest_ProseWriteExtractsPath(t *testing.T) {
+	tool, params := parseLocalRequest(`create a file and save it to S:\DETAILS\calc.py`)
+	if tool != "write_file" {
+		t.Fatalf("tool = %q, want write_file", tool)
+	}
+	if params["path"] != `S:\DETAILS\calc.py` {
+		t.Errorf("path = %v, want the windows path", params["path"])
+	}
+}
+
+func TestExtractPath(t *testing.T) {
+	cases := map[string]string{
+		`save it to S:\DETAILS\x.py`:   `S:\DETAILS\x.py`,
+		"write to /tmp/out.txt please": "/tmp/out.txt",
+		"no path here":                 "",
+	}
+	for msg, want := range cases {
+		if got := extractPath(msg); got != want {
+			t.Errorf("extractPath(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestHandleMessage_LocalFileRoutesWithoutAI(t *testing.T) {
+	// A gateway that FAILS any Complete call — proves the local-file path never
+	// touches the AI for intent parsing.
+	c, dir := localCoord(t, func(context.Context, ApprovalRequest) bool { return true })
+	c.cfg.AIGateway = failingGateway{}
+	_ = osWrite(t, dir, "a.txt", "hi")
+	out, err := c.HandleMessage(context.Background(), "/ls", "s1")
+	if err != nil {
+		t.Fatalf("local /ls should not error: %v", err)
+	}
+	if !strings.Contains(out, "Listing") {
+		t.Errorf("expected a directory-listing transcript, got: %s", out)
+	}
+}
+
+// failingGateway returns an error on every call (to prove the AI isn't used).
+type failingGateway struct{}
+
+func (failingGateway) Complete(context.Context, string, string) (string, error) {
+	return "", fmt.Errorf("AI must not be called for local-file intent")
 }

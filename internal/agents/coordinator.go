@@ -48,12 +48,17 @@ type Intent string
 // Intent classifications produced by the coordinator.
 const (
 	IntentBuildApp        Intent = "BUILD_APP"
+	IntentLocalFile       Intent = "LOCAL_FILE"
 	IntentResearch        Intent = "RESEARCH"
 	IntentDevOpsCheck     Intent = "DEVOPS_CHECK"
 	IntentDataPipeline    Intent = "DATA_PIPELINE"
 	IntentGeneralQuestion Intent = "GENERAL_QUESTION"
 	IntentUnknown         Intent = "UNKNOWN"
 )
+
+// handleMessageTimeout bounds full message handling (intent parse + dispatch).
+// Two minutes covers a slow provider intent parse for a real build.
+const handleMessageTimeout = 120 * time.Second
 
 const intentSystemPrompt = `You are the VORTEX coordinator. Classify the user's request into exactly one of: BUILD_APP, RESEARCH, DEVOPS_CHECK, DATA_PIPELINE, GENERAL_QUESTION, UNKNOWN. Respond with only the classification keyword.`
 
@@ -353,13 +358,28 @@ func strParamOr(params map[string]any, key, def string) string {
 // intent via the AI gateway and routes to the matching handler. For M10, the
 // BUILD_APP/RESEARCH/DEVOPS/DATA handlers are stubs; GENERAL_QUESTION is
 // answered directly and UNKNOWN returns a clarifying question.
-func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID string) (string, error) {
+func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string) (string, error) {
 	if strings.TrimSpace(userMsg) == "" {
 		return "", fmt.Errorf("agents: empty user message")
 	}
-	// sessionID scopes future per-conversation state (memory, cost, sub-agent
-	// reuse); the routing in M10 is stateless, so we only validate it here.
-	_ = sessionID
+	// Decouple from the caller's context with a 120s floor so a short-lived TUI
+	// request can't cancel a slow intent parse / build dispatch mid-flight. The
+	// caller's context is deliberately ignored (the TUI cancels it on nav).
+	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
+	defer cancel()
+
+	// Rule-based fast path FIRST: simple file/terminal operations and slash
+	// commands route to local tools directly — no AI call, instant. Only fall
+	// back to the AI classifier when the rules don't match.
+	if intent := ruleClassify(userMsg); intent == IntentLocalFile {
+		return c.handleLocalFile(ctx, sessionID, userMsg)
+	} else if intent == IntentBuildApp {
+		if c.cfg.BuildApp != nil {
+			return c.cfg.BuildApp(ctx, userMsg, sessionID)
+		}
+		return c.modeStub("BUILD_APP"), nil
+	}
+
 	intent := c.classify(ctx, userMsg)
 
 	switch intent {
@@ -398,6 +418,122 @@ func (c *Coordinator) classify(ctx context.Context, userMsg string) Intent {
 		}
 	}
 	return IntentUnknown
+}
+
+// localFileKeywords route a message to local tools directly (no AI).
+var localFileKeywords = []string{
+	"create a file", "write a file", "save to", "save it to", "save it in",
+	"read file", "read the file", "list files", "list the files",
+	"edit file", "edit the file", "run command", "run the command",
+}
+
+// buildAppKeywords route a message to Forge (which needs AI intent parsing).
+var buildAppKeywords = []string{
+	"build me an app", "build an android", "build a web app", "build a mobile",
+	"create a project", "build and deploy", "scaffold a project",
+}
+
+// ruleClassify is a fast, AI-free classifier. It returns IntentLocalFile for
+// simple file/terminal operations and slash commands, IntentBuildApp for real
+// build requests, or IntentUnknown when no rule matches (caller falls back to
+// the AI classifier). Slash commands and the explicit local-file keywords take
+// precedence over build keywords so "create a file" never reaches Forge.
+func ruleClassify(userMsg string) Intent {
+	msg := strings.ToLower(strings.TrimSpace(userMsg))
+	if strings.HasPrefix(msg, "/") {
+		return IntentLocalFile
+	}
+	for _, kw := range localFileKeywords {
+		if strings.Contains(msg, kw) {
+			return IntentLocalFile
+		}
+	}
+	for _, kw := range buildAppKeywords {
+		if strings.Contains(msg, kw) {
+			return IntentBuildApp
+		}
+	}
+	return IntentUnknown
+}
+
+// handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,
+// streaming progress. Slash commands map to specific tools; otherwise the
+// request is treated as a file write (path/content extracted heuristically).
+// It returns a transcript of the streamed steps.
+func (c *Coordinator) handleLocalFile(ctx context.Context, sessionID, userMsg string) (string, error) {
+	if c.cfg.LocalTools == nil {
+		return "", fmt.Errorf("agents: local tools are not enabled")
+	}
+	tool, params := parseLocalRequest(userMsg)
+	if tool == "" {
+		return "I can list, read, write, edit, or run things locally. Try `/ls`, `/read <file>`, `/run <cmd>`, or \"create a file <path>\".", nil
+	}
+
+	var steps []string
+	_, err := c.ExecuteLocalTool(ctx, sessionID, tool, params, func(s string) {
+		steps = append(steps, s)
+	})
+	transcript := strings.Join(steps, "\n")
+	if err != nil {
+		return transcript, nil // the transcript already carries the failure line
+	}
+	return transcript, nil
+}
+
+// parseLocalRequest maps a LOCAL_FILE message to a tool name + params. It
+// handles the slash commands precisely and a few common prose forms; an
+// unrecognised request yields an empty tool name (the caller explains usage).
+func parseLocalRequest(userMsg string) (string, map[string]any) {
+	msg := strings.TrimSpace(userMsg)
+	lower := strings.ToLower(msg)
+
+	// Slash commands: "/cmd args".
+	if strings.HasPrefix(msg, "/") {
+		cmd, rest, _ := strings.Cut(strings.TrimPrefix(msg, "/"), " ")
+		rest = strings.TrimSpace(rest)
+		switch strings.ToLower(cmd) {
+		case "ls":
+			return "list_directory", map[string]any{"path": rest}
+		case "read":
+			return "read_file", map[string]any{"path": rest}
+		case "run":
+			return "run_terminal", map[string]any{"command": rest}
+		case "write", "create":
+			path, content, _ := strings.Cut(rest, " ")
+			return "write_file", map[string]any{"path": path, "content": content, "create_dirs": true}
+		case "edit":
+			return "edit_file", map[string]any{"path": rest}
+		default:
+			return "", nil
+		}
+	}
+
+	switch {
+	case strings.Contains(lower, "list files") || strings.Contains(lower, "list the files"):
+		return "list_directory", map[string]any{"path": extractPath(msg)}
+	case strings.Contains(lower, "read file") || strings.Contains(lower, "read the file"):
+		return "read_file", map[string]any{"path": extractPath(msg)}
+	case strings.Contains(lower, "create a file") || strings.Contains(lower, "write a file") ||
+		strings.Contains(lower, "save to") || strings.Contains(lower, "save it to") ||
+		strings.Contains(lower, "save it in"):
+		return "write_file", map[string]any{"path": extractPath(msg), "content": "", "create_dirs": true}
+	}
+	return "", nil
+}
+
+// extractPath pulls a filesystem path from a prose request. It recognises an
+// absolute Windows (S:\…) or POSIX (/…) path token; otherwise returns "".
+func extractPath(msg string) string {
+	for _, tok := range strings.Fields(msg) {
+		t := strings.Trim(tok, "\"'.,")
+		if len(t) >= 3 && t[1] == ':' && (t[2] == '\\' || t[2] == '/') { // S:\ or S:/
+			return t
+		}
+		if strings.HasPrefix(t, "/") && len(t) > 1 {
+			return t
+		}
+	}
+	return ""
 }
 
 // modeStub returns the placeholder response for modes filled in later (M13–M16).

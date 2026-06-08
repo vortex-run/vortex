@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
 )
@@ -70,12 +71,18 @@ func NewAIIntentParser(gateway agents.AIGateway) *AIIntentParser {
 	return &AIIntentParser{gateway: gateway}
 }
 
-// Parse asks the AI gateway to classify the request into a BuildIntent.
-func (p *AIIntentParser) Parse(ctx context.Context, userMsg string) (BuildIntent, error) {
+// Parse asks the AI gateway to classify the request into a BuildIntent. The
+// caller's context is intentionally not used for the provider call (see below).
+func (p *AIIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, error) {
 	if strings.TrimSpace(userMsg) == "" {
 		return BuildIntent{}, fmt.Errorf("forge: empty user message")
 	}
-	reply, err := p.gateway.Complete(ctx, userMsg, intentSystemPrompt)
+	// Intent parsing calls a (possibly slow) provider; decouple from the
+	// caller's context with a 60s floor so a short-lived TUI request can't
+	// cancel the parse mid-flight.
+	parseCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	reply, err := p.gateway.Complete(parseCtx, userMsg, intentSystemPrompt)
 	if err != nil {
 		return BuildIntent{}, fmt.Errorf("forge: intent completion: %w", err)
 	}
