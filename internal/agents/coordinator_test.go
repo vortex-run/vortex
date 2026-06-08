@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestCoordinator(t *testing.T, gw AIGateway) *Coordinator {
@@ -219,4 +220,154 @@ func TestCoordinator_RunToolNoApprovalNeeded(t *testing.T) {
 	if res.(map[string]any)["content"].(string) != "hi" {
 		t.Errorf("unexpected content: %v", res)
 	}
+}
+
+// localCoord builds a coordinator with local tools rooted at a temp dir.
+func localCoord(t *testing.T, approval ApprovalFunc) (*Coordinator, string) {
+	t.Helper()
+	dir := t.TempDir()
+	reg := NewToolRegistry()
+	if err := RegisterLocalTools(reg, LocalFSConfig{Root: dir}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:        NewBus(),
+		AIGateway:  StubAIGateway{},
+		LocalTools: reg,
+		WorkingDir: dir,
+		Approval:   approval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, dir
+}
+
+func TestCoordinator_WorkingDirDefaults(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	if c.WorkingDir() == "" {
+		t.Error("WorkingDir should default to the process cwd")
+	}
+}
+
+func TestExecuteLocalTool_ReadOnlyStreams(t *testing.T) {
+	c, dir := localCoord(t, nil)
+	_ = osWrite(t, dir, "f.txt", "hello")
+	var steps []string
+	res, err := c.ExecuteLocalTool(context.Background(), "s1", "read_file",
+		map[string]any{"path": "f.txt"}, func(m string) { steps = append(steps, m) })
+	if err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	if res.(map[string]any)["content"] != "hello" {
+		t.Errorf("content = %v", res.(map[string]any)["content"])
+	}
+	joined := strings.Join(steps, " | ")
+	if !strings.Contains(joined, "Reading file") || !strings.Contains(joined, "File read") {
+		t.Errorf("read should stream start+done steps: %s", joined)
+	}
+}
+
+func TestExecuteLocalTool_ApprovedWriteExecutes(t *testing.T) {
+	// Approval callback auto-approves write_file.
+	c, dir := localCoord(t, func(_ context.Context, req ApprovalRequest) bool {
+		return req.Tool == "write_file"
+	})
+	var steps []string
+	_, err := c.ExecuteLocalTool(context.Background(), "s1", "write_file",
+		map[string]any{"path": "out.txt", "content": "data"}, func(m string) { steps = append(steps, m) })
+	if err != nil {
+		t.Fatalf("approved write: %v", err)
+	}
+	data, _ := osRead(dir, "out.txt")
+	if data != "data" {
+		t.Errorf("file content = %q, want data", data)
+	}
+	joined := strings.Join(steps, " | ")
+	if !strings.Contains(joined, "APPROVAL_REQUIRED") || !strings.Contains(joined, "File created") {
+		t.Errorf("write should stream approval + done: %s", joined)
+	}
+}
+
+func TestExecuteLocalTool_RejectedDoesNotWrite(t *testing.T) {
+	c, dir := localCoord(t, func(context.Context, ApprovalRequest) bool { return false })
+	_, err := c.ExecuteLocalTool(context.Background(), "s1", "write_file",
+		map[string]any{"path": "no.txt", "content": "x"}, func(string) {})
+	if err == nil {
+		t.Error("rejected write should error")
+	}
+	if _, rerr := osRead(dir, "no.txt"); rerr == nil {
+		t.Error("rejected write must NOT create the file")
+	}
+}
+
+func TestExecuteLocalTool_NilApproverDenies(t *testing.T) {
+	// No Approval callback AND no ApproveAction resolver → must deny (fail-safe).
+	c, dir := localCoord(t, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ExecuteLocalTool(context.Background(), "s1", "write_file",
+			map[string]any{"path": "x.txt", "content": "x"}, func(string) {})
+		done <- err
+	}()
+	// Resolve via ApproveAction with reject to avoid waiting the full timeout.
+	waitForPendingApproval(t, c, "s1")
+	if !c.ApproveAction("s1", false) {
+		t.Fatal("ApproveAction should match the pending request")
+	}
+	if err := <-done; err == nil {
+		t.Error("a rejected (and otherwise unapproved) action must deny")
+	}
+	if _, rerr := osRead(dir, "x.txt"); rerr == nil {
+		t.Error("denied action must not create the file")
+	}
+}
+
+func TestApproveAction_ResolvesPending(t *testing.T) {
+	c, dir := localCoord(t, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.ExecuteLocalTool(context.Background(), "sess", "write_file",
+			map[string]any{"path": "ok.txt", "content": "yes"}, func(string) {})
+		done <- err
+	}()
+	waitForPendingApproval(t, c, "sess")
+	if !c.ApproveAction("sess", true) {
+		t.Fatal("ApproveAction should resolve the pending write")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("approved write should succeed: %v", err)
+	}
+	if data, _ := osRead(dir, "ok.txt"); data != "yes" {
+		t.Errorf("approved file content = %q, want yes", data)
+	}
+}
+
+func TestApproveAction_UnknownSession(t *testing.T) {
+	c, _ := localCoord(t, nil)
+	if c.ApproveAction("ghost", true) {
+		t.Error("ApproveAction for an unknown session should return false")
+	}
+}
+
+// --- small fs helpers for these tests ---------------------------------------
+
+func osWrite(t *testing.T, dir, name, content string) error {
+	t.Helper()
+	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600)
+}
+func osRead(dir, name string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	return string(b), err
+}
+
+func waitForPendingApproval(t *testing.T, c *Coordinator, session string) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if c.HasPendingApproval(session) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("no pending approval appeared")
 }
