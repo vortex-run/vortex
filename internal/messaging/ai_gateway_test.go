@@ -2,10 +2,12 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,4 +238,95 @@ func (c *fakeClock) advance(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.t = c.t.Add(d)
+}
+
+func TestAIGateway_DeepSeekOpenAICompatible(t *testing.T) {
+	var gotPath, gotAuth string
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotModel = body.Model
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"deepseek reply"}}],"usage":{"total_tokens":8}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderDeepSeek, APIKey: "sk-ds", Endpoint: srv.URL, Models: []string{"deepseek-chat"}}},
+		Client:    srv.Client(),
+	})
+	out, err := g.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "deepseek reply" {
+		t.Errorf("out = %q, want deepseek reply", out)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Errorf("path = %q, want OpenAI-compatible /v1/chat/completions", gotPath)
+	}
+	if gotAuth != "Bearer sk-ds" {
+		t.Errorf("auth = %q, want Bearer sk-ds", gotAuth)
+	}
+	if gotModel != "deepseek-chat" {
+		t.Errorf("model = %q, want deepseek-chat", gotModel)
+	}
+}
+
+func TestAIGateway_GeminiEndpointAndParse(t *testing.T) {
+	var gotKey, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.URL.Query().Get("key")
+		gotPath = r.URL.Path
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"gemini reply"}]}}],"usageMetadata":{"totalTokenCount":12}}`)
+	}))
+	defer srv.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderGemini, APIKey: "g-key", Endpoint: srv.URL, Models: []string{"gemini-1.5-flash"}}},
+		Client:    srv.Client(),
+	})
+	out, err := g.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "gemini reply" {
+		t.Errorf("out = %q, want gemini reply", out)
+	}
+	if gotKey != "g-key" {
+		t.Errorf("query key = %q, want g-key", gotKey)
+	}
+	if !strings.Contains(gotPath, "gemini-1.5-flash:generateContent") {
+		t.Errorf("path = %q, want .../gemini-1.5-flash:generateContent", gotPath)
+	}
+}
+
+func TestAIGateway_DeepSeekFallback(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"gemini fallback"}]}}]}`)
+	}))
+	defer ok.Close()
+
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderDeepSeek, APIKey: "sk", Endpoint: failing.URL, Models: []string{"deepseek-chat"}, Priority: 0},
+			{Name: ProviderGemini, APIKey: "g", Endpoint: ok.URL, Models: []string{"gemini-1.5-flash"}, Priority: 1},
+		},
+		Client: ok.Client(),
+	})
+	out, err := g.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "gemini fallback" {
+		t.Errorf("out = %q, want fallback to gemini after deepseek fails", out)
+	}
 }
