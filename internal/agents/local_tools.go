@@ -64,11 +64,14 @@ var protectedWritePrefixes = []string{
 	`c:\windows`,
 }
 
-// isProtectedPath reports whether abs falls inside a protected system directory.
-func isProtectedPath(abs string) bool {
-	lower := strings.ToLower(filepath.Clean(abs))
-	for _, p := range protectedWritePrefixes {
-		if lower == p || strings.HasPrefix(lower, p+`\`) {
+// isProtectedPath reports whether p targets a protected system directory. It
+// matches the Windows system paths regardless of host OS (so the check is
+// deterministic in CI on Linux too): it normalises separators and looks for a
+// "c:\windows" / "c:\windows\system32" prefix in the path as written.
+func isProtectedPath(p string) bool {
+	norm := strings.ToLower(strings.ReplaceAll(p, "/", `\`))
+	for _, prefix := range protectedWritePrefixes {
+		if norm == prefix || strings.HasPrefix(norm, prefix+`\`) {
 			return true
 		}
 	}
@@ -209,7 +212,7 @@ func (t WriteLocalFileTool) Execute(_ context.Context, params map[string]any) (a
 	if err != nil {
 		return nil, err
 	}
-	if isProtectedPath(abs) {
+	if isProtectedPath(abs) || isProtectedPath(p) {
 		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
 	}
 	if t.RequireApproval {
@@ -266,7 +269,7 @@ func (t EditFileTool) Execute(_ context.Context, params map[string]any) (any, er
 	if err != nil {
 		return nil, err
 	}
-	if isProtectedPath(abs) {
+	if isProtectedPath(abs) || isProtectedPath(p) {
 		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
 	}
 	data, err := os.ReadFile(abs) //nolint:gosec // user-approved local read
@@ -421,11 +424,12 @@ func (t CreateProjectTool) Execute(_ context.Context, params map[string]any) (an
 	}
 	description, _ := params["description"].(string)
 	path, _ := params["path"].(string)
-	dir, err := t.cfg.resolveLocal(filepath.Join(path, name))
+	rawDir := filepath.Join(path, name)
+	dir, err := t.cfg.resolveLocal(rawDir)
 	if err != nil {
 		return nil, err
 	}
-	if isProtectedPath(dir) {
+	if isProtectedPath(dir) || isProtectedPath(rawDir) {
 		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, dir)
 	}
 	files := projectFiles(name, typ, description)

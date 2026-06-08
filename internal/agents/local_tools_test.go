@@ -287,3 +287,28 @@ func assertApproval(t *testing.T, name string, err error) {
 		t.Errorf("%s should be approval-gated, got %v", name, err)
 	}
 }
+
+func TestIsProtectedPath_CrossPlatform(t *testing.T) {
+	// These must be detected on ANY host OS (the check is string-based, not
+	// dependent on filepath.IsAbs which is OS-specific).
+	blocked := []string{
+		`C:\Windows\System32\drivers\etc\hosts`,
+		`C:\Windows\notepad.exe`,
+		`c:\windows`,
+		`C:/Windows/System32/x.dll`, // forward slashes normalised
+	}
+	for _, p := range blocked {
+		if !isProtectedPath(p) {
+			t.Errorf("isProtectedPath(%q) = false, want true", p)
+		}
+	}
+	allowed := []string{
+		`S:\DETAILS\calc.py`, `/tmp/out.txt`, `C:\Users\me\project\main.go`,
+		`/home/user/windows-notes.txt`, // contains 'windows' but not the prefix
+	}
+	for _, p := range allowed {
+		if isProtectedPath(p) {
+			t.Errorf("isProtectedPath(%q) = true, want false", p)
+		}
+	}
+}
