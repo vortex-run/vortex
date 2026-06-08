@@ -923,7 +923,7 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 	}
 }
 
-func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) bool {
+func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) (string, bool) {
 	return a.rt.Approve(sessionID, approved)
 }
 

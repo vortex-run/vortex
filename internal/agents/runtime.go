@@ -202,8 +202,9 @@ type RuntimeStats struct {
 }
 
 // Approve resolves a pending tool-action approval for a session, delegating to
-// the coordinator. Returns true when a pending action matched.
-func (r *Runtime) Approve(sessionID string, approved bool) bool {
+// the coordinator. It returns the result transcript (executed on approval) and
+// whether a pending action matched.
+func (r *Runtime) Approve(sessionID string, approved bool) (string, bool) {
 	return r.cfg.Coordinator.ApproveAction(sessionID, approved)
 }
 

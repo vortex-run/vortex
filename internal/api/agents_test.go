@@ -37,7 +37,7 @@ func (s stubRuntime) Submit(_ context.Context, _, _ string) (<-chan string, erro
 
 func (s stubRuntime) Stats() AgentRuntimeStats { return s.stats }
 
-func (s stubRuntime) Approve(string, bool) bool { return s.approveMatch }
+func (s stubRuntime) Approve(string, bool) (string, bool) { return "✓ done", s.approveMatch }
 
 // newAgentTestServer starts a live management server with the agent runtime
 // wired, returning its address and a cleanup func.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,11 +91,16 @@ type CoordinatorConfig struct {
 }
 
 // pendingApproval holds a tool action awaiting the user's approve/reject via
-// ApproveAction (e.g. the TUI's [Y]/[N]).
+// ApproveAction (e.g. the TUI's [Y]/[N]). For the synchronous (Telegram) path,
+// result delivers the decision to a blocked awaitApproval. For the async (TUI)
+// path, tool/params let ApproveAction execute the action directly when the
+// approve/reject POST arrives — the original Submit has already returned the
+// preview, so it cannot block waiting.
 type pendingApproval struct {
-	tool   string
-	params map[string]any
-	result chan bool
+	toolName string
+	tool     Tool
+	params   map[string]any
+	result   chan bool
 }
 
 // Coordinator is the single user-facing agent. It classifies user messages,
@@ -169,10 +175,6 @@ func (c *Coordinator) RunTool(ctx context.Context, name string, params map[strin
 	return c.cfg.Tools.ExecuteApproved(ctx, name, params)
 }
 
-// localApprovalTimeout bounds how long a local-tool action waits for the user's
-// approve/reject before it is treated as rejected (fail-safe).
-const localApprovalTimeout = 10 * time.Minute
-
 // ExecuteLocalTool runs a local FS/terminal tool, streaming human-readable
 // progress lines via emit (each becomes a chat message). Read-only tools run
 // immediately; mutating tools that return an *ApprovalError are routed for
@@ -202,71 +204,81 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 		return result, nil
 	}
 
-	// Approval required — surface the preview, then obtain a decision.
+	// Approval required. If a synchronous approver (Telegram) is configured,
+	// block on it as before. Otherwise (the TUI), register the pending action
+	// and RETURN immediately with the preview — the caller's HTTP response must
+	// not block, because the TUI can only render the approval box after Submit
+	// returns. ApproveAction then executes the action when the user's
+	// approve/reject POST arrives.
 	emit("[APPROVAL_REQUIRED] " + ae.Request.Description)
 	if ae.Request.Preview != "" {
 		emit(ae.Request.Preview)
 	}
-	approved := c.awaitApproval(ctx, session, ae.Request)
-	if !approved {
-		emit("✗ Action rejected by user")
-		return nil, fmt.Errorf("agents: action rejected by user")
-	}
 
-	// Re-run with the approval gate cleared.
-	approvedResult, aerr := executeApprovedLocal(ctx, tool, params)
-	if aerr != nil {
-		emit("⚠ " + aerr.Error())
-		return nil, aerr
-	}
-	emit(toolDoneLine(name, approvedResult))
-	return approvedResult, nil
-}
-
-// awaitApproval resolves a pending action: it prefers the synchronous Approval
-// callback (Telegram/inline); otherwise it registers a session-keyed pending
-// request that ApproveAction resolves, blocking up to localApprovalTimeout. With
-// neither available it returns false (deny).
-func (c *Coordinator) awaitApproval(ctx context.Context, session string, req ApprovalRequest) bool {
 	if c.cfg.Approval != nil {
-		return c.cfg.Approval(ctx, req)
+		approved := c.cfg.Approval(ctx, ae.Request)
+		if !approved {
+			emit("✗ Action rejected by user")
+			return nil, fmt.Errorf("agents: action rejected by user")
+		}
+		approvedResult, aerr := executeApprovedLocal(ctx, tool, params)
+		if aerr != nil {
+			emit("⚠ " + aerr.Error())
+			return nil, aerr
+		}
+		emit(toolDoneLine(name, approvedResult))
+		return approvedResult, nil
 	}
-	p := &pendingApproval{tool: req.Tool, params: req.Params, result: make(chan bool, 1)}
-	c.mu.Lock()
-	c.pending[session] = p
-	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		delete(c.pending, session)
-		c.mu.Unlock()
-	}()
 
-	timer := time.NewTimer(localApprovalTimeout)
-	defer timer.Stop()
-	select {
-	case ok := <-p.result:
-		return ok
-	case <-timer.C:
-		return false // timeout → deny
-	case <-ctx.Done():
-		return false
+	// Async (TUI) path: stash the action and return the preview now.
+	c.mu.Lock()
+	c.pending[session] = &pendingApproval{
+		toolName: name, tool: tool, params: params,
+		result: make(chan bool, 1),
 	}
+	c.mu.Unlock()
+	return nil, nil
 }
 
-// ApproveAction resolves a pending approval for a session (called by the
-// /api/agents/approve handler). It returns true when a pending action matched.
-func (c *Coordinator) ApproveAction(session string, approved bool) bool {
+// ApproveAction resolves a pending TUI approval for a session and, on approval,
+// EXECUTES the stashed action — returning a transcript of the result (the
+// original Submit already returned the preview, so the work happens here).
+// matched is false when no action was pending for the session.
+func (c *Coordinator) ApproveAction(session string, approved bool) (transcript string, matched bool) {
 	c.mu.Lock()
 	p, ok := c.pending[session]
+	if ok {
+		delete(c.pending, session)
+	}
 	c.mu.Unlock()
 	if !ok {
-		return false
+		return "", false
 	}
+
+	// Legacy synchronous (Telegram) waiter, if any, still gets the decision.
 	select {
 	case p.result <- approved:
 	default:
 	}
-	return true
+
+	if !approved {
+		slog.Default().Info("approval rejected", "tool", p.toolName, "session", session)
+		return "✗ Action rejected by user", true
+	}
+	if p.tool == nil {
+		return "✓ Action approved", true
+	}
+
+	slog.Default().Info("approval received, executing tool", "tool", p.toolName, "session", session)
+	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
+	defer cancel()
+	result, err := executeApprovedLocal(ctx, p.tool, p.params)
+	if err != nil {
+		slog.Default().Error("tool execution after approval failed", "tool", p.toolName, "err", err)
+		return "⚠ " + err.Error(), true
+	}
+	slog.Default().Info("tool executed after approval", "tool", p.toolName, "result", result)
+	return toolDoneLine(p.toolName, result), true
 }
 
 // HasPendingApproval reports whether a session has an action awaiting approval.

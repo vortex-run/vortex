@@ -23,8 +23,9 @@ type AgentRuntime interface {
 	Submit(ctx context.Context, userMsg, sessionID string) (<-chan string, error)
 	Stats() AgentRuntimeStats
 	// Approve resolves a pending tool-action approval for a session (the TUI
-	// [Y]/[N]). Returns true when a pending action matched.
-	Approve(sessionID string, approved bool) bool
+	// [Y]/[N]). On approval it executes the stashed action and returns a result
+	// transcript; matched is false when no action was pending.
+	Approve(sessionID string, approved bool) (transcript string, matched bool)
 }
 
 // AgentRuntimeStats mirrors the runtime's stats for the API. The wiring in
@@ -151,13 +152,13 @@ func (s *Server) handleAgentApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
-	matched := s.agentRuntime.Approve(req.SessionID, req.Approved)
+	transcript, matched := s.agentRuntime.Approve(req.SessionID, req.Approved)
 	if !matched {
 		http.Error(w, "no pending approval for session", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"resolved": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{"resolved": true, "result": transcript})
 }
 
 // handleAgentStatus returns the runtime stats.

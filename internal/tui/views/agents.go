@@ -195,11 +195,15 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.awaiting = false
 		m.approvalReady = false
 		m.approvalChoice = ""
-		verb := "rejected"
 		if msg.approved {
-			verb = "approved"
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✓ Action approved", Timestamp: time.Now()})
+		} else {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✗ Action rejected", Timestamp: time.Now()})
 		}
-		m.messages = append(m.messages, ChatMessage{Role: "system", Content: "Action " + verb + ".", Timestamp: time.Now()})
+		// Show the server-side execution transcript (e.g. "✓ File created: …").
+		if strings.TrimSpace(msg.result) != "" {
+			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: msg.result, Timestamp: time.Now()})
+		}
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		return m, nil
@@ -354,9 +358,11 @@ func (m AgentsModel) handleForgeProgress(msg forgeProgress) (tea.Model, tea.Cmd)
 // ForgePolling reports whether a forge job is being polled (for tests).
 func (m AgentsModel) ForgePolling() bool { return m.forgeJob != "" }
 
-// approvalResult is emitted after an approve/reject decision is sent.
+// approvalResult is emitted after an approve/reject decision is sent. result is
+// the server-side execution transcript (the file write happens on approval).
 type approvalResult struct {
 	approved bool
+	result   string
 }
 
 // approvalReadyMsg fires ~100ms after an approval box renders, enabling Y/N.
@@ -368,15 +374,17 @@ func (m AgentsModel) ApprovalReady() bool { return m.approvalReady }
 // ApprovalChoice returns the staged choice ("approve"/"reject"/"") (for tests).
 func (m AgentsModel) ApprovalChoice() string { return m.approvalChoice }
 
-// sendApproval posts the user's approve/reject decision to the agent runtime.
+// sendApproval posts the user's approve/reject decision to the agent runtime
+// and carries back the result transcript (the action executes on approval).
 func (m AgentsModel) sendApproval(approved bool) tea.Cmd {
 	c := m.client
 	sid := m.approvalID
 	return func() tea.Msg {
+		result := ""
 		if c != nil {
-			_ = c.Approve(sid, approved)
+			result, _ = c.Approve(sid, approved)
 		}
-		return approvalResult{approved: approved}
+		return approvalResult{approved: approved, result: result}
 	}
 }
 

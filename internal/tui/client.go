@@ -332,25 +332,32 @@ func (c *Client) Submit(msg, sessionID string) (string, error) {
 	return out.Response, nil
 }
 
-// Approve posts an approve/reject decision for a pending agent tool action.
-func (c *Client) Approve(sessionID string, approved bool) error {
+// Approve posts an approve/reject decision for a pending agent tool action and
+// returns the result transcript (the action executes server-side on approval,
+// which may call a slow tool, so this uses the long submit timeout).
+func (c *Client) Approve(sessionID string, approved bool) (string, error) {
 	body, _ := json.Marshal(map[string]any{"session_id": sessionID, "approved": approved})
-	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/approve", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	approveClient := &http.Client{Timeout: submitTimeout}
+	resp, err := approveClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("tui: approve returned %d", resp.StatusCode)
+		return "", fmt.Errorf("tui: approve returned %d", resp.StatusCode)
 	}
-	return nil
+	var out struct {
+		Result string `json:"result"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out.Result, nil
 }
 
 // Reload triggers a config reload via the control plane.
