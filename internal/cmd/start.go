@@ -46,11 +46,17 @@ func newStartCommand() *cobra.Command {
 	var pidfile string
 	var setup bool
 	var withUI bool
+	var cwd string
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the VORTEX server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Set the agent's working directory (where relative paths and the
+			// local FS/terminal tools resolve against). Defaults to the cwd.
+			if cwd != "" {
+				agentWorkingDir = cwd
+			}
 			// Run the first-run wizard when --setup is given, or automatically on
 			// first start when no AI provider is configured AND stdin is an
 			// interactive terminal (never block a non-interactive/scripted start,
@@ -71,7 +77,25 @@ func newStartCommand() *cobra.Command {
 	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
+	c.Flags().StringVar(&cwd, "cwd", "", "working directory for the agent's local file/terminal tools (default: current dir)")
 	return c
+}
+
+// agentWorkingDir is the directory the agent's local FS/terminal tools resolve
+// relative paths against (set by `vortex start --cwd`; defaults to os.Getwd).
+var agentWorkingDir string
+
+// resolveWorkingDir returns the configured agent working directory, defaulting
+// to the process cwd.
+func resolveWorkingDir() string {
+	if agentWorkingDir != "" {
+		return agentWorkingDir
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
 }
 
 // runStart performs the start sequence. ctx controls shutdown: cancelling it
@@ -318,7 +342,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		apiSrv.SetForgeRuntime(&forgeRuntimeAdapter{jm: forgeJobs})
 	}
 
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs))
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir())
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -640,6 +664,7 @@ func wireDashboardProviders(
 			TLSProvider:   cfg.TLS.Provider,
 			SecretBackend: secretBackendKind(cfg),
 			PolicyDefault: policyEngine != nil && policyEngine.UsingDefault(),
+			WorkingDir:    resolveWorkingDir(),
 		}
 		if id, err := vtls.NewNodeIdentity(cfg.Cluster.Name); err == nil {
 			info.NodeID = id.NodeID
@@ -820,7 +845,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -839,13 +864,25 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		sandboxed = sandboxed.WithAudit(auditLog, "coordinator")
 	}
 
+	// Local filesystem + terminal tools (real machine access, approval-gated),
+	// confined to the working directory so writes/cwd stay inside the user's
+	// project tree. Registered in their own registry to avoid read_file/
+	// write_file name collisions with the sandbox builtins.
+	localRegistry := agents.NewToolRegistry()
+	if err := agents.RegisterLocalTools(localRegistry, agents.LocalFSConfig{Root: workingDir}); err != nil {
+		log.Warn("local agent tools disabled: registration failed", "err", err)
+		localRegistry = nil
+	}
+
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
-		Bus:       bus,
-		Tools:     sandboxed,
-		AIGateway: gateway,
-		MaxAgents: 8,
-		Approval:  approval,
-		BuildApp:  buildApp,
+		Bus:        bus,
+		Tools:      sandboxed,
+		LocalTools: localRegistry,
+		AIGateway:  gateway,
+		MaxAgents:  8,
+		Approval:   approval,
+		BuildApp:   buildApp,
+		WorkingDir: workingDir,
 	})
 	if err != nil {
 		log.Warn("agent runtime disabled: coordinator init failed", "err", err)

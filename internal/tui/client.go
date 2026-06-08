@@ -69,6 +69,7 @@ type StatusData struct {
 	AuditCount    int64  `json:"audit_entry_count"`
 	ClusterName   string `json:"cluster_name"`
 	Version       string `json:"version"`
+	WorkingDir    string `json:"working_dir"`
 }
 
 // MetricsData is parsed from the Prometheus /metrics exposition.

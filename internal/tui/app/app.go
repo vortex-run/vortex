@@ -58,6 +58,7 @@ type App struct {
 	views      map[ViewID]tea.Model
 	selected   int // sidebar selection index
 	health     *tui.HealthData
+	workingDir string // shown in the top bar
 	width      int
 	height     int
 	setupMode  bool
@@ -121,10 +122,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v, ok := a.views[a.activeView]; ok {
 			a.views[a.activeView], cmd = v.Update(views.RefreshMsg{})
 		}
-		// Keep the top bar's health fresh.
+		// Keep the top bar's health + working dir fresh.
 		if a.client != nil {
 			if h, err := a.client.Health(); err == nil {
 				a.health = h
+			}
+			if st, err := a.client.Status(); err == nil && st.WorkingDir != "" {
+				a.workingDir = st.WorkingDir
 			}
 		}
 		return a, tea.Batch(cmd, tick())
@@ -196,6 +200,9 @@ func (a *App) topBar() string {
 		)
 	} else {
 		parts = append(parts, tui.SubtitleStyle.Render("disconnected"))
+	}
+	if a.workingDir != "" {
+		parts = append(parts, tui.Pill("📂 "+a.workingDir, tui.ColorPurple))
 	}
 	parts = append(parts, tui.HelpStyle.Render("[Tab] views  [q] quit"))
 	return strings.Join(parts, "  ")

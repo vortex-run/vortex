@@ -130,6 +130,7 @@ type StatusInfo struct {
 	AuditEntryCount int    `json:"audit_entry_count"`
 	ClusterName     string `json:"cluster_name"`
 	Version         string `json:"version"`
+	WorkingDir      string `json:"working_dir"`
 }
 
 // SecretStatus is one declared secret's set/unset state (never its value).
