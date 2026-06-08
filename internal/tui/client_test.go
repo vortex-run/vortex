@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeVortex builds an httptest server emulating the management API. It records
@@ -206,5 +207,51 @@ func TestClient_LoadAPIKeyEnvBeatsFile(t *testing.T) {
 	c := NewClient(ClientConfig{})
 	if got := c.LoadAPIKey(); got != "env-key" {
 		t.Errorf("env var should win over file: got %q", got)
+	}
+}
+
+func TestClient_SubmitTimeoutIsLong(t *testing.T) {
+	// Submit must tolerate a slow (multi-second) handler that the 5s default
+	// would have killed. Server sleeps 6s then replies.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents/submit", func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(6 * time.Second)
+		_, _ = io.WriteString(w, `{"response":"slow ok","session_id":"s1"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(ClientConfig{BaseURL: srv.URL, Timeout: 5 * time.Second}) // 5s default
+	resp, err := c.Submit("hi", "s1")
+	if err != nil {
+		t.Fatalf("Submit should not time out at 6s (uses 180s): %v", err)
+	}
+	if resp != "slow ok" {
+		t.Errorf("resp = %q, want 'slow ok'", resp)
+	}
+}
+
+func TestClient_TimeoutConstants(t *testing.T) {
+	if submitTimeout < 180*time.Second {
+		t.Errorf("submitTimeout = %v, want >= 180s", submitTimeout)
+	}
+	if forgeStatusTimeout < 300*time.Second {
+		t.Errorf("forgeStatusTimeout = %v, want >= 300s", forgeStatusTimeout)
+	}
+}
+
+func TestClient_HealthStillUsesShortTimeout(t *testing.T) {
+	// A slow /health must still fail fast (the 5s default applies to reads).
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second)
+		_, _ = io.WriteString(w, `{"status":"ok"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(ClientConfig{BaseURL: srv.URL, Timeout: 500 * time.Millisecond})
+	if _, err := c.Health(); err == nil {
+		t.Error("Health should honour the short client timeout and fail on a 2s handler")
 	}
 }

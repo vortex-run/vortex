@@ -271,24 +271,51 @@ func (c *Client) Namespaces() (*NamespacesData, error) {
 
 // ForgeStatus fetches GET /api/forge/status/{id}.
 func (c *Client) ForgeStatus(jobID string) (*ForgeJobData, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), forgeStatusTimeout)
+	defer cancel()
+	req, err := c.newReq(ctx, http.MethodGet, "/api/forge/status/"+jobID, nil)
+	if err != nil {
+		return nil, err
+	}
+	forgeClient := &http.Client{Timeout: forgeStatusTimeout}
+	resp, err := forgeClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tui: forge status returned %d", resp.StatusCode)
+	}
 	var d ForgeJobData
-	if err := c.getJSON("/api/forge/status/"+jobID, &d); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
 		return nil, err
 	}
 	return &d, nil
 }
 
-// Submit POSTs a message to the agent runtime and returns the response.
+// submitTimeout bounds an agent submit. The coordinator may call a slow
+// provider (DeepSeek can take 10–30s) for content generation, so Submit uses a
+// much longer deadline than the fast read endpoints.
+const submitTimeout = 180 * time.Second
+
+// forgeStatusTimeout bounds a forge status poll. Forge builds can run for
+// minutes; the status endpoint itself is fast, but we allow generous headroom.
+const forgeStatusTimeout = 300 * time.Second
+
+// Submit POSTs a message to the agent runtime and returns the response. It uses
+// a dedicated 180s client/context (not the 5s default) because the agent may
+// wait on a slow AI provider.
 func (c *Client) Submit(msg, sessionID string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
-	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	submitClient := &http.Client{Timeout: submitTimeout}
+	resp, err := submitClient.Do(req)
 	if err != nil {
 		return "", err
 	}

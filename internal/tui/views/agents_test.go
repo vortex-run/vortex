@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/vortex-run/vortex/internal/tui"
@@ -289,5 +290,50 @@ func TestAgents_ForgePollErrorStops(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("no further poll after error")
+	}
+}
+
+func TestAgents_ThinkingShownImmediatelyOnSubmit(t *testing.T) {
+	m := NewAgents(nil)
+	m.input.SetValue("hello")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	am := updated.(AgentsModel)
+	if !am.Thinking() {
+		t.Fatal("model should be thinking right after submit")
+	}
+	// The transcript should already show an animated Thinking line.
+	if !strings.Contains(am.renderMessages(), "Thinking") {
+		t.Errorf("a Thinking indicator should appear immediately:\n%s", am.renderMessages())
+	}
+	if cmd == nil {
+		t.Error("submit should also kick the spinner/submit commands")
+	}
+}
+
+func TestAgents_SpinnerTickRefreshesWhileThinking(t *testing.T) {
+	m := NewAgents(nil)
+	m.thinking = true
+	// A spinner tick while thinking should return a follow-up tick command so
+	// the animation keeps running (and the transcript is rebuilt each frame).
+	_, cmd := m.Update(spinner.TickMsg{})
+	if cmd == nil {
+		t.Error("spinner tick while thinking should schedule the next frame")
+	}
+}
+
+func TestAgents_ResponseReplacesThinking(t *testing.T) {
+	m := NewAgents(nil)
+	m.thinking = true
+	updated, _ := m.Update(agentResponse{content: "the real answer"})
+	am := updated.(AgentsModel)
+	if am.Thinking() {
+		t.Error("response should clear thinking")
+	}
+	out := am.renderMessages()
+	if !strings.Contains(out, "the real answer") {
+		t.Errorf("response should replace the Thinking line:\n%s", out)
+	}
+	if strings.Contains(out, "Thinking…") {
+		t.Errorf("Thinking indicator should be gone after the response:\n%s", out)
 	}
 }

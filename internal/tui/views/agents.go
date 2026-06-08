@@ -139,6 +139,13 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		// While waiting on the agent, rebuild the transcript each frame so the
+		// "⠸ Thinking…" line actually animates (reassures the user the request
+		// is in flight). Keep the view pinned to the bottom.
+		if m.thinking {
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+		}
 		return m, cmd
 
 	case agentResponse:
