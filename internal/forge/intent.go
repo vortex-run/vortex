@@ -93,6 +93,10 @@ func (p *AIIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, 
 	if intent.Description == "" {
 		intent.Description = userMsg
 	}
+	// Cap clarifying questions so the conversation can't drag on — at most 2.
+	if len(intent.ClarifyingQs) > 2 {
+		intent.ClarifyingQs = intent.ClarifyingQs[:2]
+	}
 	return intent, nil
 }
 

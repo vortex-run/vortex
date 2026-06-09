@@ -86,3 +86,15 @@ func hasTarget(intent BuildIntent, target string) bool {
 	}
 	return false
 }
+
+func TestAIIntentParser_CapsClarifyingQuestions(t *testing.T) {
+	gw := &scriptedGateway{replies: []string{`{"app_type":"mobile","clarifying_questions":["q1","q2","q3","q4"]}`}}
+	p := NewAIIntentParser(gw)
+	intent, err := p.Parse(context.Background(), "build something")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(intent.ClarifyingQs) != 2 {
+		t.Errorf("clarifying questions = %d, want capped at 2: %v", len(intent.ClarifyingQs), intent.ClarifyingQs)
+	}
+}

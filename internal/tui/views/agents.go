@@ -63,11 +63,13 @@ func NewAgents(client *tui.Client) AgentsModel {
 	vp := viewport.New(0, 0)
 
 	return AgentsModel{
-		client:    client,
-		input:     in,
-		viewport:  vp,
-		spinner:   tui.Spinner(),
-		sessionID: fmt.Sprintf("tui-%d", time.Now().Unix()),
+		client:   client,
+		input:    in,
+		viewport: vp,
+		spinner:  tui.Spinner(),
+		// Generate ONCE; the same session id is used for every Submit/Approve so
+		// multi-turn flows (clarifying questions) stay in one session.
+		sessionID: fmt.Sprintf("tui-%d", time.Now().UnixMilli()),
 		messages: []ChatMessage{
 			{Role: "system", Content: "Agent runtime ready. How can I help?", Timestamp: time.Now()},
 		},
