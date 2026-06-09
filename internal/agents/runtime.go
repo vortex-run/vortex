@@ -108,23 +108,30 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 	if r.stopped.Load() {
 		return nil, ErrRuntimeStopped
 	}
+	// Register this in-flight Submit under r.mu so wg.Add never races with the
+	// wg.Wait in Stop: once Stop has set stopped (also under r.mu), no new Add
+	// happens. This closes a TOCTOU gap between the stopped check and wg.Add.
 	r.mu.Lock()
-	started := r.started
-	r.mu.Unlock()
-	if !started {
-		return nil, fmt.Errorf("agents: runtime not started")
+	if !r.started || r.stopped.Load() {
+		r.mu.Unlock()
+		if !r.started {
+			return nil, fmt.Errorf("agents: runtime not started")
+		}
+		return nil, ErrRuntimeStopped
 	}
 
 	// Acquire a concurrency slot; reject rather than queue unboundedly.
 	select {
 	case r.submitSem <- struct{}{}:
 	default:
+		r.mu.Unlock()
 		return nil, ErrTooManyRequests
 	}
 
 	out := make(chan string, 1)
 	r.queue.Add(1)
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go func() {
 		defer r.wg.Done()
 		defer func() { <-r.submitSem }()
@@ -165,10 +172,13 @@ func (r *Runtime) Stop(ctx context.Context) error {
 		return nil
 	}
 	r.started = false
+	// Set stopped under r.mu so it is ordered with the Submit gate: after this,
+	// no new Submit can pass the gate and call wg.Add, so the wg.Wait below
+	// cannot race a concurrent wg.Add.
+	r.stopped.Store(true)
 	r.mu.Unlock()
 
-	// Reject new Submits and cancel in-flight work.
-	r.stopped.Store(true)
+	// Cancel in-flight work.
 	r.cancel()
 
 	// Wait for in-flight Submit goroutines to finish, bounded by ctx.
