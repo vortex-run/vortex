@@ -83,3 +83,34 @@ func TestJobs_List(t *testing.T) {
 		t.Fatalf("List returned %d jobs, want 2", len(jobs))
 	}
 }
+
+func TestJobs_SessionPendingAndClarifying(t *testing.T) {
+	intent := BuildIntent{DeliveryTargets: []string{"script"}, Stack: StackChoice{Backend: "go"}}
+	m := newJobManagerWithStubs(t, intent, &stubQA{})
+
+	// No job for the session yet.
+	if m.SessionPending("sx") || m.SessionClarifying("sx") {
+		t.Error("unknown session should be neither pending nor clarifying")
+	}
+
+	id := m.Submit(context.Background(), "build a hello world", "sx", 0)
+	// Once complete, the session is no longer pending.
+	_ = waitState(t, m, id, JobComplete)
+	if m.SessionPending("sx") {
+		t.Error("a completed build should not be pending")
+	}
+}
+
+func TestJobs_SessionPendingClarifyState(t *testing.T) {
+	// A build that asks a clarifying question → JobClarify → pending + clarifying.
+	intent := BuildIntent{ClarifyingQs: []string{"web or mobile?"}}
+	m := newJobManagerWithStubs(t, intent, &stubQA{})
+	id := m.Submit(context.Background(), "make something", "sc", 0)
+	_ = waitState(t, m, id, JobClarify)
+	if !m.SessionClarifying("sc") {
+		t.Error("a clarifying build should report SessionClarifying")
+	}
+	if !m.SessionPending("sc") {
+		t.Error("a clarifying build is non-terminal → should be pending")
+	}
+}

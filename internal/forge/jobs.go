@@ -129,6 +129,30 @@ func (m *JobManager) Get(id string) (Job, bool) {
 // needs-clarification state (so the coordinator treats the next message as an
 // answer, not a new build request).
 func (m *JobManager) SessionClarifying(sessionID string) bool {
+	j := m.latestForSession(sessionID)
+	return j != nil && j.State == JobClarify
+}
+
+// SessionPending reports whether the latest job for a session is non-terminal
+// (queued, running, or awaiting clarification). The coordinator uses this so a
+// follow-up message is treated as an ANSWER while a build is still in flight —
+// the build is async, so the job may not have reached needs_clarification yet
+// when the user replies. Without this, the reply starts a new job (the loop).
+func (m *JobManager) SessionPending(sessionID string) bool {
+	j := m.latestForSession(sessionID)
+	if j == nil {
+		return false
+	}
+	switch j.State {
+	case JobQueued, JobRunning, JobClarify:
+		return true
+	default:
+		return false
+	}
+}
+
+// latestForSession returns the most recent job for a session (nil if none).
+func (m *JobManager) latestForSession(sessionID string) *Job {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var latest *Job
@@ -140,7 +164,7 @@ func (m *JobManager) SessionClarifying(sessionID string) bool {
 			latest = j
 		}
 	}
-	return latest != nil && latest.State == JobClarify
+	return latest
 }
 
 // List returns all jobs, newest first.

@@ -88,9 +88,13 @@ type CoordinatorConfig struct {
 	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
 	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
 	// SessionClarifying reports whether the most recent build for a session is
-	// awaiting clarifying answers (forge JobClarify state). When it returns true,
-	// the next message is treated as an answer, not a new request. Optional.
+	// awaiting clarifying answers (forge JobClarify state). Optional.
 	SessionClarifying func(sessionID string) bool
+	// SessionPending reports whether the most recent build for a session is
+	// non-terminal (queued/running/clarifying). Used so a follow-up message is
+	// treated as an answer while the (async) build is still in flight — even
+	// before it reaches needs_clarification. Optional.
+	SessionPending func(sessionID string) bool
 	// MemoryStore, when set, persists per-session conversation history under this
 	// directory and passes recent context to the AI. Optional.
 	MemoryStore string
@@ -641,7 +645,10 @@ func (c *Coordinator) continueClarification(ctx context.Context, sessionID, answ
 		return c.dispatchBuild(ctx, sessionID, answer)
 	}
 	st.Answers = append(st.Answers, answer)
-	st.AwaitingClarification = false // answered; don't loop
+	// Keep AwaitingClarification true: the resubmitted build is async, so a
+	// further answer (if forge asks again) must also continue this session. The
+	// live pending/clarifying check gates it — it returns false once the build
+	// reaches a terminal state, so this cannot loop forever.
 	st.LastActivity = time.Now()
 	combined := st.OriginalRequest + "\n\nAdditional details: " + strings.Join(st.Answers, "; ")
 	c.mu.Unlock()
@@ -659,13 +666,30 @@ func (c *Coordinator) isAwaitingClarification(sessionID string) bool {
 	c.mu.Lock()
 	st, ok := c.sessions[sessionID]
 	c.mu.Unlock()
-	if !ok {
+	if !ok || st == nil || !st.AwaitingClarification {
 		return false
 	}
+	// We dispatched a build for this session and haven't yet consumed an answer.
+	// Treat the next message as the answer while that build is still in flight
+	// (pending) OR has explicitly asked (clarifying). The build is async, so it
+	// may not have reached needs_clarification when the user replies — the
+	// pending check closes that window (the root cause of the restart loop).
+	clarifying, pending := false, false
 	if c.cfg.SessionClarifying != nil {
-		return c.cfg.SessionClarifying(sessionID)
+		clarifying = c.cfg.SessionClarifying(sessionID)
 	}
-	return st.AwaitingClarification
+	if c.cfg.SessionPending != nil {
+		pending = c.cfg.SessionPending(sessionID)
+	}
+	awaiting := clarifying || pending
+	if c.cfg.SessionPending == nil && c.cfg.SessionClarifying == nil {
+		awaiting = st.AwaitingClarification // no live hooks → trust the flag
+	}
+	slog.Default().Info("session state check",
+		"session", sessionID, "awaiting", awaiting,
+		"clarifying", clarifying, "pending", pending,
+		"original", st.OriginalRequest)
+	return awaiting
 }
 
 // ClearSession drops a session's state (called when its job completes/fails).

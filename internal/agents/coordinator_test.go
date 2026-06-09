@@ -741,3 +741,73 @@ func TestAgentSystemPrompt_IncludesContext(t *testing.T) {
 		t.Errorf("system prompt should include project context + tool guidance:\n%s", prompt)
 	}
 }
+
+// TestClarification_AnswerContinuesSameJob verifies the loop fix: when a build
+// for a session is still in flight (pending) — even before it reaches
+// needs_clarification — the next message is treated as an ANSWER that continues
+// the SAME session, not a new build request.
+func TestClarification_AnswerContinuesSameJob(t *testing.T) {
+	var submissions []string
+	// Simulate forge: the first build is "pending" (async, not yet clarifying)
+	// when the answer arrives — the exact window that used to start a new job.
+	pending := false
+	c, err := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{IntentReply: string(IntentBuildApp)},
+		BuildApp: func(_ context.Context, msg, _ string) (string, error) {
+			submissions = append(submissions, msg)
+			pending = true // a build is now in flight for this session
+			return "🛠 Build started. Job ID: job-1", nil
+		},
+		// No clarifying yet (job hasn't reached needs_clarification), but the
+		// build IS pending — the answer must still continue the session.
+		SessionClarifying: func(string) bool { return false },
+		SessionPending:    func(string) bool { return pending },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Turn 1: the build request → dispatched.
+	if _, err := c.HandleMessage(context.Background(), "design a flutter calculator", "sess-A"); err != nil {
+		t.Fatal(err)
+	}
+	// Turn 2: the answer arrives while the build is pending (not yet clarifying).
+	if _, err := c.HandleMessage(context.Background(), "no a basic calculator", "sess-A"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(submissions) != 2 {
+		t.Fatalf("expected 2 submissions, got %d: %v", len(submissions), submissions)
+	}
+	// The second submission must CONTINUE the same build (original + answer),
+	// NOT be a fresh unrelated request.
+	if !strings.Contains(submissions[1], "flutter calculator") ||
+		!strings.Contains(submissions[1], "basic calculator") {
+		t.Errorf("answer should continue the same job (original + answer), got: %q", submissions[1])
+	}
+}
+
+func TestClarification_NewRequestWhenBuildDone(t *testing.T) {
+	var submissions []string
+	pending := false // build finished (terminal)
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{IntentReply: string(IntentBuildApp)},
+		BuildApp: func(_ context.Context, msg, _ string) (string, error) {
+			submissions = append(submissions, msg)
+			return "ok", nil
+		},
+		SessionClarifying: func(string) bool { return false },
+		SessionPending:    func(string) bool { return pending },
+	})
+	_, _ = c.HandleMessage(context.Background(), "build a go api", "sess-B")
+	// Build is done (pending=false) → a second build message is a NEW request.
+	_, _ = c.HandleMessage(context.Background(), "build a python script", "sess-B")
+	if len(submissions) != 2 {
+		t.Fatalf("expected 2 submissions, got %v", submissions)
+	}
+	if strings.Contains(submissions[1], "go api") {
+		t.Errorf("a new request after the build finished should not merge: %q", submissions[1])
+	}
+}
