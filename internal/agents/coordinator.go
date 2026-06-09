@@ -323,6 +323,12 @@ func executeApprovedLocal(ctx context.Context, tool Tool, params map[string]any)
 	case CreateProjectTool:
 		tl.RequireApproval = false
 		return tl.Execute(ctx, params)
+	case GitAddTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
+	case GitCommitTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
 	default:
 		return tool.Execute(ctx, params) // read-only tool; no gate
 	}
@@ -343,6 +349,14 @@ func toolStartLine(name string, params map[string]any) string {
 		return "$ " + strParamOr(params, "command", "")
 	case "create_project":
 		return "📦 Creating project: " + strParamOr(params, "name", "")
+	case "git_status":
+		return "🔱 git status"
+	case "git_diff":
+		return "🔱 git diff"
+	case "git_add":
+		return "🔱 git add"
+	case "git_commit":
+		return "🔱 git commit: " + strParamOr(params, "message", "")
 	default:
 		return "→ " + name
 	}
@@ -381,6 +395,22 @@ func toolDoneLine(name string, result any) string {
 		}
 	case "list_directory":
 		return "✓ Directory listed"
+	case "git_status":
+		branch, _ := m["branch"].(string)
+		clean, _ := m["clean"].(bool)
+		if clean {
+			return "✓ branch " + branch + " — working tree clean"
+		}
+		return "✓ branch " + branch + " — changes present"
+	case "git_diff":
+		if d, _ := m["diff"].(string); d != "" {
+			return d
+		}
+		return "✓ No changes"
+	case "git_add":
+		return "✓ Staged"
+	case "git_commit":
+		return "✓ Committed"
 	}
 	return "✓ Done"
 }
@@ -542,11 +572,14 @@ func (c *Coordinator) classify(ctx context.Context, userMsg string) Intent {
 	return IntentUnknown
 }
 
-// localFileKeywords route a message to local tools directly (no AI).
+// localFileKeywords route a message to local tools directly (no AI). Includes
+// git operations (GIT_OP), which use the git tools without an AI round-trip.
 var localFileKeywords = []string{
 	"create a file", "write a file", "save to", "save it to", "save it in",
 	"read file", "read the file", "list files", "list the files",
 	"edit file", "edit the file", "run command", "run the command",
+	"git status", "git diff", "git add", "git commit", "stage files",
+	"what changed", "show changes", "commit",
 }
 
 // buildAppKeywords route a message to Forge (which needs AI intent parsing).
@@ -702,12 +735,28 @@ func parseLocalRequest(userMsg string) (string, map[string]any) {
 			return "write_file", map[string]any{"path": path, "content": content, "create_dirs": true}
 		case "edit":
 			return "edit_file", map[string]any{"path": rest}
+		case "status":
+			return "git_status", map[string]any{}
+		case "diff":
+			return "git_diff", map[string]any{"file": rest}
+		case "commit":
+			return "git_commit", map[string]any{"message": rest}
 		default:
 			return "", nil
 		}
 	}
 
 	switch {
+	case strings.Contains(lower, "git status") || lower == "what changed" || strings.Contains(lower, "show changes"):
+		return "git_status", map[string]any{}
+	case strings.Contains(lower, "git diff"):
+		return "git_diff", map[string]any{}
+	case strings.Contains(lower, "git commit") || strings.HasPrefix(lower, "commit "):
+		// Use the message after "commit" as the commit message.
+		_, m, _ := strings.Cut(lower, "commit")
+		return "git_commit", map[string]any{"message": strings.TrimSpace(m)}
+	case strings.Contains(lower, "git add") || strings.Contains(lower, "stage files"):
+		return "git_add", map[string]any{"files": []string{"."}}
 	case strings.Contains(lower, "list files") || strings.Contains(lower, "list the files"):
 		return "list_directory", map[string]any{"path": extractPath(msg)}
 	case strings.Contains(lower, "read file") || strings.Contains(lower, "read the file"):

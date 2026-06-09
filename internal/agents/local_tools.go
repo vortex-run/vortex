@@ -512,7 +512,7 @@ func shellCommand(command string) (string, []string) {
 // approval REQUIRED on all mutating tools.
 func NewLocalTools(cfg LocalFSConfig) []Tool {
 	cfg.RequireApproval = true
-	return []Tool{
+	tools := []Tool{
 		ListDirectoryTool{cfg: cfg},
 		ReadLocalFileTool{cfg: cfg},
 		WriteLocalFileTool{cfg: cfg, RequireApproval: true},
@@ -520,4 +520,6 @@ func NewLocalTools(cfg LocalFSConfig) []Tool {
 		RunTerminalTool{cfg: cfg, RequireApproval: true},
 		CreateProjectTool{cfg: cfg, RequireApproval: true},
 	}
+	tools = append(tools, gitTools(cfg)...)
+	return tools
 }

@@ -46,6 +46,7 @@ type AgentsModel struct {
 var slashCommands = []string{
 	"/ls", "/read", "/run", "/create", "/edit", "/project",
 	"/forge", "/status", "/reload", "/help",
+	"/diff", "/commit", "/search", "/find",
 }
 
 // commandCompletions are tab-completed command prefixes.
