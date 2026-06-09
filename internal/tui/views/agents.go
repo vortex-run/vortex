@@ -99,6 +99,32 @@ func extractJobID(s string) string {
 	return ""
 }
 
+// orderTranscript splits a result transcript into non-empty lines, returning
+// the command output first and any completion/summary line (✓/✗/Completed/
+// File created) last — so the chat reads stdout-then-result.
+func orderTranscript(result string) []string {
+	var output, summary []string
+	for _, line := range strings.Split(result, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if isSummaryLine(line) {
+			summary = append(summary, line)
+		} else {
+			output = append(output, line)
+		}
+	}
+	return append(output, summary...)
+}
+
+// isSummaryLine reports whether a transcript line is a completion/summary marker
+// (rendered after the command output).
+func isSummaryLine(line string) bool {
+	l := strings.TrimSpace(line)
+	return strings.HasPrefix(l, "✓") || strings.HasPrefix(l, "✗") ||
+		strings.HasPrefix(l, "⚠") || strings.Contains(l, "Completed (exit")
+}
+
 // pollForge schedules a single status poll of the active forge job after 2s.
 func (m AgentsModel) pollForge() tea.Cmd {
 	c := m.client
@@ -202,13 +228,11 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✗ Action rejected", Timestamp: time.Now()})
 		}
-		// Show the server-side execution transcript line by line, so command
-		// output (stdout/stderr from /run) appears as separate chat lines.
+		// Show the server-side execution transcript line by line, with the
+		// completion/summary line LAST: command stdout/stderr appear first, then
+		// "✓ Completed (exit N)" — so the chat reads output-then-result.
 		if strings.TrimSpace(msg.result) != "" {
-			for _, line := range strings.Split(msg.result, "\n") {
-				if strings.TrimSpace(line) == "" {
-					continue
-				}
+			for _, line := range orderTranscript(msg.result) {
 				m.messages = append(m.messages, ChatMessage{Role: "agent", Content: line, Timestamp: time.Now()})
 			}
 		}

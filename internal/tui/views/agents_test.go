@@ -380,3 +380,83 @@ func TestAgents_ResponseReplacesThinking(t *testing.T) {
 		t.Errorf("Thinking indicator should be gone after the response:\n%s", out)
 	}
 }
+
+func TestAgents_ApprovalResultSplitsOutputLines(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	// A multi-line result (command output) should become separate agent lines.
+	updated, _ := m.Update(approvalResult{approved: true, result: "line one\nline two\n✓ Completed (exit 0)"})
+	am := updated.(AgentsModel)
+	msgs := am.Messages()
+	// Expect: …, system "✓ Action approved", agent "line one", agent "line two", agent "✓ Completed…"
+	var agentLines []string
+	for _, msg := range msgs {
+		if msg.Role == "agent" {
+			agentLines = append(agentLines, msg.Content)
+		}
+	}
+	got := strings.Join(agentLines, "|")
+	if !strings.Contains(got, "line one") || !strings.Contains(got, "line two") || !strings.Contains(got, "Completed") {
+		t.Errorf("output should be split into separate agent lines, got: %s", got)
+	}
+	// Each output line is its own message (not one blob).
+	if !containsExact(agentLines, "line one") || !containsExact(agentLines, "line two") {
+		t.Errorf("each line should be a distinct message: %v", agentLines)
+	}
+}
+
+func containsExact(lines []string, want string) bool {
+	for _, l := range lines {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestOrderTranscript_OutputBeforeCompletion(t *testing.T) {
+	// Even if the completion marker came first in the raw transcript, output
+	// must render before it.
+	got := orderTranscript("✓ Completed (exit 0)\nhello from calc\nsecond line")
+	if len(got) != 3 {
+		t.Fatalf("got %d lines, want 3: %v", len(got), got)
+	}
+	if got[0] != "hello from calc" || got[1] != "second line" {
+		t.Errorf("output should come first: %v", got)
+	}
+	if got[len(got)-1] != "✓ Completed (exit 0)" {
+		t.Errorf("completion should be last: %v", got)
+	}
+}
+
+func TestOrderTranscript_StripsBlankLines(t *testing.T) {
+	got := orderTranscript("a\n\n\nb\n")
+	if len(got) != 2 {
+		t.Errorf("blank lines should be dropped: %v", got)
+	}
+}
+
+func TestApprovalResult_RunOutputOrderInChat(t *testing.T) {
+	m := NewAgents(nil)
+	m, _ = applyApprovalPending(t, m)
+	updated, _ := m.Update(approvalResult{approved: true, result: "hello from calc\n✓ Completed (exit 0)"})
+	var agentLines []string
+	for _, msg := range updated.(AgentsModel).Messages() {
+		if msg.Role == "agent" {
+			agentLines = append(agentLines, msg.Content)
+		}
+	}
+	// stdout must appear before the completion line.
+	hi, ci := -1, -1
+	for i, l := range agentLines {
+		if l == "hello from calc" {
+			hi = i
+		}
+		if strings.Contains(l, "Completed") {
+			ci = i
+		}
+	}
+	if hi < 0 || ci < 0 || hi > ci {
+		t.Errorf("stdout should appear before completion: %v", agentLines)
+	}
+}
