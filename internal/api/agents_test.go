@@ -39,6 +39,14 @@ func (s stubRuntime) Stats() AgentRuntimeStats { return s.stats }
 
 func (s stubRuntime) Approve(string, bool) (string, bool) { return "✓ done", s.approveMatch }
 
+func (s stubRuntime) ListSessions() []SessionSummary {
+	return []SessionSummary{{SessionID: "s1", Summary: "first chat"}}
+}
+
+func (s stubRuntime) SessionHistory(string) []SessionMessage {
+	return []SessionMessage{{Role: "user", Content: "hello"}, {Role: "agent", Content: "hi"}}
+}
+
 // newAgentTestServer starts a live management server with the agent runtime
 // wired, returning its address and a cleanup func.
 func newAgentTestServer(t *testing.T, rt AgentRuntime) string {
@@ -291,5 +299,40 @@ func TestAgentApprove_RequiresAuth(t *testing.T) {
 	rec := serve(s, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("approve without key = %d, want 401", rec.Code)
+	}
+}
+
+func TestAgentHistory_ListsSessions(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{})
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/history", nil)
+	req.Header.Set("X-API-Key", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "first chat") {
+		t.Errorf("history should list sessions: %s", rec.Body)
+	}
+}
+
+func TestAgentHistory_RequiresAuth(t *testing.T) {
+	s, _ := newAuthedAgentServer(t, stubRuntime{})
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/history", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	if rec := serve(s, req); rec.Code != http.StatusUnauthorized {
+		t.Errorf("history without key = %d, want 401", rec.Code)
+	}
+}
+
+func TestAgentSessionHistory_ReturnsMessages(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{})
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/history/s1", nil)
+	req.Header.Set("X-API-Key", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session history = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "hello") {
+		t.Errorf("session history should include messages: %s", rec.Body)
 	}
 }
