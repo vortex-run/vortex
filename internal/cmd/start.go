@@ -1332,6 +1332,16 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 		Approve: func(sessionID string, ok bool) (string, bool) {
 			return rt.Approve(sessionID, ok)
 		},
+		ClarifySubmit: func(sessionID, answer string) {
+			// Submit the combined clarifying answer to the runtime (same session
+			// → continues the build). Drain the response channel in the background.
+			if ch, err := rt.Submit(context.Background(), answer, sessionID); err == nil {
+				go func() {
+					for range ch { //nolint:revive // draining
+					}
+				}()
+			}
+		},
 	})
 }
 

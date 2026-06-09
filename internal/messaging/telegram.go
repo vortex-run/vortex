@@ -16,6 +16,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
@@ -52,6 +53,9 @@ type CommandHooks struct {
 	Cost    func() string                                  // /cost reply
 	List    func(path string) string                       // /ls reply
 	Approve func(sessionID string, ok bool) (string, bool) // /approve, /reject
+	// ClarifySubmit submits a combined clarifying answer for a session (used when
+	// all option buttons have been tapped).
+	ClarifySubmit func(sessionID, answer string)
 }
 
 // SetCommandHooks wires the built-in command data sources.
@@ -64,6 +68,25 @@ type TelegramBot struct {
 	client   *http.Client
 	resolver CallbackResolver
 	hooks    CommandHooks
+
+	clarifyMu sync.Mutex
+	clarify   map[string]*clarifySession // session → in-progress Q&A
+}
+
+// ClarifyQuestion is a structured clarifying question for Telegram buttons.
+type ClarifyQuestion struct {
+	Question string
+	Options  []string
+	Key      string
+}
+
+// clarifySession collects button answers for a multi-question clarification,
+// submitting the combined answer once every question is answered.
+type clarifySession struct {
+	chatID    int64
+	keys      []string          // question keys, in order
+	answers   map[string]string // key → chosen option text
+	submitted bool
 }
 
 // SetCallbackResolver wires a resolver (e.g. the ApprovalManager) that gets
@@ -276,6 +299,10 @@ func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime
 		if !t.allowed(upd.CallbackQuery.From.ID) {
 			return
 		}
+		// Clarify option buttons first, then approval/other resolvers.
+		if t.handleClarifyCallback(upd.CallbackQuery.Data) {
+			return
+		}
 		if t.resolver != nil {
 			t.resolver.Resolve(upd.CallbackQuery.Data)
 		}
@@ -352,9 +379,14 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			// Acknowledge the button press.
 			_ = t.post(r.Context(), "answerCallbackQuery",
 				map[string]any{"callback_query_id": upd.CallbackQuery.ID})
-			// An approval decision is consumed by the resolver; anything else is
-			// dispatched to the runtime as a directive.
-			if t.resolver == nil || !t.resolver.Resolve(upd.CallbackQuery.Data) {
+			// Clarify option buttons first; then an approval decision is consumed
+			// by the resolver; anything else is dispatched as a directive.
+			switch {
+			case t.handleClarifyCallback(upd.CallbackQuery.Data):
+				// consumed by the clarification collector
+			case t.resolver != nil && t.resolver.Resolve(upd.CallbackQuery.Data):
+				// consumed by the approval resolver
+			default:
 				t.dispatch(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
 			}
 			w.WriteHeader(http.StatusOK)
@@ -464,4 +496,98 @@ func (t *TelegramBot) SendApprovalRequest(ctx context.Context, chatID int64, des
 			}},
 		},
 	})
+}
+
+// SendClarifyingQuestions sends each structured question as a row of inline
+// option buttons (callback_data "clarify:<session>:<key>:<value>"). Questions
+// with no options are sent as plain text (the next text message is the answer).
+// It registers a clarifySession so taps are collected until all are answered.
+func (t *TelegramBot) SendClarifyingQuestions(ctx context.Context, chatID int64, session string, qs []ClarifyQuestion) error {
+	if len(qs) == 0 {
+		return nil
+	}
+	cs := &clarifySession{chatID: chatID, answers: map[string]string{}}
+	for _, q := range qs {
+		if len(q.Options) > 0 {
+			cs.keys = append(cs.keys, q.Key)
+		}
+	}
+	t.clarifyMu.Lock()
+	if t.clarify == nil {
+		t.clarify = map[string]*clarifySession{}
+	}
+	t.clarify[session] = cs
+	t.clarifyMu.Unlock()
+
+	if err := t.SendMessage(ctx, chatID, "Before I build, quick questions:"); err != nil {
+		return err
+	}
+	for _, q := range qs {
+		if len(q.Options) == 0 {
+			_ = t.SendMessage(ctx, chatID, q.Question) // free text → next message is the answer
+			continue
+		}
+		var row []map[string]any
+		for _, opt := range q.Options {
+			row = append(row, map[string]any{
+				"text":          opt,
+				"callback_data": fmt.Sprintf("clarify:%s:%s:%s", session, q.Key, opt),
+			})
+		}
+		if err := t.post(ctx, "sendMessage", map[string]any{
+			"chat_id":      chatID,
+			"text":         q.Question,
+			"reply_markup": map[string]any{"inline_keyboard": [][]map[string]any{row}},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// handleClarifyCallback processes a "clarify:<session>:<key>:<value>" button
+// tap. It records the answer; once every keyed question is answered it submits
+// the combined answer via the ClarifySubmit hook. Returns true if it consumed
+// the callback.
+func (t *TelegramBot) handleClarifyCallback(data string) bool {
+	const prefix = "clarify:"
+	if !strings.HasPrefix(data, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(data, prefix)
+	// session:key:value (value may contain colons → split into 3).
+	parts := strings.SplitN(rest, ":", 3)
+	if len(parts) != 3 {
+		return true // malformed but it was a clarify callback
+	}
+	session, key, value := parts[0], parts[1], parts[2]
+
+	t.clarifyMu.Lock()
+	cs, ok := t.clarify[session]
+	if !ok || cs.submitted {
+		t.clarifyMu.Unlock()
+		return true
+	}
+	cs.answers[key] = value
+	// All keyed questions answered?
+	complete := true
+	var combined []string
+	for _, k := range cs.keys {
+		v, answered := cs.answers[k]
+		if !answered {
+			complete = false
+			break
+		}
+		combined = append(combined, v)
+	}
+	if complete {
+		cs.submitted = true
+		delete(t.clarify, session)
+	}
+	t.clarifyMu.Unlock()
+
+	if complete && t.hooks.ClarifySubmit != nil {
+		t.hooks.ClarifySubmit(session, strings.Join(combined, ", "))
+	}
+	return true
 }

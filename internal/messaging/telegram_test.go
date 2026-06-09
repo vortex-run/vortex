@@ -348,3 +348,66 @@ func TestTelegram_HelpText(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegram_SendClarifyingQuestions(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{7}})
+	qs := []ClarifyQuestion{
+		{Question: "Calculator type?", Key: "calc", Options: []string{"Basic", "Scientific"}},
+		{Question: "Platform?", Key: "plat", Options: []string{"Phone", "Tablet"}},
+	}
+	if err := bot.SendClarifyingQuestions(context.Background(), 7, "sess-1", qs); err != nil {
+		t.Fatal(err)
+	}
+	// A clarify session is registered with both keys.
+	bot.clarifyMu.Lock()
+	cs := bot.clarify["sess-1"]
+	bot.clarifyMu.Unlock()
+	if cs == nil || len(cs.keys) != 2 {
+		t.Fatalf("clarify session not registered: %+v", cs)
+	}
+}
+
+func TestTelegram_ClarifyCallbackCollectsAndSubmits(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{7}})
+	var submitted string
+	bot.SetCommandHooks(CommandHooks{
+		ClarifySubmit: func(_ string, answer string) { submitted = answer },
+	})
+	qs := []ClarifyQuestion{
+		{Question: "Calculator type?", Key: "calc", Options: []string{"Basic", "Scientific"}},
+		{Question: "Platform?", Key: "plat", Options: []string{"Phone", "Tablet"}},
+	}
+	_ = bot.SendClarifyingQuestions(context.Background(), 7, "sess-2", qs)
+
+	// First tap: not yet complete.
+	if !bot.handleClarifyCallback("clarify:sess-2:calc:Scientific") {
+		t.Error("first clarify tap should be consumed")
+	}
+	if submitted != "" {
+		t.Error("should not submit until all questions answered")
+	}
+	// Second tap: complete → submit combined answer in question order.
+	bot.handleClarifyCallback("clarify:sess-2:plat:Phone")
+	if submitted != "Scientific, Phone" {
+		t.Errorf("combined answer = %q, want 'Scientific, Phone'", submitted)
+	}
+}
+
+func TestTelegram_ClarifyCallbackUnknownSession(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{})
+	// A clarify callback for an unknown session is consumed but does nothing.
+	if !bot.handleClarifyCallback("clarify:ghost:k:v") {
+		t.Error("clarify callback should be consumed even for unknown session")
+	}
+}
+
+func TestTelegram_NonClarifyCallbackNotConsumed(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{})
+	if bot.handleClarifyCallback("approve:appr-1") {
+		t.Error("a non-clarify callback should not be consumed by the clarify handler")
+	}
+}
