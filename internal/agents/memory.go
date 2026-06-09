@@ -18,6 +18,15 @@ type MemoryMessage struct {
 	ToolCalls []string  `json:"tool_calls,omitempty"`
 }
 
+// memoryData is the serialisable payload of a Memory (no mutex, so json never
+// reflects over a lock that another goroutine may hold — which would race).
+type memoryData struct {
+	SessionID string          `json:"session_id"`
+	Messages  []MemoryMessage `json:"messages"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
 // Memory is a per-session conversation history persisted to disk under
 // storePath/<sessionID>.json.
 type Memory struct {
@@ -28,6 +37,17 @@ type Memory struct {
 
 	mu        sync.Mutex
 	storePath string
+}
+
+// snapshot returns a lock-free copy of the serialisable fields (caller holds
+// mu). Marshaling this copy avoids json reflecting over the live mutex.
+func (m *Memory) snapshot() memoryData {
+	msgs := make([]MemoryMessage, len(m.Messages))
+	copy(msgs, m.Messages)
+	return memoryData{
+		SessionID: m.SessionID, Messages: msgs,
+		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}
 }
 
 // NewMemory creates an in-memory conversation bound to a store directory. Call
@@ -62,7 +82,7 @@ func (m *Memory) Save() error {
 	if err := os.MkdirAll(m.storePath, 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
+	data, err := json.MarshalIndent(m.snapshot(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -78,11 +98,14 @@ func (m *Memory) Load(sessionID string) error {
 	if err != nil {
 		return err
 	}
-	store := m.storePath
-	if err := json.Unmarshal(data, m); err != nil {
+	var d memoryData
+	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	m.storePath = store // preserve (not in the JSON)
+	m.SessionID = d.SessionID
+	m.Messages = d.Messages
+	m.CreatedAt = d.CreatedAt
+	m.UpdatedAt = d.UpdatedAt
 	return nil
 }
 
@@ -104,7 +127,12 @@ func (m *Memory) Recent(n int) []MemoryMessage {
 func (m *Memory) Summary() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, msg := range m.Messages {
+	return summaryOf(m.Messages)
+}
+
+// summaryOf returns the first user message (a conversation title), or "".
+func summaryOf(msgs []MemoryMessage) string {
+	for _, msg := range msgs {
 		if msg.Role == "user" {
 			return truncateMemoryTitle(msg.Content)
 		}
@@ -134,14 +162,14 @@ func (m *Memory) List() []SessionInfo {
 		if rerr != nil {
 			continue
 		}
-		var mem Memory
-		if json.Unmarshal(data, &mem) != nil {
+		var d memoryData
+		if json.Unmarshal(data, &d) != nil {
 			continue
 		}
 		out = append(out, SessionInfo{
-			SessionID: mem.SessionID,
-			Summary:   mem.Summary(),
-			UpdatedAt: mem.UpdatedAt,
+			SessionID: d.SessionID,
+			Summary:   summaryOf(d.Messages),
+			UpdatedAt: d.UpdatedAt,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
