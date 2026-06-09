@@ -129,11 +129,13 @@ type Coordinator struct {
 	*BaseAgent
 	cfg CoordinatorConfig
 
-	mu       sync.Mutex
-	active   map[string]Agent
-	pending  map[string]*pendingApproval // session → action awaiting approval
-	sessions map[string]*SessionState    // session → conversation state
-	memories map[string]*Memory          // session → conversation memory
+	mu            sync.Mutex
+	active        map[string]Agent
+	pending       map[string]*pendingApproval // session → action awaiting approval
+	sessions      map[string]*SessionState    // session → conversation state
+	memories      map[string]*Memory          // session → conversation memory
+	projectCtx    string                      // cached project description
+	projectCtxSet bool
 }
 
 // memory returns (loading if needed) the conversation memory for a session, or
@@ -561,7 +563,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 
 	switch intent {
 	case IntentGeneralQuestion:
-		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), answerSystemPrompt)
+		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), c.agentSystemPrompt())
 		if err == nil {
 			c.recordExchange(sessionID, userMsg, reply)
 		}
@@ -749,6 +751,67 @@ func (c *Coordinator) handleLocalFile(ctx context.Context, sessionID, userMsg st
 		return transcript, nil // the transcript already carries the failure line
 	}
 	return transcript, nil
+}
+
+// detectProjectContext inspects the working directory and returns a short
+// description of the project (type, path, primary config) for the AI system
+// prompt. The result is computed once per coordinator and cached.
+func (c *Coordinator) detectProjectContext() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.projectCtxSet {
+		return c.projectCtx
+	}
+	c.projectCtx = describeProject(c.cfg.WorkingDir)
+	c.projectCtxSet = true
+	return c.projectCtx
+}
+
+// describeProject detects the project type at dir from its marker files.
+func describeProject(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	type marker struct {
+		file, kind string
+	}
+	markers := []marker{
+		{"go.mod", "Go"}, {"package.json", "Node"}, {"requirements.txt", "Python"},
+		{"pubspec.yaml", "Flutter"}, {"pom.xml", "Java"}, {"Cargo.toml", "Rust"},
+	}
+	for _, mk := range markers {
+		path := filepath.Join(dir, mk.file)
+		if data, err := os.ReadFile(path); err == nil { //nolint:gosec // project root
+			head := string(data)
+			if len(head) > 200 {
+				head = head[:200]
+			}
+			return fmt.Sprintf("%s project at %s (%s):\n%s", mk.kind, dir, mk.file, strings.TrimSpace(head))
+		}
+	}
+	// C# detection (any .sln/.csproj).
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			n := strings.ToLower(e.Name())
+			if strings.HasSuffix(n, ".sln") || strings.HasSuffix(n, ".csproj") {
+				return fmt.Sprintf("C# project at %s (%s)", dir, e.Name())
+			}
+		}
+	}
+	return fmt.Sprintf("directory %s (no recognised project type)", dir)
+}
+
+// agentSystemPrompt builds the system prompt for direct answers, including the
+// detected project context and tool-usage guidance.
+func (c *Coordinator) agentSystemPrompt() string {
+	ctx := c.detectProjectContext()
+	if ctx == "" {
+		return answerSystemPrompt
+	}
+	return "You are working in a " + ctx + "\n\n" +
+		"When modifying code: use read_file first. When creating files: use " +
+		"write_file (approval required). When running commands: use run_terminal. " +
+		answerSystemPrompt
 }
 
 // codegenSystemPrompt instructs the model to return raw code only.

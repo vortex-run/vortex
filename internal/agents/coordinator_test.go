@@ -694,3 +694,50 @@ func TestSession_ClearSession(t *testing.T) {
 		t.Error("cleared session should not be awaiting")
 	}
 }
+
+func TestDescribeProject_DetectsTypes(t *testing.T) {
+	cases := []struct {
+		file, content, wantType string
+	}{
+		{"go.mod", "module x\n\ngo 1.26\n", "Go"},
+		{"package.json", "{\"name\":\"x\"}", "Node"},
+		{"requirements.txt", "flask\n", "Python"},
+		{"pubspec.yaml", "name: x\n", "Flutter"},
+		{"pom.xml", "<project/>", "Java"},
+		{"Cargo.toml", "[package]\n", "Rust"},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, c.file), []byte(c.content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := describeProject(dir)
+		if !strings.Contains(got, c.wantType) {
+			t.Errorf("describeProject with %s = %q, want it to mention %s", c.file, got, c.wantType)
+		}
+	}
+}
+
+func TestDescribeProject_CSharp(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "app.csproj"), []byte("<Project/>"), 0o600)
+	if got := describeProject(dir); !strings.Contains(got, "C#") {
+		t.Errorf("describeProject = %q, want C#", got)
+	}
+}
+
+func TestDescribeProject_Unknown(t *testing.T) {
+	if got := describeProject(t.TempDir()); !strings.Contains(got, "no recognised project type") {
+		t.Errorf("empty dir = %q, want unknown", got)
+	}
+}
+
+func TestAgentSystemPrompt_IncludesContext(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module svc\n"), 0o600)
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}, WorkingDir: dir})
+	prompt := c.agentSystemPrompt()
+	if !strings.Contains(prompt, "Go project") || !strings.Contains(prompt, "read_file first") {
+		t.Errorf("system prompt should include project context + tool guidance:\n%s", prompt)
+	}
+}
