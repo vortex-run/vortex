@@ -39,15 +39,34 @@ type StackChoice struct {
 	Database string `json:"database"` // "sqlite"|"postgres"|"none"
 }
 
+// ClarifyingQuestion is a structured question the agent asks before building.
+// When Options is non-empty it is rendered as a numbered selection (TUI) or
+// inline buttons (Telegram); when empty it is a free-text question.
+type ClarifyingQuestion struct {
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"` // empty → free text
+	Key      string   `json:"key"`               // what this answer maps to
+}
+
 // BuildIntent is the structured interpretation of a user request.
 type BuildIntent struct {
-	AppType         AppType     `json:"app_type"`
-	Description     string      `json:"description"`
-	Requirements    []string    `json:"requirements"`
-	DeliveryTargets []string    `json:"delivery_targets"` // "apk"|"web"|"api"|"script"
-	Stack           StackChoice `json:"stack"`
-	NeedsLiveData   bool        `json:"needs_live_data"`
-	ClarifyingQs    []string    `json:"clarifying_questions"`
+	AppType         AppType              `json:"app_type"`
+	Description     string               `json:"description"`
+	Requirements    []string             `json:"requirements"`
+	DeliveryTargets []string             `json:"delivery_targets"` // "apk"|"web"|"api"|"script"
+	Stack           StackChoice          `json:"stack"`
+	NeedsLiveData   bool                 `json:"needs_live_data"`
+	ClarifyingQs    []ClarifyingQuestion `json:"clarifying_questions"`
+}
+
+// ClarifyingTexts returns the question texts (legacy string view) — used by the
+// progress stream which carries questions as "❓ <text>" lines.
+func (b BuildIntent) ClarifyingTexts() []string {
+	out := make([]string, 0, len(b.ClarifyingQs))
+	for _, q := range b.ClarifyingQs {
+		out = append(out, q.Question)
+	}
+	return out
 }
 
 // IntentParser turns a user message into a BuildIntent.
@@ -58,8 +77,8 @@ type IntentParser interface {
 // --- AIIntentParser ---------------------------------------------------------
 
 const intentSystemPrompt = `You are VORTEX Forge's intent parser. Given a user's app-build request, respond with ONLY a JSON object of the form:
-{"app_type":"web|mobile|api|script|data_pipeline|bot","description":"...","requirements":[...],"delivery_targets":["apk"|"web"|"api"|"script"],"stack":{"backend":"fastapi|express|go|none","frontend":"flutter|react|none","ml":"sklearn|pytorch|none","database":"sqlite|postgres|none"},"needs_live_data":bool,"clarifying_questions":[...]}
-Return only the JSON, no prose.`
+{"app_type":"web|mobile|api|script|data_pipeline|bot","description":"...","requirements":[...],"delivery_targets":["apk"|"web"|"api"|"script"],"stack":{"backend":"fastapi|express|go|none","frontend":"flutter|react|none","ml":"sklearn|pytorch|none","database":"sqlite|postgres|none"},"needs_live_data":bool,"clarifying_questions":[{"question":"...","key":"snake_case_key","options":["Option A","Option B","Option C"]}]}
+For clarifying_questions: ask AT MOST 2 questions, each with AT MOST 3 short options. Prefer options over open-ended questions. Only ask when genuinely ambiguous. Return only the JSON, no prose.`
 
 // AIIntentParser parses intent using the AI gateway.
 type AIIntentParser struct {
@@ -93,11 +112,24 @@ func (p *AIIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, 
 	if intent.Description == "" {
 		intent.Description = userMsg
 	}
-	// Cap clarifying questions so the conversation can't drag on — at most 2.
-	if len(intent.ClarifyingQs) > 2 {
-		intent.ClarifyingQs = intent.ClarifyingQs[:2]
-	}
+	intent.ClarifyingQs = capQuestions(intent.ClarifyingQs)
 	return intent, nil
+}
+
+// capQuestions enforces at most 2 questions, each with at most 3 options.
+func capQuestions(qs []ClarifyingQuestion) []ClarifyingQuestion {
+	if len(qs) > 2 {
+		qs = qs[:2]
+	}
+	for i := range qs {
+		if len(qs[i].Options) > 3 {
+			qs[i].Options = qs[i].Options[:3]
+		}
+		if qs[i].Key == "" {
+			qs[i].Key = fmt.Sprintf("answer_%d", i+1)
+		}
+	}
+	return qs
 }
 
 // languageKeyword maps a requested language to the words that imply it. This is
@@ -216,7 +248,11 @@ func (RuleIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, e
 		intent.AppType = AppTypeWeb
 		intent.DeliveryTargets = []string{"web"}
 		intent.Stack = StackChoice{Frontend: "react", Backend: "go", ML: "none", Database: "none"}
-		intent.ClarifyingQs = []string{"What kind of app would you like — web, mobile (APK), API, or script?"}
+		intent.ClarifyingQs = []ClarifyingQuestion{{
+			Question: "What kind of app would you like?",
+			Key:      "app_type",
+			Options:  []string{"Web app", "Mobile (APK)", "API / script"},
+		}}
 	}
 
 	if containsAny(msg, "live data", "real-time", "realtime", "fetch", "api data") {

@@ -88,7 +88,11 @@ func hasTarget(intent BuildIntent, target string) bool {
 }
 
 func TestAIIntentParser_CapsClarifyingQuestions(t *testing.T) {
-	gw := &scriptedGateway{replies: []string{`{"app_type":"mobile","clarifying_questions":["q1","q2","q3","q4"]}`}}
+	gw := &scriptedGateway{replies: []string{`{"app_type":"mobile","clarifying_questions":[
+		{"question":"q1","key":"k1","options":["a","b","c","d","e"]},
+		{"question":"q2","key":"k2"},
+		{"question":"q3","key":"k3"},
+		{"question":"q4","key":"k4"}]}`}}
 	p := NewAIIntentParser(gw)
 	intent, err := p.Parse(context.Background(), "build something")
 	if err != nil {
@@ -96,5 +100,49 @@ func TestAIIntentParser_CapsClarifyingQuestions(t *testing.T) {
 	}
 	if len(intent.ClarifyingQs) != 2 {
 		t.Errorf("clarifying questions = %d, want capped at 2: %v", len(intent.ClarifyingQs), intent.ClarifyingQs)
+	}
+	if len(intent.ClarifyingQs[0].Options) != 3 {
+		t.Errorf("options = %d, want capped at 3", len(intent.ClarifyingQs[0].Options))
+	}
+}
+
+func TestClarifyingQuestion_StructuredParse(t *testing.T) {
+	gw := &scriptedGateway{replies: []string{`{"app_type":"mobile","clarifying_questions":[
+		{"question":"What type of calculator?","key":"calc_type","options":["Basic","Scientific"]}]}`}}
+	intent, err := NewAIIntentParser(gw).Parse(context.Background(), "flutter calculator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := intent.ClarifyingQs[0]
+	if q.Question != "What type of calculator?" || q.Key != "calc_type" || len(q.Options) != 2 {
+		t.Errorf("structured question = %+v", q)
+	}
+	// ClarifyingTexts returns the question texts.
+	if texts := intent.ClarifyingTexts(); len(texts) != 1 || texts[0] != "What type of calculator?" {
+		t.Errorf("ClarifyingTexts = %v", texts)
+	}
+}
+
+func TestRuleIntentParser_StructuredOptions(t *testing.T) {
+	intent, _ := NewRuleIntentParser().Parse(context.Background(), "make me something cool")
+	if len(intent.ClarifyingQs) == 0 {
+		t.Fatal("ambiguous request should produce a clarifying question")
+	}
+	q := intent.ClarifyingQs[0]
+	if len(q.Options) == 0 || q.Key == "" {
+		t.Errorf("rule clarifying question should have options + key: %+v", q)
+	}
+}
+
+func TestForge_StatusCarriesQuestions(t *testing.T) {
+	intent := BuildIntent{ClarifyingQs: []ClarifyingQuestion{
+		{Question: "web or mobile?", Key: "platform", Options: []string{"Web", "Mobile"}},
+	}}
+	b, q, c, d := &stubBuilder{}, &stubQA{}, &stubCodegen{}, &stubDeliver{}
+	f := newStubForge(t, intent, b, q, c, d)
+	_ = f.Build(context.Background(), "make something", 1, nil)
+	st := f.Status()
+	if len(st.Questions) != 1 || st.Questions[0].Key != "platform" || len(st.Questions[0].Options) != 2 {
+		t.Errorf("Status should carry structured questions: %+v", st.Questions)
 	}
 }

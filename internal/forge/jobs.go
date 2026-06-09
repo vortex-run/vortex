@@ -24,18 +24,19 @@ const (
 
 // Job is one asynchronous build request.
 type Job struct {
-	ID              string    `json:"id"`
-	Message         string    `json:"message"`
-	SessionID       string    `json:"session_id"`
-	ChatID          int64     `json:"chat_id"`
-	State           JobState  `json:"state"`
-	Progress        string    `json:"progress"`
-	ProgressHistory []string  `json:"progress_history,omitempty"`
-	Result          string    `json:"result,omitempty"`
-	DurationMs      int64     `json:"duration_ms,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string               `json:"id"`
+	Message         string               `json:"message"`
+	SessionID       string               `json:"session_id"`
+	ChatID          int64                `json:"chat_id"`
+	State           JobState             `json:"state"`
+	Progress        string               `json:"progress"`
+	ProgressHistory []string             `json:"progress_history,omitempty"`
+	Questions       []ClarifyingQuestion `json:"questions,omitempty"`
+	Result          string               `json:"result,omitempty"`
+	DurationMs      int64                `json:"duration_ms,omitempty"`
+	Error           string               `json:"error,omitempty"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 // JobManager runs forge builds asynchronously and tracks their status. Builds
@@ -92,6 +93,7 @@ func (m *JobManager) run(ctx context.Context, job *Job) {
 	m.update(job.ID, func(j *Job) {
 		j.Result = status.Result
 		j.DurationMs = status.DurationMs
+		j.Questions = status.Questions
 		if err != nil {
 			j.State = JobFailed
 			j.Error = err.Error()

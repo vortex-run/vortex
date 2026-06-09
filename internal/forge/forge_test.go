@@ -129,7 +129,7 @@ func TestForge_BuildEndToEnd(t *testing.T) {
 }
 
 func TestForge_ClarifyingQuestionsShortCircuit(t *testing.T) {
-	intent := BuildIntent{ClarifyingQs: []string{"web or mobile?"}}
+	intent := BuildIntent{ClarifyingQs: []ClarifyingQuestion{{Question: "web or mobile?", Key: "platform"}}}
 	b, q, c, d := &stubBuilder{}, &stubQA{}, &stubCodegen{}, &stubDeliver{}
 	f := newStubForge(t, intent, b, q, c, d)
 

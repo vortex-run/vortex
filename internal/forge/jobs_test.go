@@ -103,7 +103,7 @@ func TestJobs_SessionPendingAndClarifying(t *testing.T) {
 
 func TestJobs_SessionPendingClarifyState(t *testing.T) {
 	// A build that asks a clarifying question → JobClarify → pending + clarifying.
-	intent := BuildIntent{ClarifyingQs: []string{"web or mobile?"}}
+	intent := BuildIntent{ClarifyingQs: []ClarifyingQuestion{{Question: "web or mobile?", Key: "platform"}}}
 	m := newJobManagerWithStubs(t, intent, &stubQA{})
 	id := m.Submit(context.Background(), "make something", "sc", 0)
 	_ = waitState(t, m, id, JobClarify)

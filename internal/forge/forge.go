@@ -58,14 +58,23 @@ type ForgeConfig struct {
 type Forge struct {
 	cfg ForgeConfig
 
-	mu       sync.Mutex
-	active   bool
-	current  string
-	prog     string
-	history  []string  // every progress step, in order
-	result   string    // final result summary (set on completion)
-	started  time.Time // build start, for duration
-	duration int64     // final duration in ms (set on completion)
+	mu        sync.Mutex
+	active    bool
+	current   string
+	prog      string
+	history   []string             // every progress step, in order
+	result    string               // final result summary (set on completion)
+	started   time.Time            // build start, for duration
+	duration  int64                // final duration in ms (set on completion)
+	questions []ClarifyingQuestion // structured clarifying questions (option UI)
+}
+
+// setQuestions records the structured clarifying questions for the current
+// build (surfaced via Status for option-selection UIs).
+func (f *Forge) setQuestions(qs []ClarifyingQuestion) {
+	f.mu.Lock()
+	f.questions = qs
+	f.mu.Unlock()
 }
 
 // NewForge constructs the orchestrator.
@@ -84,12 +93,13 @@ func NewForge(cfg ForgeConfig) (*Forge, error) {
 //
 //nolint:revive // ForgeStatus name is mandated by the M13 spec
 type ForgeStatus struct {
-	Active          bool     `json:"active"`
-	CurrentBuild    string   `json:"current_build"`
-	Progress        string   `json:"progress"`
-	ProgressHistory []string `json:"progress_history"`
-	Result          string   `json:"result"`
-	DurationMs      int64    `json:"duration_ms"`
+	Active          bool                 `json:"active"`
+	CurrentBuild    string               `json:"current_build"`
+	Progress        string               `json:"progress"`
+	ProgressHistory []string             `json:"progress_history"`
+	Result          string               `json:"result"`
+	DurationMs      int64                `json:"duration_ms"`
+	Questions       []ClarifyingQuestion `json:"questions,omitempty"`
 }
 
 // Status returns a snapshot of the current build state.
@@ -97,9 +107,11 @@ func (f *Forge) Status() ForgeStatus {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	hist := append([]string(nil), f.history...)
+	qs := append([]ClarifyingQuestion(nil), f.questions...)
 	return ForgeStatus{
 		Active: f.active, CurrentBuild: f.current, Progress: f.prog,
 		ProgressHistory: hist, Result: f.result, DurationMs: f.duration,
+		Questions: qs,
 	}
 }
 
@@ -141,6 +153,7 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 	f.active = true
 	f.current = userMsg
 	f.history = nil
+	f.questions = nil
 	f.result = ""
 	f.duration = 0
 	f.started = time.Now()
@@ -165,9 +178,12 @@ func (f *Forge) Build(ctx context.Context, userMsg string, chatID int64, progres
 		f.setResult(gate)
 		return nil
 	}
-	// 2. Clarifying questions short-circuit (caller handles the Q&A loop).
+	// 2. Clarifying questions short-circuit (caller handles the Q&A loop). Record
+	// the STRUCTURED questions (for option-selection UIs) and emit the text form
+	// for the legacy progress stream.
 	if len(intent.ClarifyingQs) > 0 {
-		for _, q := range intent.ClarifyingQs {
+		f.setQuestions(intent.ClarifyingQs)
+		for _, q := range intent.ClarifyingTexts() {
 			f.setProgress(progressFn, "❓ "+q)
 		}
 		return nil

@@ -1041,9 +1041,21 @@ func (a *forgeRuntimeAdapter) Get(id string) (api.ForgeJob, bool) {
 	}
 	return api.ForgeJob{
 		ID: j.ID, Message: j.Message, State: string(j.State), Progress: j.Progress,
-		ProgressHistory: j.ProgressHistory, Result: j.Result, DurationMs: j.DurationMs,
-		Error: j.Error,
+		ProgressHistory: j.ProgressHistory, Questions: forgeQuestions(j.Questions),
+		Result: j.Result, DurationMs: j.DurationMs, Error: j.Error,
 	}, true
+}
+
+// forgeQuestions converts forge clarifying questions into the API type.
+func forgeQuestions(qs []forge.ClarifyingQuestion) []api.ForgeQuestion {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]api.ForgeQuestion, 0, len(qs))
+	for _, q := range qs {
+		out = append(out, api.ForgeQuestion{Question: q.Question, Options: q.Options, Key: q.Key})
+	}
+	return out
 }
 
 func (a *forgeRuntimeAdapter) List() []api.ForgeJob {

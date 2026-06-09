@@ -139,14 +139,22 @@ type NamespacesData struct {
 
 // ForgeJobData mirrors GET /api/forge/status/{id}.
 type ForgeJobData struct {
-	ID              string   `json:"id"`
-	Message         string   `json:"message"`
-	State           string   `json:"state"`
-	Progress        string   `json:"progress"`
-	ProgressHistory []string `json:"progress_history"`
-	Result          string   `json:"result"`
-	DurationMs      int64    `json:"duration_ms"`
-	Error           string   `json:"error"`
+	ID              string          `json:"id"`
+	Message         string          `json:"message"`
+	State           string          `json:"state"`
+	Progress        string          `json:"progress"`
+	ProgressHistory []string        `json:"progress_history"`
+	Questions       []ForgeQuestion `json:"questions"`
+	Result          string          `json:"result"`
+	DurationMs      int64           `json:"duration_ms"`
+	Error           string          `json:"error"`
+}
+
+// ForgeQuestion is a structured clarifying question (option-selection UI).
+type ForgeQuestion struct {
+	Question string   `json:"question"`
+	Options  []string `json:"options"`
+	Key      string   `json:"key"`
 }
 
 // --- requests ---------------------------------------------------------------
