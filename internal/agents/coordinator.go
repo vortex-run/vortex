@@ -240,6 +240,9 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	if c.cfg.WorkingDir == "" {
 		c.cfg.WorkingDir, _ = os.Getwd()
 	}
+	// Detect the project context once, up front (read-only thereafter).
+	c.projectCtx = describeProject(c.cfg.WorkingDir)
+	c.projectCtxSet = true
 	return c, nil
 }
 
@@ -769,17 +772,10 @@ func (c *Coordinator) handleLocalFile(ctx context.Context, sessionID, userMsg st
 	return transcript, nil
 }
 
-// detectProjectContext inspects the working directory and returns a short
-// description of the project (type, path, primary config) for the AI system
-// prompt. The result is computed once per coordinator and cached.
+// detectProjectContext returns the project description. It is computed once at
+// construction (NewCoordinator) and read-only thereafter, so it is safe to read
+// without a lock from concurrent HandleMessage calls.
 func (c *Coordinator) detectProjectContext() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.projectCtxSet {
-		return c.projectCtx
-	}
-	c.projectCtx = describeProject(c.cfg.WorkingDir)
-	c.projectCtxSet = true
 	return c.projectCtx
 }
 
