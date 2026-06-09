@@ -153,5 +153,9 @@ func (m SecretsModel) View() string {
 // Editing reports whether inline input is active (for tests).
 func (m SecretsModel) Editing() bool { return m.editing }
 
+// IsInputFocused returns true while the user is typing a secret value, so the
+// app does not intercept number keys (or q/Tab) as navigation.
+func (m SecretsModel) IsInputFocused() bool { return m.editing }
+
 // Selected returns the selected index (for tests).
 func (m SecretsModel) Selected() int { return m.selected }

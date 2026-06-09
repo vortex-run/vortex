@@ -336,8 +336,12 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, nil
 		case "tab":
-			m.input.SetValue(autocomplete(m.input.Value()))
-			m.input.CursorEnd()
+			// Tab autocompletes commands — but NOT while answering option
+			// questions (there the user types numbers, not commands).
+			if len(m.pendingQs) == 0 {
+				m.input.SetValue(autocomplete(m.input.Value()))
+				m.input.CursorEnd()
+			}
 			return m, nil
 		}
 	}
@@ -361,6 +365,10 @@ func (m AgentsModel) View() string {
 		body = m.renderMessages()
 	}
 
+	// While answering option questions, show a clear numbered-entry prompt.
+	if len(m.pendingQs) > 0 {
+		m.input.Prompt = "Enter numbers (e.g. 1 2): "
+	}
 	footer := m.input.View()
 	if m.thinking {
 		footer = m.spinner.View() + " Thinking…"
@@ -578,6 +586,12 @@ func autocomplete(current string) string {
 
 // Awaiting reports whether an approval is pending (for tests).
 func (m AgentsModel) Awaiting() bool { return m.awaiting }
+
+// IsInputFocused always returns true: the Agents chat input is active at all
+// times (including approval Y/N and option-selection), so the app must not
+// intercept q/Tab/1-9 navigation while the user is here — every key is typed
+// into the chat or consumed by the view.
+func (m AgentsModel) IsInputFocused() bool { return true }
 
 // Messages exposes the conversation (for tests).
 func (m AgentsModel) Messages() []ChatMessage { return m.messages }

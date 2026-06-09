@@ -117,3 +117,15 @@ func TestSecrets_EmptyState(t *testing.T) {
 		t.Errorf("empty secrets should show placeholder:\n%s", updated.View())
 	}
 }
+
+func TestSecrets_IsInputFocusedWhenEditing(t *testing.T) {
+	m := NewSecrets(nil)
+	if m.IsInputFocused() {
+		t.Error("not editing → input not focused")
+	}
+	loaded, _ := m.Update(secretsModelData{secrets: sampleSecrets()})
+	editing, _ := loaded.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	if !editing.(SecretsModel).IsInputFocused() {
+		t.Error("while editing a secret value → input focused")
+	}
+}

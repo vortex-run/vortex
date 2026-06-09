@@ -67,6 +67,21 @@ type App struct {
 	setupMode  bool
 }
 
+// InputFocused is implemented by views that own a text input. When the active
+// view reports its input is focused, the app stops handling navigation keys
+// (q/Tab/1-9/F1-F9) so the user can type those characters into the input.
+type InputFocused interface {
+	IsInputFocused() bool
+}
+
+// activeViewInputFocused reports whether the active view has a focused input.
+func (a *App) activeViewInputFocused() bool {
+	if v, ok := a.views[a.activeView].(InputFocused); ok {
+		return v.IsInputFocused()
+	}
+	return false
+}
+
 // tickMsg drives periodic data refresh.
 type tickMsg time.Time
 
@@ -150,10 +165,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.views[ViewOverview].Init()
 
 	case tea.KeyMsg:
-		// Global keys (skip while in setup so the wizard owns input).
-		if !a.setupMode {
+		// Ctrl+C always quits, even while typing.
+		if msg.String() == "ctrl+c" {
+			return a, tea.Quit
+		}
+		// When the active view has a focused text input (e.g. the Agents chat or
+		// a Secrets value entry), it captures ALL other keys — navigation
+		// shortcuts (q, Tab, 1-9, F1-F9) are disabled so the user can type freely.
+		// Setup mode likewise owns its own input.
+		if !a.setupMode && !a.activeViewInputFocused() {
 			switch msg.String() {
-			case "q", "ctrl+c":
+			case "q":
 				return a, tea.Quit
 			case "tab":
 				a.cycleSidebar(1)
@@ -167,8 +189,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.SwitchView(id)
 				return a, a.views[a.activeView].Init()
 			}
-		} else if msg.String() == "ctrl+c" {
-			return a, tea.Quit
 		}
 	}
 

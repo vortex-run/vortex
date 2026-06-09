@@ -131,3 +131,46 @@ func TestApp_TopBarShowsCost(t *testing.T) {
 		t.Errorf("top bar should show cost:\n%s", a.View())
 	}
 }
+
+func TestApp_InputFocusedBlocksNavigation(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	a.SwitchView(ViewAgents) // Agents view reports IsInputFocused()=true
+	// Pressing "1" must NOT jump to Overview — it goes to the chat input.
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1")})
+	if a.ActiveView() != ViewAgents {
+		t.Errorf("'1' while typing in Agents jumped to %d; should stay on Agents", a.ActiveView())
+	}
+	// Tab must not cycle the sidebar either.
+	a.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if a.ActiveView() != ViewAgents {
+		t.Error("Tab while typing in Agents should not cycle the sidebar")
+	}
+	// 'q' must not quit while typing.
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd != nil {
+		if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+			t.Error("'q' while typing in Agents should not quit")
+		}
+	}
+}
+
+func TestApp_CtrlCQuitsEvenWhileTyping(t *testing.T) {
+	a := connectedApp(t)
+	a.SwitchView(ViewAgents)
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl+C should always quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("Ctrl+C should map to tea.Quit even while typing")
+	}
+}
+
+func TestApp_NavigationWorksWhenNotInputFocused(t *testing.T) {
+	a := connectedApp(t) // starts on Overview (no input focus)
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	if a.ActiveView() != ViewRoutes {
+		t.Errorf("'3' on a non-input view should jump to Routes, got %d", a.ActiveView())
+	}
+}

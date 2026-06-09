@@ -540,3 +540,38 @@ func TestAgents_AnswerMapsOptionsAndSubmits(t *testing.T) {
 		t.Errorf("user message should show the typed answer, got %q", last.Content)
 	}
 }
+
+func TestAgents_IsInputFocusedAlways(t *testing.T) {
+	m := NewAgents(nil)
+	if !m.IsInputFocused() {
+		t.Error("Agents chat input should always be focused")
+	}
+}
+
+func TestAgents_TabDisabledDuringOptions(t *testing.T) {
+	m := NewAgents(nil)
+	m.pendingQs = []tui.ForgeQuestion{{Options: []string{"A", "B"}}}
+	m.input.SetValue("/sea")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Tab must NOT autocomplete while answering options — input unchanged.
+	if updated.(AgentsModel).input.Value() != "/sea" {
+		t.Errorf("Tab should be inert during option selection, got %q", updated.(AgentsModel).input.Value())
+	}
+}
+
+func TestAgents_TabAutocompletesNormally(t *testing.T) {
+	m := NewAgents(nil) // no pending questions
+	m.input.SetValue("/sea")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if updated.(AgentsModel).input.Value() != "/search " {
+		t.Errorf("Tab should autocomplete /sea → /search, got %q", updated.(AgentsModel).input.Value())
+	}
+}
+
+func TestAgents_OptionPromptShown(t *testing.T) {
+	m := NewAgents(nil)
+	m.pendingQs = []tui.ForgeQuestion{{Question: "x?", Options: []string{"A"}}}
+	if !strings.Contains(m.View(), "Enter numbers") {
+		t.Errorf("option-selection view should show the numbered-entry prompt:\n%s", m.View())
+	}
+}
