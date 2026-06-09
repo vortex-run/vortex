@@ -1268,12 +1268,19 @@ func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *ag
 	}
 
 	// Telegram: wire built-in command hooks, register the command menu, and pick
-	// a delivery mode (polling for local testing, webhook for production).
+	// a delivery mode (polling for local testing, webhook for production). The
+	// network calls (setMyCommands, setWebhook) run in the BACKGROUND so a slow
+	// or unreachable Telegram API never delays startup or shutdown.
 	if m.telegram != nil {
 		wireTelegramCommands(m.telegram, apiSrv, rt)
-		if serr := m.telegram.SetCommands(context.Background()); serr != nil {
-			log.Warn("telegram setMyCommands failed", "err", serr)
-		}
+		bot := m.telegram
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if serr := bot.SetCommands(ctx); serr != nil {
+				log.Warn("telegram setMyCommands failed", "err", serr)
+			}
+		}()
 		startTelegramDelivery(m.telegram, rt, log)
 	}
 }
@@ -1323,11 +1330,15 @@ func startTelegramDelivery(bot *messaging.TelegramBot, rt *agents.Runtime, log *
 		return
 	}
 	if pub := os.Getenv("VORTEX_PUBLIC_URL"); pub != "" {
-		if err := bot.SetWebhook(context.Background(), strings.TrimRight(pub, "/")+"/webhook/telegram"); err != nil {
-			log.Warn("Telegram webhook registration failed", "err", err)
-		} else {
-			log.Info("Telegram webhook registered", "url", pub)
-		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := bot.SetWebhook(ctx, strings.TrimRight(pub, "/")+"/webhook/telegram"); err != nil {
+				log.Warn("Telegram webhook registration failed", "err", err)
+			} else {
+				log.Info("Telegram webhook registered", "url", pub)
+			}
+		}()
 		return
 	}
 	log.Info("Telegram webhook not registered — set VORTEX_PUBLIC_URL or VORTEX_TELEGRAM_POLLING=true")
