@@ -283,6 +283,13 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	if err != nil {
 		return nil, err
 	}
+	// Scope session-aware tools (write backups, undo) to this session.
+	if params == nil {
+		params = map[string]any{}
+	}
+	if _, ok := params["session_id"]; !ok {
+		params["session_id"] = session
+	}
 	emit(toolStartLine(name, params))
 
 	result, err := tool.Execute(ctx, params)
@@ -404,6 +411,9 @@ func executeApprovedLocal(ctx context.Context, tool Tool, params map[string]any)
 	case GitCommitTool:
 		tl.RequireApproval = false
 		return tl.Execute(ctx, params)
+	case UndoTool:
+		tl.RequireApproval = false
+		return tl.Execute(ctx, params)
 	default:
 		return tool.Execute(ctx, params) // read-only tool; no gate
 	}
@@ -436,6 +446,8 @@ func toolStartLine(name string, params map[string]any) string {
 		return "🔎 Searching for: " + strParamOr(params, "pattern", "")
 	case "find_files":
 		return "🔎 Finding files: " + strParamOr(params, "name_pattern", "")
+	case "undo":
+		return "↩ Undo last write"
 	default:
 		return "→ " + name
 	}
@@ -507,6 +519,10 @@ func toolDoneLine(name string, result any) string {
 				return "✓ No files found"
 			}
 			return strings.Join(files, "\n")
+		}
+	case "undo":
+		if restored, ok := m["restored"].(string); ok {
+			return "✓ Restored: " + restored
 		}
 	}
 	return "✓ Done"
@@ -908,6 +924,8 @@ func parseLocalRequest(userMsg string) (string, map[string]any) {
 			return "search_files", map[string]any{"pattern": rest}
 		case "find":
 			return "find_files", map[string]any{"name_pattern": rest}
+		case "undo":
+			return "undo", map[string]any{}
 		default:
 			return "", nil
 		}

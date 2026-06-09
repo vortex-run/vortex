@@ -229,6 +229,9 @@ func (t WriteLocalFileTool) Execute(_ context.Context, params map[string]any) (a
 			return nil, mkerr
 		}
 	}
+	// Back up an existing file before overwriting, so /undo can restore it.
+	session, _ := params["session_id"].(string)
+	backupBeforeWrite(session, abs)
 	if werr := os.WriteFile(abs, []byte(content), 0o644); werr != nil { //nolint:gosec // user-approved write
 		return nil, werr
 	}
@@ -522,5 +525,6 @@ func NewLocalTools(cfg LocalFSConfig) []Tool {
 	}
 	tools = append(tools, gitTools(cfg)...)
 	tools = append(tools, searchTools(cfg)...)
+	tools = append(tools, UndoTool{cfg: cfg, RequireApproval: true})
 	return tools
 }
