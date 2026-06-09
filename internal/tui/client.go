@@ -270,6 +270,41 @@ func (c *Client) Namespaces() (*NamespacesData, error) {
 }
 
 // ForgeStatus fetches GET /api/forge/status/{id}.
+// SessionSummaryData mirrors one entry of GET /api/agents/history.
+type SessionSummaryData struct {
+	SessionID string `json:"session_id"`
+	Summary   string `json:"summary"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// SessionMessageData mirrors one message of GET /api/agents/history/{id}.
+type SessionMessageData struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// History fetches the list of stored conversation sessions.
+func (c *Client) History() ([]SessionSummaryData, error) {
+	var out struct {
+		Sessions []SessionSummaryData `json:"sessions"`
+	}
+	if err := c.getJSON("/api/agents/history", &out); err != nil {
+		return nil, err
+	}
+	return out.Sessions, nil
+}
+
+// SessionHistory fetches the messages of a past session.
+func (c *Client) SessionHistory(sessionID string) ([]SessionMessageData, error) {
+	var out struct {
+		Messages []SessionMessageData `json:"messages"`
+	}
+	if err := c.getJSON("/api/agents/history/"+sessionID, &out); err != nil {
+		return nil, err
+	}
+	return out.Messages, nil
+}
+
 func (c *Client) ForgeStatus(jobID string) (*ForgeJobData, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), forgeStatusTimeout)
 	defer cancel()

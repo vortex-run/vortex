@@ -211,6 +211,14 @@ func (r *Runtime) Approve(sessionID string, approved bool) (string, bool) {
 // Coordinator returns the runtime's coordinator (for wiring local-tool calls).
 func (r *Runtime) Coordinator() *Coordinator { return r.cfg.Coordinator }
 
+// ListSessions returns stored conversation sessions (newest first).
+func (r *Runtime) ListSessions() []SessionInfo { return r.cfg.Coordinator.ListSessions() }
+
+// SessionHistory returns the persisted messages for a session.
+func (r *Runtime) SessionHistory(sessionID string) []MemoryMessage {
+	return r.cfg.Coordinator.SessionHistory(sessionID)
+}
+
 // Stats returns a snapshot of runtime activity.
 func (r *Runtime) Stats() RuntimeStats {
 	r.mu.Lock()

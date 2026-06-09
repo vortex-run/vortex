@@ -47,6 +47,7 @@ var slashCommands = []string{
 	"/ls", "/read", "/run", "/create", "/edit", "/project",
 	"/forge", "/status", "/reload", "/help",
 	"/diff", "/commit", "/search", "/find",
+	"/history", "/resume", "/undo",
 }
 
 // commandCompletions are tab-completed command prefixes.
@@ -217,6 +218,34 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalReady = true
 		return m, nil
 
+	case historyListMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "⚠ " + msg.err.Error(), Timestamp: time.Now()})
+		} else if len(msg.sessions) == 0 {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "No past sessions.", Timestamp: time.Now()})
+		} else {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "Past sessions (use /resume <id>):", Timestamp: time.Now()})
+			for _, s := range msg.sessions {
+				m.messages = append(m.messages, ChatMessage{Role: "system", Content: "• " + s.SessionID + " — " + s.Summary, Timestamp: time.Now()})
+			}
+		}
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+
+	case resumeMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "⚠ " + msg.err.Error(), Timestamp: time.Now()})
+		} else {
+			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "Resumed session " + msg.sessionID + ":", Timestamp: time.Now()})
+			for _, hm := range msg.messages {
+				m.messages = append(m.messages, ChatMessage{Role: hm.Role, Content: hm.Content, Timestamp: time.Now()})
+			}
+		}
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, nil
+
 	case forgeProgress:
 		return m.handleForgeProgress(msg)
 
@@ -274,6 +303,14 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" || m.thinking {
 				return m, nil
+			}
+			// /history and /resume are handled client-side (query the memory
+			// store via the API) instead of being sent to the coordinator.
+			if cmd, handled := m.handleHistoryCommand(text); handled {
+				m.input.Reset()
+				m.viewport.SetContent(m.renderMessages())
+				m.viewport.GotoBottom()
+				return m, cmd
 			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: text, Timestamp: time.Now()})
 			m.input.Reset()
@@ -400,6 +437,46 @@ type approvalResult struct {
 
 // approvalReadyMsg fires ~100ms after an approval box renders, enabling Y/N.
 type approvalReadyMsg struct{}
+
+// historyListMsg carries the list of past sessions for /history.
+type historyListMsg struct {
+	sessions []tui.SessionSummaryData
+	err      error
+}
+
+// resumeMsg carries a resumed session's messages for /resume.
+type resumeMsg struct {
+	sessionID string
+	messages  []tui.SessionMessageData
+	err       error
+}
+
+// handleHistoryCommand intercepts /history and /resume. It returns (cmd, true)
+// when it handled the input, else (nil, false) so normal submit proceeds.
+func (m *AgentsModel) handleHistoryCommand(text string) (tea.Cmd, bool) {
+	switch {
+	case text == "/history":
+		c := m.client
+		return func() tea.Msg {
+			if c == nil {
+				return historyListMsg{err: fmt.Errorf("not connected")}
+			}
+			s, err := c.History()
+			return historyListMsg{sessions: s, err: err}
+		}, true
+	case strings.HasPrefix(text, "/resume "):
+		id := strings.TrimSpace(strings.TrimPrefix(text, "/resume "))
+		c := m.client
+		return func() tea.Msg {
+			if c == nil {
+				return resumeMsg{err: fmt.Errorf("not connected")}
+			}
+			msgs, err := c.SessionHistory(id)
+			return resumeMsg{sessionID: id, messages: msgs, err: err}
+		}, true
+	}
+	return nil, false
+}
 
 // ApprovalReady reports whether Y/N input is enabled on the box (for tests).
 func (m AgentsModel) ApprovalReady() bool { return m.approvalReady }

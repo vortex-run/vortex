@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/vortex-run/vortex/internal/security"
 )
@@ -26,6 +27,24 @@ type AgentRuntime interface {
 	// [Y]/[N]). On approval it executes the stashed action and returns a result
 	// transcript; matched is false when no action was pending.
 	Approve(sessionID string, approved bool) (transcript string, matched bool)
+	// ListSessions returns stored conversation sessions (newest first).
+	ListSessions() []SessionSummary
+	// SessionHistory returns the persisted messages for a session.
+	SessionHistory(sessionID string) []SessionMessage
+}
+
+// SessionSummary describes a stored conversation for /api/agents/history.
+type SessionSummary struct {
+	SessionID string    `json:"session_id"`
+	Summary   string    `json:"summary"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SessionMessage is one persisted conversation turn.
+type SessionMessage struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // AgentRuntimeStats mirrors the runtime's stats for the API. The wiring in
@@ -159,6 +178,39 @@ func (s *Server) handleAgentApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"resolved": true, "result": transcript})
+}
+
+// handleAgentHistory lists stored conversation sessions.
+func (s *Server) handleAgentHistory(w http.ResponseWriter, _ *http.Request) {
+	if s.agentRuntime == nil {
+		http.Error(w, "agent runtime not configured", http.StatusServiceUnavailable)
+		return
+	}
+	sessions := s.agentRuntime.ListSessions()
+	if sessions == nil {
+		sessions = []SessionSummary{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessions})
+}
+
+// handleAgentSessionHistory returns the messages for one session.
+func (s *Server) handleAgentSessionHistory(w http.ResponseWriter, r *http.Request) {
+	if s.agentRuntime == nil {
+		http.Error(w, "agent runtime not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+	msgs := s.agentRuntime.SessionHistory(id)
+	if msgs == nil {
+		msgs = []SessionMessage{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"session_id": id, "messages": msgs})
 }
 
 // handleAgentStatus returns the runtime stats.

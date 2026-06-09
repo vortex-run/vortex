@@ -875,6 +875,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		Approval:          approval,
 		BuildApp:          buildApp,
 		SessionClarifying: sessionClarifying,
+		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
 		WorkingDir:        workingDir,
 	})
 	if err != nil {
@@ -930,6 +931,24 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 
 func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) (string, bool) {
 	return a.rt.Approve(sessionID, approved)
+}
+
+func (a *agentRuntimeAdapter) ListSessions() []api.SessionSummary {
+	src := a.rt.ListSessions()
+	out := make([]api.SessionSummary, 0, len(src))
+	for _, s := range src {
+		out = append(out, api.SessionSummary{SessionID: s.SessionID, Summary: s.Summary, UpdatedAt: s.UpdatedAt})
+	}
+	return out
+}
+
+func (a *agentRuntimeAdapter) SessionHistory(sessionID string) []api.SessionMessage {
+	src := a.rt.SessionHistory(sessionID)
+	out := make([]api.SessionMessage, 0, len(src))
+	for _, m := range src {
+		out = append(out, api.SessionMessage{Role: m.Role, Content: m.Content, Timestamp: m.Timestamp})
+	}
+	return out
 }
 
 // buildForge constructs the Forge orchestrator + job manager. The AI gateway is

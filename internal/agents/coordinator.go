@@ -91,7 +91,10 @@ type CoordinatorConfig struct {
 	// awaiting clarifying answers (forge JobClarify state). When it returns true,
 	// the next message is treated as an answer, not a new request. Optional.
 	SessionClarifying func(sessionID string) bool
-	WorkingDir        string // directory relative paths resolve against
+	// MemoryStore, when set, persists per-session conversation history under this
+	// directory and passes recent context to the AI. Optional.
+	MemoryStore string
+	WorkingDir  string // directory relative paths resolve against
 }
 
 // pendingApproval holds a tool action awaiting the user's approve/reject via
@@ -130,6 +133,75 @@ type Coordinator struct {
 	active   map[string]Agent
 	pending  map[string]*pendingApproval // session → action awaiting approval
 	sessions map[string]*SessionState    // session → conversation state
+	memories map[string]*Memory          // session → conversation memory
+}
+
+// memory returns (loading if needed) the conversation memory for a session, or
+// nil when no MemoryStore is configured.
+func (c *Coordinator) memory(sessionID string) *Memory {
+	if c.cfg.MemoryStore == "" || sessionID == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m, ok := c.memories[sessionID]; ok {
+		return m
+	}
+	m := NewMemory(c.cfg.MemoryStore)
+	if err := m.Load(sessionID); err != nil {
+		m.SessionID = sessionID // new conversation
+	}
+	c.memories[sessionID] = m
+	return m
+}
+
+// ListSessions returns stored conversation sessions (newest first), or nil when
+// no MemoryStore is configured.
+func (c *Coordinator) ListSessions() []SessionInfo {
+	if c.cfg.MemoryStore == "" {
+		return nil
+	}
+	return NewMemory(c.cfg.MemoryStore).List()
+}
+
+// SessionHistory returns the persisted messages for a session.
+func (c *Coordinator) SessionHistory(sessionID string) []MemoryMessage {
+	m := c.memory(sessionID)
+	if m == nil {
+		return nil
+	}
+	return m.Recent(0)
+}
+
+// recordExchange appends the user message + agent reply to memory and persists.
+func (c *Coordinator) recordExchange(sessionID, userMsg, reply string) {
+	m := c.memory(sessionID)
+	if m == nil {
+		return
+	}
+	m.Append("user", userMsg)
+	m.Append("agent", reply)
+	_ = m.Save()
+}
+
+// contextPrompt builds an AI prompt that includes the last few turns of history
+// for continuity, followed by the current message.
+func (c *Coordinator) contextPrompt(sessionID, userMsg string) string {
+	m := c.memory(sessionID)
+	if m == nil {
+		return userMsg
+	}
+	recent := m.Recent(10)
+	if len(recent) == 0 {
+		return userMsg
+	}
+	var b strings.Builder
+	b.WriteString("Conversation so far:\n")
+	for _, msg := range recent {
+		b.WriteString(msg.Role + ": " + msg.Content + "\n")
+	}
+	b.WriteString("\nCurrent message: " + userMsg)
+	return b.String()
 }
 
 // WorkingDir returns the directory the agent resolves relative paths against.
@@ -161,6 +233,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		active:   make(map[string]Agent),
 		pending:  make(map[string]*pendingApproval),
 		sessions: make(map[string]*SessionState),
+		memories: make(map[string]*Memory),
 	}
 	if c.cfg.WorkingDir == "" {
 		c.cfg.WorkingDir, _ = os.Getwd()
@@ -488,7 +561,11 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 
 	switch intent {
 	case IntentGeneralQuestion:
-		return c.cfg.AIGateway.Complete(ctx, userMsg, answerSystemPrompt)
+		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), answerSystemPrompt)
+		if err == nil {
+			c.recordExchange(sessionID, userMsg, reply)
+		}
+		return reply, err
 	case IntentBuildApp:
 		return c.dispatchBuild(ctx, sessionID, userMsg)
 	case IntentResearch:
