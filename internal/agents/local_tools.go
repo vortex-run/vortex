@@ -521,5 +521,6 @@ func NewLocalTools(cfg LocalFSConfig) []Tool {
 		CreateProjectTool{cfg: cfg, RequireApproval: true},
 	}
 	tools = append(tools, gitTools(cfg)...)
+	tools = append(tools, searchTools(cfg)...)
 	return tools
 }

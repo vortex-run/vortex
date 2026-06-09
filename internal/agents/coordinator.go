@@ -357,6 +357,10 @@ func toolStartLine(name string, params map[string]any) string {
 		return "🔱 git add"
 	case "git_commit":
 		return "🔱 git commit: " + strParamOr(params, "message", "")
+	case "search_files":
+		return "🔎 Searching for: " + strParamOr(params, "pattern", "")
+	case "find_files":
+		return "🔎 Finding files: " + strParamOr(params, "name_pattern", "")
 	default:
 		return "→ " + name
 	}
@@ -411,6 +415,24 @@ func toolDoneLine(name string, result any) string {
 		return "✓ Staged"
 	case "git_commit":
 		return "✓ Committed"
+	case "search_files":
+		if matches, ok := m["matches"].([]map[string]any); ok {
+			if len(matches) == 0 {
+				return "✓ No matches"
+			}
+			var b strings.Builder
+			for _, mm := range matches {
+				b.WriteString(fmt.Sprintf("%v:%v: %v\n", mm["file"], mm["line_number"], mm["line_content"]))
+			}
+			return strings.TrimRight(b.String(), "\n")
+		}
+	case "find_files":
+		if files, ok := m["files"].([]string); ok {
+			if len(files) == 0 {
+				return "✓ No files found"
+			}
+			return strings.Join(files, "\n")
+		}
 	}
 	return "✓ Done"
 }
@@ -580,6 +602,7 @@ var localFileKeywords = []string{
 	"edit file", "edit the file", "run command", "run the command",
 	"git status", "git diff", "git add", "git commit", "stage files",
 	"what changed", "show changes", "commit",
+	"search for", "find files", "search files",
 }
 
 // buildAppKeywords route a message to Forge (which needs AI intent parsing).
@@ -741,12 +764,21 @@ func parseLocalRequest(userMsg string) (string, map[string]any) {
 			return "git_diff", map[string]any{"file": rest}
 		case "commit":
 			return "git_commit", map[string]any{"message": rest}
+		case "search":
+			return "search_files", map[string]any{"pattern": rest}
+		case "find":
+			return "find_files", map[string]any{"name_pattern": rest}
 		default:
 			return "", nil
 		}
 	}
 
 	switch {
+	case strings.HasPrefix(lower, "search for ") || strings.Contains(lower, "search files"):
+		_, pat, _ := strings.Cut(lower, "search for ")
+		return "search_files", map[string]any{"pattern": strings.TrimSpace(pat)}
+	case strings.Contains(lower, "find files"):
+		return "find_files", map[string]any{"name_pattern": "*"}
 	case strings.Contains(lower, "git status") || lower == "what changed" || strings.Contains(lower, "show changes"):
 		return "git_status", map[string]any{}
 	case strings.Contains(lower, "git diff"):
