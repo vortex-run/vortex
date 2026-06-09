@@ -74,3 +74,31 @@ func TestStartCommand_NoCwdOrAllowPathFlag(t *testing.T) {
 		t.Error("--allow-path flag should not exist")
 	}
 }
+
+func TestTelegramFromFile(t *testing.T) {
+	// Redirect the config dir to a temp location and write a provider config
+	// with telegram fields.
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+
+	cfg := AIProviderConfig{
+		Provider: "claude", TelegramToken: "bot:123", TelegramChatID: "456",
+	}
+	if err := saveProviderConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	tok, chat, ok := telegramFromFile()
+	if !ok || tok != "bot:123" || chat != 456 {
+		t.Errorf("telegramFromFile = %q, %d, %v; want bot:123, 456, true", tok, chat, ok)
+	}
+}
+
+func TestTelegramFromFile_AbsentWhenNoToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("AppData", dir)
+	if _, _, ok := telegramFromFile(); ok {
+		t.Error("telegramFromFile should be false when no config exists")
+	}
+}

@@ -257,3 +257,94 @@ func TestTelegram_HandleWebhook_CallbackQuery(t *testing.T) {
 		t.Errorf("callback status = %d, want 200", rec.Code)
 	}
 }
+
+func TestTelegram_SetCommands(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{})
+	if err := bot.SetCommands(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.method() != "setMyCommands" {
+		t.Errorf("method = %q, want setMyCommands", f.method())
+	}
+}
+
+func TestTelegram_HandleCommandHooks(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{7}})
+	bot.SetCommandHooks(CommandHooks{
+		Status: func() string { return "VORTEX ok" },
+		Cost:   func() string { return "free" },
+		List:   func(string) string { return "files: a b" },
+		Approve: func(_ string, ok bool) (string, bool) {
+			if ok {
+				return "✓ File created", true
+			}
+			return "", true
+		},
+	})
+	cases := map[string]string{
+		"/status":  "VORTEX ok",
+		"/cost":    "free",
+		"/ls .":    "files: a b",
+		"/help":    "VORTEX commands",
+		"/approve": "Approved",
+	}
+	for cmd, want := range cases {
+		reply, handled := bot.handleCommand(context.Background(), 7, cmd)
+		if !handled {
+			t.Errorf("%s should be handled", cmd)
+		}
+		if !strings.Contains(reply, want) {
+			t.Errorf("%s reply = %q, want it to contain %q", cmd, reply, want)
+		}
+	}
+	// A non-command falls through.
+	if _, handled := bot.handleCommand(context.Background(), 7, "hello there"); handled {
+		t.Error("a non-command should not be handled")
+	}
+}
+
+func TestTelegram_RejectCommand(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{})
+	bot.SetCommandHooks(CommandHooks{
+		Approve: func(string, bool) (string, bool) { return "", true },
+	})
+	reply, handled := bot.handleCommand(context.Background(), 1, "/reject")
+	if !handled || !strings.Contains(reply, "Rejected") {
+		t.Errorf("/reject = %q handled=%v", reply, handled)
+	}
+}
+
+func TestTelegram_GetUpdates(t *testing.T) {
+	// A fake that returns one message update for getUpdates.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "getUpdates") {
+			_, _ = io.WriteString(w, `{"ok":true,"result":[{"update_id":5,"message":{"chat":{"id":7},"text":"hi"}}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(srv.Close)
+	bot, _ := NewTelegramBot(TelegramConfig{Token: "t", BaseURL: srv.URL, Client: srv.Client()})
+	updates, err := bot.getUpdates(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 || updates[0].UpdateID != 5 || updates[0].Message.Text != "hi" {
+		t.Errorf("getUpdates = %+v", updates)
+	}
+	if bot.lastUpdateID(updates[0]) != 5 {
+		t.Errorf("lastUpdateID = %d, want 5", bot.lastUpdateID(updates[0]))
+	}
+}
+
+func TestTelegram_HelpText(t *testing.T) {
+	h := helpText()
+	for _, c := range []string{"/status", "/ls", "/approve", "/cost", "/help"} {
+		if !strings.Contains(h, c) {
+			t.Errorf("help text missing %s", c)
+		}
+	}
+}
