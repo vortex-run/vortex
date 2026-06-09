@@ -15,6 +15,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
@@ -42,12 +43,27 @@ type CallbackResolver interface {
 	Resolve(callbackData string) bool
 }
 
+// CommandHooks supply data for the bot's built-in slash commands. Each is
+// optional; a nil hook yields a "not available" reply. They keep telegram.go
+// decoupled from the api/agents packages (wired in start.go).
+type CommandHooks struct {
+	Status  func() string                                  // /status reply
+	Routes  func() string                                  // /routes reply
+	Cost    func() string                                  // /cost reply
+	List    func(path string) string                       // /ls reply
+	Approve func(sessionID string, ok bool) (string, bool) // /approve, /reject
+}
+
+// SetCommandHooks wires the built-in command data sources.
+func (t *TelegramBot) SetCommandHooks(h CommandHooks) { t.hooks = h }
+
 // TelegramBot is a Telegram Bot API client + webhook handler.
 type TelegramBot struct {
 	cfg      TelegramConfig
 	baseURL  string
 	client   *http.Client
 	resolver CallbackResolver
+	hooks    CommandHooks
 }
 
 // SetCallbackResolver wires a resolver (e.g. the ApprovalManager) that gets
@@ -165,9 +181,119 @@ func (t *TelegramBot) SetWebhook(ctx context.Context, url string) error {
 	return t.post(ctx, "setWebhook", payload)
 }
 
+// botCommand is one entry of the Telegram command menu.
+type botCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// botCommands is the menu shown in the Telegram client.
+var botCommands = []botCommand{
+	{"status", "Show VORTEX status"},
+	{"routes", "List active routes"},
+	{"ls", "List files in the working directory"},
+	{"build", "Start a forge build"},
+	{"approve", "Approve the pending action"},
+	{"reject", "Reject the pending action"},
+	{"cost", "Show AI usage cost today"},
+	{"help", "Show all commands"},
+}
+
+// SetCommands registers the bot's command menu (/setMyCommands).
+func (t *TelegramBot) SetCommands(ctx context.Context) error {
+	return t.post(ctx, "setMyCommands", map[string]any{"commands": botCommands})
+}
+
+// helpText is the /help reply.
+func helpText() string {
+	var b strings.Builder
+	b.WriteString("VORTEX commands:\n")
+	for _, c := range botCommands {
+		b.WriteString("/" + c.Command + " — " + c.Description + "\n")
+	}
+	return b.String()
+}
+
+// getUpdatesResponse is the /getUpdates reply.
+type getUpdatesResponse struct {
+	OK     bool             `json:"ok"`
+	Result []telegramUpdate `json:"result"`
+}
+
+// Poll runs long-poll mode: every interval it fetches new updates via
+// getUpdates and dispatches them, until ctx is cancelled. No public URL is
+// needed (for local testing). updateID tracks the offset across calls.
+func (t *TelegramBot) Poll(ctx context.Context, runtime *agents.Runtime, interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	var offset int64
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			updates, err := t.getUpdates(ctx, offset)
+			if err != nil {
+				continue
+			}
+			for _, upd := range updates {
+				offset = t.lastUpdateID(upd) + 1
+				t.processUpdate(ctx, runtime, upd)
+			}
+		}
+	}
+}
+
+// getUpdates fetches updates with the given offset.
+func (t *TelegramBot) getUpdates(ctx context.Context, offset int64) ([]telegramUpdate, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/getUpdates?offset=%d&timeout=0", t.baseURL, offset), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out getUpdatesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Result, nil
+}
+
+// lastUpdateID returns the update_id of an update (for offset tracking).
+func (t *TelegramBot) lastUpdateID(upd telegramUpdate) int64 { return upd.UpdateID }
+
+// processUpdate dispatches a single update (message or callback). Shared by the
+// webhook handler and polling mode.
+func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime, upd telegramUpdate) {
+	if upd.CallbackQuery != nil {
+		if !t.allowed(upd.CallbackQuery.From.ID) {
+			return
+		}
+		if t.resolver != nil {
+			t.resolver.Resolve(upd.CallbackQuery.Data)
+		}
+		return
+	}
+	if upd.Message == nil {
+		return
+	}
+	if !t.allowed(upd.Message.Chat.ID) {
+		return
+	}
+	t.dispatch(ctx, runtime, upd.Message.Chat.ID, upd.Message.Text)
+}
+
 // telegramUpdate is the subset of a Telegram Update we consume.
 type telegramUpdate struct {
-	Message *struct {
+	UpdateID int64 `json:"update_id"`
+	Message  *struct {
 		Chat struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
@@ -249,7 +375,17 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 
 // dispatch submits text to the runtime and sends the response back to chatID.
 func (t *TelegramBot) dispatch(ctx context.Context, runtime *agents.Runtime, chatID int64, text string) {
-	if runtime == nil || text == "" {
+	if text == "" {
+		return
+	}
+	// Built-in slash commands are handled directly (no agent round-trip).
+	if reply, handled := t.handleCommand(ctx, chatID, text); handled {
+		if reply != "" {
+			_ = t.SendMessage(ctx, chatID, reply)
+		}
+		return
+	}
+	if runtime == nil {
 		return
 	}
 	ch, err := runtime.Submit(ctx, text, fmt.Sprintf("telegram:%d", chatID))
@@ -264,6 +400,54 @@ func (t *TelegramBot) dispatch(ctx context.Context, runtime *agents.Runtime, cha
 	if resp != "" {
 		_ = t.SendMessage(ctx, chatID, resp)
 	}
+}
+
+// handleCommand handles the built-in slash commands. It returns (reply, true)
+// when the message was a recognised command, else ("", false).
+func (t *TelegramBot) handleCommand(_ context.Context, chatID int64, text string) (string, bool) {
+	cmd, arg, _ := strings.Cut(strings.TrimSpace(text), " ")
+	arg = strings.TrimSpace(arg)
+	session := fmt.Sprintf("telegram:%d", chatID)
+	switch strings.ToLower(cmd) {
+	case "/status":
+		return hookOr(t.hooks.Status, "status not available"), true
+	case "/routes":
+		return hookOr(t.hooks.Routes, "routes not available"), true
+	case "/cost":
+		return hookOr(t.hooks.Cost, "cost not available"), true
+	case "/ls":
+		if t.hooks.List == nil {
+			return "file listing not available", true
+		}
+		return t.hooks.List(arg), true
+	case "/approve", "/reject":
+		if t.hooks.Approve == nil {
+			return "approval not available", true
+		}
+		transcript, matched := t.hooks.Approve(session, cmd == "/approve")
+		if !matched {
+			return "No pending action to " + strings.TrimPrefix(cmd, "/") + ".", true
+		}
+		if cmd == "/approve" {
+			return "✅ Approved\n" + transcript, true
+		}
+		return "❌ Rejected", true
+	case "/help":
+		return helpText(), true
+	case "/build":
+		// /build falls through to the agent runtime as a build request.
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+// hookOr calls fn (if set) or returns a fallback message.
+func hookOr(fn func() string, fallback string) string {
+	if fn == nil {
+		return fallback
+	}
+	return fn()
 }
 
 // SendApprovalRequest sends a message with inline approve/reject buttons. The

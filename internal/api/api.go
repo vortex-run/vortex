@@ -122,16 +122,18 @@ func (s *Server) SetNamespaceHooks(
 
 // StatusInfo is the extended status returned by GET /api/status.
 type StatusInfo struct {
-	NodeID          string `json:"node_id"`
-	TrustDomain     string `json:"trust_domain"`
-	TLSProvider     string `json:"tls_provider"`
-	SecretBackend   string `json:"secret_backend"`
-	PolicyDefault   bool   `json:"policy_default"`
-	PluginCount     int    `json:"plugin_count"`
-	AuditEntryCount int    `json:"audit_entry_count"`
-	ClusterName     string `json:"cluster_name"`
-	Version         string `json:"version"`
-	WorkingDir      string `json:"working_dir"`
+	NodeID          string   `json:"node_id"`
+	TrustDomain     string   `json:"trust_domain"`
+	TLSProvider     string   `json:"tls_provider"`
+	SecretBackend   string   `json:"secret_backend"`
+	PolicyDefault   bool     `json:"policy_default"`
+	PluginCount     int      `json:"plugin_count"`
+	AuditEntryCount int      `json:"audit_entry_count"`
+	ClusterName     string   `json:"cluster_name"`
+	Version         string   `json:"version"`
+	WorkingDir      string   `json:"working_dir"`
+	Routes          int      `json:"routes"`
+	RouteNames      []string `json:"route_names,omitempty"`
 }
 
 // SecretStatus is one declared secret's set/unset state (never its value).
@@ -164,6 +166,23 @@ type AICostInfo struct {
 // SetAICostProvider wires the GET /api/ai/cost data source. When nil, the
 // endpoint reports zero/free.
 func (s *Server) SetAICostProvider(fn func() AICostInfo) { s.aiCostProvider = fn }
+
+// StatusSnapshot returns the current extended status (for non-HTTP callers like
+// the Telegram bot). Empty when no provider is wired.
+func (s *Server) StatusSnapshot() StatusInfo {
+	if s.statusProvider == nil {
+		return StatusInfo{}
+	}
+	return s.statusProvider()
+}
+
+// AICostSnapshot returns the current AI cost summary (free when unwired).
+func (s *Server) AICostSnapshot() AICostInfo {
+	if s.aiCostProvider == nil {
+		return AICostInfo{Free: true}
+	}
+	return s.aiCostProvider()
+}
 
 // handleAICost returns today's AI usage and budget.
 func (s *Server) handleAICost(w http.ResponseWriter, _ *http.Request) {

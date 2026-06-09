@@ -74,6 +74,17 @@ func newStartCommand() *cobra.Command {
 	return c
 }
 
+// telegramFromFile reads the Telegram token + chat id from the setup config
+// (ai-provider.json), returning ok=false when absent.
+func telegramFromFile() (token string, chatID int64, ok bool) {
+	cfg, found := loadProviderConfig()
+	if !found || cfg.TelegramToken == "" {
+		return "", 0, false
+	}
+	chatID = atoi64Default(cfg.TelegramChatID, 0)
+	return cfg.TelegramToken, chatID, true
+}
+
 // resolveWorkingDir returns the process working directory. It is shown in the
 // TUI top bar as INFORMATION ONLY — the agent's local FS/terminal tools have no
 // path confinement (the approval gate is the security control), so this never
@@ -669,6 +680,10 @@ func wireDashboardProviders(
 			SecretBackend: secretBackendKind(cfg),
 			PolicyDefault: policyEngine != nil && policyEngine.UsingDefault(),
 			WorkingDir:    resolveWorkingDir(),
+			Routes:        len(cfg.Routes),
+		}
+		for _, r := range cfg.Routes {
+			info.RouteNames = append(info.RouteNames, r.Name)
 		}
 		if id, err := vtls.NewNodeIdentity(cfg.Cluster.Name); err == nil {
 			info.NodeID = id.NodeID
@@ -1059,6 +1074,7 @@ type messagingComponents struct {
 	slack      *messaging.SlackBot
 	approval   *messaging.ApprovalManager
 	approvalFn agents.ApprovalFunc
+	tgChat     int64 // resolved Telegram default chat (env or setup config)
 }
 
 // providerFromFile builds an AIProvider from the saved `vortex setup` config
@@ -1147,10 +1163,27 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 	}
 
 	// --- platform bots ------------------------------------------------------
-	if tok := os.Getenv("VORTEX_TELEGRAM_TOKEN"); tok != "" {
+	// Telegram token+chat: env var wins; otherwise fall back to the setup config
+	// (ai-provider.json telegram_token/telegram_chat_id).
+	tgToken := os.Getenv("VORTEX_TELEGRAM_TOKEN")
+	tgChat := atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0)
+	if tgToken == "" {
+		if fileTok, fileChat, ok := telegramFromFile(); ok {
+			tgToken = fileTok
+			if tgChat == 0 {
+				tgChat = fileChat
+			}
+			log.Info("Telegram loaded from setup config")
+		}
+	}
+	if tgToken != "" {
+		allowed := parseInt64List(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS"))
+		if len(allowed) == 0 && tgChat != 0 {
+			allowed = []int64{tgChat} // the configured chat is implicitly allowed
+		}
 		bot, err := messaging.NewTelegramBot(messaging.TelegramConfig{
-			Token:       tok,
-			AllowedIDs:  parseInt64List(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS")),
+			Token:       tgToken,
+			AllowedIDs:  allowed,
 			SecretToken: os.Getenv("VORTEX_TELEGRAM_SECRET"),
 		})
 		if err != nil {
@@ -1184,9 +1217,10 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		Telegram:      m.telegram,
 		WhatsApp:      m.whatsapp,
 		Slack:         m.slack,
-		DefaultChatID: atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0),
+		DefaultChatID: tgChat,
 		DefaultPhone:  os.Getenv("VORTEX_WA_DEFAULT_PHONE"),
 	})
+	m.tgChat = tgChat
 	if chans := m.router.ConfiguredChannels(); len(chans) > 0 {
 		log.Info("messaging configured", "channels", chans)
 	} else {
@@ -1197,7 +1231,7 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 	// Approval routes to Telegram when a default chat is set; the resolver
 	// consumes approve/reject button callbacks before they reach the runtime.
 	if m.telegram != nil {
-		chat := atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0)
+		chat := tgChat
 		if chat != 0 {
 			m.approval = messaging.NewApprovalManager(m.telegram, chat, 0)
 			m.telegram.SetCallbackResolver(m.approval)
@@ -1232,6 +1266,71 @@ func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *ag
 		apiSrv.SetWebhooks(specs)
 		log.Info("messaging webhooks registered", "count", len(specs))
 	}
+
+	// Telegram: wire built-in command hooks, register the command menu, and pick
+	// a delivery mode (polling for local testing, webhook for production).
+	if m.telegram != nil {
+		wireTelegramCommands(m.telegram, apiSrv, rt)
+		if serr := m.telegram.SetCommands(context.Background()); serr != nil {
+			log.Warn("telegram setMyCommands failed", "err", serr)
+		}
+		startTelegramDelivery(m.telegram, rt, log)
+	}
+}
+
+// wireTelegramCommands wires the built-in /status, /routes, /cost, /ls,
+// /approve, /reject command data sources.
+func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *agents.Runtime) {
+	bot.SetCommandHooks(messaging.CommandHooks{
+		Status: func() string {
+			cfg := apiSrv.StatusSnapshot()
+			return fmt.Sprintf("VORTEX %s ✅\nCluster: %s\nRoutes: %d active",
+				version, cfg.ClusterName, cfg.Routes)
+		},
+		Routes: func() string {
+			cfg := apiSrv.StatusSnapshot()
+			if len(cfg.RouteNames) == 0 {
+				return "No routes configured."
+			}
+			return "Routes:\n• " + strings.Join(cfg.RouteNames, "\n• ")
+		},
+		Cost: func() string {
+			info := apiSrv.AICostSnapshot()
+			if info.Free {
+				return "AI cost today: free (local model)"
+			}
+			return fmt.Sprintf("AI cost today: $%.2f (%d requests)", info.TotalUSD, info.RequestsToday)
+		},
+		List: func(path string) string {
+			res, err := rt.Coordinator().ExecuteLocalToolSync("list_directory", map[string]any{"path": path})
+			if err != nil {
+				return "⚠ " + err.Error()
+			}
+			return res
+		},
+		Approve: func(sessionID string, ok bool) (string, bool) {
+			return rt.Approve(sessionID, ok)
+		},
+	})
+}
+
+// startTelegramDelivery starts polling mode (VORTEX_TELEGRAM_POLLING=true) or
+// registers a webhook (VORTEX_PUBLIC_URL); otherwise logs how to enable one.
+func startTelegramDelivery(bot *messaging.TelegramBot, rt *agents.Runtime, log *slog.Logger) {
+	if os.Getenv("VORTEX_TELEGRAM_POLLING") == "true" {
+		go bot.Poll(context.Background(), rt, 2*time.Second)
+		log.Info("Telegram polling mode enabled")
+		return
+	}
+	if pub := os.Getenv("VORTEX_PUBLIC_URL"); pub != "" {
+		if err := bot.SetWebhook(context.Background(), strings.TrimRight(pub, "/")+"/webhook/telegram"); err != nil {
+			log.Warn("Telegram webhook registration failed", "err", err)
+		} else {
+			log.Info("Telegram webhook registered", "url", pub)
+		}
+		return
+	}
+	log.Info("Telegram webhook not registered — set VORTEX_PUBLIC_URL or VORTEX_TELEGRAM_POLLING=true")
 }
 
 // buildStudio constructs the VORTEX Studio handler tree (code-server proxy,

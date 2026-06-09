@@ -343,6 +343,20 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	return nil, nil
 }
 
+// ExecuteLocalToolSync runs a read-only local tool and returns its transcript
+// as a string (for non-streaming callers like the Telegram /ls command). It is
+// only intended for tools that don't require approval.
+func (c *Coordinator) ExecuteLocalToolSync(name string, params map[string]any) (string, error) {
+	var lines []string
+	_, err := c.ExecuteLocalTool(context.Background(), "telegram", name, params, func(s string) {
+		lines = append(lines, s)
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
 // ApproveAction resolves a pending TUI approval for a session and, on approval,
 // EXECUTES the stashed action — returning a transcript of the result (the
 // original Submit already returned the preview, so the work happens here).
