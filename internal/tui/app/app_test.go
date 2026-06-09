@@ -109,3 +109,25 @@ func TestApp_TopBarShowsWorkingDir(t *testing.T) {
 		t.Errorf("top bar should show the working dir:\n%s", a.View())
 	}
 }
+
+func TestCostPill_Colors(t *testing.T) {
+	if got := costPill(&tui.AICostData{Free: true}); !strings.Contains(got, "free") {
+		t.Errorf("free pill = %q", got)
+	}
+	if got := costPill(&tui.AICostData{TotalUSD: 0.50}); !strings.Contains(got, "$0.50") {
+		t.Errorf("cost pill = %q, want $0.50", got)
+	}
+	if got := costPill(&tui.AICostData{TotalUSD: 7.0}); !strings.Contains(got, "$7.00") {
+		t.Errorf("high cost pill = %q", got)
+	}
+}
+
+func TestApp_TopBarShowsCost(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	a.health = &tui.HealthData{Version: "v1", ClusterName: "c1", Uptime: "1h"}
+	a.cost = &tui.AICostData{TotalUSD: 0.02}
+	if !strings.Contains(a.View(), "$0.02") {
+		t.Errorf("top bar should show cost:\n%s", a.View())
+	}
+}

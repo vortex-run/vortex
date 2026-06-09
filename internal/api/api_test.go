@@ -118,3 +118,38 @@ func getHealth(t *testing.T, addr string) healthResponse {
 	}
 	return hr
 }
+
+func TestAICost_Endpoint(t *testing.T) {
+	s, secret := newAuthedAgentServer(t, stubRuntime{})
+	s.SetAICostProvider(func() AICostInfo {
+		return AICostInfo{Provider: "openai", TotalUSD: 0.05, RequestsToday: 3, DailyBudget: 1, RemainingBudget: 0.95}
+	})
+	req := newGetReq("/api/ai/cost", secret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cost = %d, want 200", rec.Code)
+	}
+	var c AICostInfo
+	_ = json.Unmarshal(rec.Body.Bytes(), &c)
+	if c.Provider != "openai" || c.TotalUSD != 0.05 || c.RequestsToday != 3 {
+		t.Errorf("cost = %+v", c)
+	}
+}
+
+func TestAICost_RequiresAuth(t *testing.T) {
+	s, _ := newAuthedAgentServer(t, stubRuntime{})
+	req := newGetReq("/api/ai/cost", "")
+	if rec := serve(s, req); rec.Code != http.StatusUnauthorized {
+		t.Errorf("cost without key = %d, want 401", rec.Code)
+	}
+}
+
+// newGetReq builds a GET request with optional X-API-Key, loopback remote.
+func newGetReq(path, key string) *http.Request {
+	req, _ := http.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	if key != "" {
+		req.Header.Set("X-API-Key", key)
+	}
+	return req
+}

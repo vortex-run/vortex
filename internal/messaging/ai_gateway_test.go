@@ -330,3 +330,41 @@ func TestAIGateway_DeepSeekFallback(t *testing.T) {
 		t.Errorf("out = %q, want fallback to gemini after deepseek fails", out)
 	}
 }
+
+func TestAIGateway_CostToday(t *testing.T) {
+	gw, err := NewAIGateway(AIGatewayConfig{
+		Providers:    []AIProvider{{Name: "openai", Models: []string{"gpt-4o-mini"}}},
+		CostPerToken: map[string]float64{"gpt-4o-mini": 0.000002},
+		DailyBudget:  1.0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw.recordCost("gpt-4o-mini", 1000) // $0.002
+	gw.mu.Lock()
+	gw.requestsToday = 1
+	gw.mu.Unlock()
+
+	c := gw.CostToday()
+	if c.Provider != "openai" {
+		t.Errorf("provider = %q, want openai", c.Provider)
+	}
+	if c.TotalUSD < 0.0019 || c.TotalUSD > 0.0021 {
+		t.Errorf("total = %v, want ~0.002", c.TotalUSD)
+	}
+	if c.DailyBudget != 1.0 || c.RemainingBudget > 1.0 || c.RemainingBudget < 0.99 {
+		t.Errorf("budget = %v remaining = %v", c.DailyBudget, c.RemainingBudget)
+	}
+	if c.Free {
+		t.Error("openai with a cost table should not be free")
+	}
+}
+
+func TestAIGateway_CostFreeForOllama(t *testing.T) {
+	gw, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: "ollama", Models: []string{"llama3"}}},
+	})
+	if !gw.CostToday().Free {
+		t.Error("ollama should report free")
+	}
+}
