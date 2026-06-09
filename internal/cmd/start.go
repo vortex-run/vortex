@@ -314,6 +314,18 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- messaging (M11): AI gateway + notification router + approval -------
 	msg := buildMessaging(log)
 
+	// AI cost endpoint: report today's spend/budget from the gateway.
+	if msg.gateway != nil {
+		gw := msg.gateway
+		apiSrv.SetAICostProvider(func() api.AICostInfo {
+			c := gw.CostToday()
+			return api.AICostInfo{
+				Provider: c.Provider, TotalUSD: c.TotalUSD, RequestsToday: c.RequestsToday,
+				DailyBudget: c.DailyBudget, RemainingBudget: c.RemainingBudget, Free: c.Free,
+			}
+		})
+	}
+
 	// --- agent runtime (M10/M11) --------------------------------------------
 	// Use the real AI gateway when configured; otherwise the stub. Wire the
 	// human-in-the-loop approval function when an approver is configured.

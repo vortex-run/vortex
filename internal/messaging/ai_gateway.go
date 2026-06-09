@@ -48,9 +48,48 @@ type AIGateway struct {
 	client *http.Client
 	now    func() time.Time
 
-	mu        sync.Mutex
-	costToday float64
-	dayStart  time.Time
+	mu            sync.Mutex
+	costToday     float64
+	requestsToday int
+	dayStart      time.Time
+}
+
+// CostSnapshot summarises AI usage for the current day (for /api/ai/cost).
+type CostSnapshot struct {
+	Provider        string  `json:"provider"`
+	TotalUSD        float64 `json:"total_usd"`
+	RequestsToday   int     `json:"requests_today"`
+	DailyBudget     float64 `json:"daily_budget"`
+	RemainingBudget float64 `json:"remaining_budget"`
+	Free            bool    `json:"free"`
+}
+
+// CostToday returns a snapshot of today's AI spend and budget.
+func (g *AIGateway) CostToday() CostSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.rolloverLocked()
+	provider := ""
+	if len(g.cfg.Providers) > 0 {
+		provider = g.cfg.Providers[0].Name
+	}
+	remaining := 0.0
+	if g.cfg.DailyBudget > 0 {
+		remaining = g.cfg.DailyBudget - g.costToday
+		if remaining < 0 {
+			remaining = 0
+		}
+	}
+	// Ollama (local) is free; treat a zero cost table as free too.
+	free := provider == "ollama" || len(g.cfg.CostPerToken) == 0
+	return CostSnapshot{
+		Provider:        provider,
+		TotalUSD:        g.costToday,
+		RequestsToday:   g.requestsToday,
+		DailyBudget:     g.cfg.DailyBudget,
+		RemainingBudget: remaining,
+		Free:            free,
+	}
 }
 
 // NewAIGateway builds the gateway. It requires at least one provider and sorts
@@ -93,6 +132,10 @@ func (g *AIGateway) Complete(ctx context.Context, prompt, systemPrompt string) (
 			continue
 		}
 		g.recordCost(g.modelOf(p), tokens)
+		g.mu.Lock()
+		g.rolloverLocked()
+		g.requestsToday++
+		g.mu.Unlock()
 		return text, nil
 	}
 	if lastErr == nil {
@@ -345,10 +388,12 @@ func (g *AIGateway) budgetExceeded() bool {
 	return g.costToday >= g.cfg.DailyBudget
 }
 
-// rolloverLocked resets the daily cost if the day has changed. Caller holds mu.
+// rolloverLocked resets the daily counters if the day has changed. Caller holds
+// mu.
 func (g *AIGateway) rolloverLocked() {
 	if g.now().Sub(g.dayStart) >= 24*time.Hour {
 		g.costToday = 0
+		g.requestsToday = 0
 		g.dayStart = g.now()
 	}
 }

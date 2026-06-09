@@ -4,6 +4,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -58,7 +59,9 @@ type App struct {
 	views      map[ViewID]tea.Model
 	selected   int // sidebar selection index
 	health     *tui.HealthData
-	workingDir string // shown in the top bar
+	workingDir string          // shown in the top bar
+	cost       *tui.AICostData // AI cost, shown in the top bar
+	lastCost   time.Time       // last cost poll (every 30s)
 	width      int
 	height     int
 	setupMode  bool
@@ -130,6 +133,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if st, err := a.client.Status(); err == nil && st.WorkingDir != "" {
 				a.workingDir = st.WorkingDir
 			}
+			// Poll AI cost at most every 30s.
+			if time.Since(a.lastCost) >= 30*time.Second {
+				if c, err := a.client.AICost(); err == nil {
+					a.cost = c
+				}
+				a.lastCost = time.Now()
+			}
 		}
 		return a, tea.Batch(cmd, tick())
 
@@ -190,6 +200,22 @@ func (a *App) View() string {
 }
 
 // topBar renders the title row.
+// costPill renders the AI cost indicator: "free" for Ollama, else 💰 $X.XX
+// colored green (<$1), amber ($1-5), or red (>$5).
+func costPill(c *tui.AICostData) string {
+	if c.Free {
+		return tui.Pill("💰 free", tui.ColorSuccess)
+	}
+	color := tui.ColorSuccess
+	switch {
+	case c.TotalUSD > 5:
+		color = tui.ColorDanger
+	case c.TotalUSD >= 1:
+		color = tui.ColorWarning
+	}
+	return tui.Pill(fmt.Sprintf("💰 $%.2f", c.TotalUSD), color)
+}
+
 func (a *App) topBar() string {
 	parts := []string{tui.TitleStyle.Render("VORTEX")}
 	if a.health != nil {
@@ -203,6 +229,9 @@ func (a *App) topBar() string {
 	}
 	if a.workingDir != "" {
 		parts = append(parts, tui.Pill("📂 "+a.workingDir, tui.ColorPurple))
+	}
+	if a.cost != nil {
+		parts = append(parts, costPill(a.cost))
 	}
 	parts = append(parts, tui.HelpStyle.Render("[Tab] views  [q] quit"))
 	return strings.Join(parts, "  ")

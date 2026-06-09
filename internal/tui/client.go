@@ -283,6 +283,25 @@ type SessionMessageData struct {
 	Content string `json:"content"`
 }
 
+// AICostData mirrors GET /api/ai/cost.
+type AICostData struct {
+	Provider        string  `json:"provider"`
+	TotalUSD        float64 `json:"total_usd"`
+	RequestsToday   int     `json:"requests_today"`
+	DailyBudget     float64 `json:"daily_budget"`
+	RemainingBudget float64 `json:"remaining_budget"`
+	Free            bool    `json:"free"`
+}
+
+// AICost fetches today's AI usage and budget.
+func (c *Client) AICost() (*AICostData, error) {
+	var d AICostData
+	if err := c.getJSON("/api/ai/cost", &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // History fetches the list of stored conversation sessions.
 func (c *Client) History() ([]SessionSummaryData, error) {
 	var out struct {

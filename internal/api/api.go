@@ -62,6 +62,7 @@ type Server struct {
 	// They are callbacks so this package stays decoupled from the audit, plugin,
 	// and secret subsystems.
 	statusProvider  func() StatusInfo
+	aiCostProvider  func() AICostInfo
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
 
@@ -149,6 +150,30 @@ type PluginInfo struct {
 
 // SetStatusProvider wires the GET /api/status data source.
 func (s *Server) SetStatusProvider(fn func() StatusInfo) { s.statusProvider = fn }
+
+// AICostInfo is the AI usage/cost summary returned by GET /api/ai/cost.
+type AICostInfo struct {
+	Provider        string  `json:"provider"`
+	TotalUSD        float64 `json:"total_usd"`
+	RequestsToday   int     `json:"requests_today"`
+	DailyBudget     float64 `json:"daily_budget"`
+	RemainingBudget float64 `json:"remaining_budget"`
+	Free            bool    `json:"free"`
+}
+
+// SetAICostProvider wires the GET /api/ai/cost data source. When nil, the
+// endpoint reports zero/free.
+func (s *Server) SetAICostProvider(fn func() AICostInfo) { s.aiCostProvider = fn }
+
+// handleAICost returns today's AI usage and budget.
+func (s *Server) handleAICost(w http.ResponseWriter, _ *http.Request) {
+	info := AICostInfo{Free: true}
+	if s.aiCostProvider != nil {
+		info = s.aiCostProvider()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
 
 // SetSecretsProvider wires the GET /api/secrets/status data source.
 func (s *Server) SetSecretsProvider(fn func() []SecretStatus) { s.secretsProvider = fn }
@@ -242,6 +267,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 
 	// Dashboard data endpoints (protected: localhost or valid key).
 	mux.Handle("GET /api/status", s.protected(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("GET /api/ai/cost", s.requireAPIKey(http.HandlerFunc(s.handleAICost)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
