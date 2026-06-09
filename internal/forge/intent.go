@@ -100,23 +100,32 @@ func (p *AIIntentParser) Parse(_ context.Context, userMsg string) (BuildIntent, 
 	return intent, nil
 }
 
-// languageKeywords maps a requested language to the words that imply it.
-var languageKeywords = map[string][]string{
-	"c++":  {"c++", "cpp", " cplus plus"},
-	"c":    {" in c", "c program", "c language"},
-	"rust": {"rust"},
-	"java": {"java "},
+// languageKeyword maps a requested language to the words that imply it. This is
+// an ORDERED list (not a map) so detection is deterministic: more specific
+// languages (c++) are checked before less specific ones (c), avoiding a flake
+// where "in c++" could match the "c" rule first under random map iteration.
+type languageKeyword struct {
+	lang     string
+	keywords []string
+}
+
+var languageKeywords = []languageKeyword{
+	{"c++", []string{"c++", "cpp", "cplus plus"}},
+	{"rust", []string{"rust"}},
+	{"java", []string{"java "}},
+	{"c", []string{" in c ", "c program", "c language"}}, // checked LAST (least specific)
 }
 
 // RequestedLanguage returns the explicit compiled language the user asked for
 // (c, c++, rust, java), or "" when none is detected. It only matches languages
-// that need a toolchain check; interpreted languages are not returned.
+// that need a toolchain check; interpreted languages are not returned. Order
+// matters: c++ is matched before c.
 func RequestedLanguage(userMsg string) string {
 	msg := " " + strings.ToLower(userMsg) + " "
-	for lang, kws := range languageKeywords {
-		for _, kw := range kws {
+	for _, lk := range languageKeywords {
+		for _, kw := range lk.keywords {
 			if strings.Contains(msg, kw) {
-				return lang
+				return lk.lang
 			}
 		}
 	}
