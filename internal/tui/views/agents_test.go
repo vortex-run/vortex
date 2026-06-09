@@ -460,3 +460,83 @@ func TestApprovalResult_RunOutputOrderInChat(t *testing.T) {
 		t.Errorf("stdout should appear before completion: %v", agentLines)
 	}
 }
+
+func TestRenderQuestions_NumberedOptions(t *testing.T) {
+	qs := []tui.ForgeQuestion{
+		{Question: "What type of calculator?", Key: "calc", Options: []string{"Basic", "Scientific"}},
+		{Question: "Target platform?", Key: "plat", Options: []string{"Phone", "Tablet"}},
+	}
+	out := renderQuestions(qs)
+	for _, want := range []string{"1. What type of calculator?", "[1] Basic", "[2] Scientific", "2. Target platform?", "[1] Phone", "numbers separated by space"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered questions missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestParseOptionAnswer_Numbers(t *testing.T) {
+	qs := []tui.ForgeQuestion{
+		{Options: []string{"Basic", "Scientific"}},
+		{Options: []string{"Phone", "Tablet"}},
+	}
+	ans, free := parseOptionAnswer("2 1", qs)
+	if free {
+		t.Error("'2 1' should parse as a numeric selection")
+	}
+	if ans != "Scientific, Phone" {
+		t.Errorf("answer = %q, want 'Scientific, Phone'", ans)
+	}
+}
+
+func TestParseOptionAnswer_FreeTextFallback(t *testing.T) {
+	qs := []tui.ForgeQuestion{{Options: []string{"A", "B"}}}
+	// Words → free text.
+	if ans, free := parseOptionAnswer("a basic one please", qs); !free || ans != "a basic one please" {
+		t.Errorf("free text = %q, free=%v", ans, free)
+	}
+	// Out-of-range number → free text.
+	if _, free := parseOptionAnswer("9", qs); !free {
+		t.Error("out-of-range number should fall back to free text")
+	}
+}
+
+func TestForgeProgress_NeedsClarificationRendersOptions(t *testing.T) {
+	m := NewAgents(nil)
+	m.forgeJob = "job-1"
+	upd, _ := m.Update(forgeProgress{job: &tui.ForgeJobData{
+		ID: "job-1", State: "needs_clarification",
+		Questions: []tui.ForgeQuestion{{Question: "Basic or scientific?", Options: []string{"Basic", "Scientific"}}},
+	}})
+	am := upd.(AgentsModel)
+	if !am.PendingQuestions() {
+		t.Error("needs_clarification should set pending questions")
+	}
+	if am.ForgePolling() {
+		t.Error("should stop polling while awaiting an answer")
+	}
+	if !strings.Contains(am.renderMessages(), "[1] Basic") {
+		t.Errorf("options should be rendered:\n%s", am.renderMessages())
+	}
+}
+
+func TestAgents_AnswerMapsOptionsAndSubmits(t *testing.T) {
+	m := NewAgents(nil)
+	m.pendingQs = []tui.ForgeQuestion{
+		{Options: []string{"Basic", "Scientific"}},
+		{Options: []string{"Phone", "Tablet"}},
+	}
+	m.input.SetValue("2 1")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	am := updated.(AgentsModel)
+	if am.PendingQuestions() {
+		t.Error("pending questions should be cleared after answering")
+	}
+	if cmd == nil {
+		t.Fatal("answering should submit")
+	}
+	// The user message shows what they typed; the submit carries the mapped text.
+	last := am.Messages()[len(am.Messages())-1]
+	if last.Content != "2 1" {
+		t.Errorf("user message should show the typed answer, got %q", last.Content)
+	}
+}

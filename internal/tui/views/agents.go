@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,12 +32,13 @@ type AgentsModel struct {
 	spinner        spinner.Model
 	thinking       bool
 	sessionID      string
-	awaiting       bool   // an approval is pending (awaiting Y/N then Enter)
-	approvalID     string // session the pending approval belongs to
-	approvalReady  bool   // box has rendered a frame; Y/N now accepted
-	approvalChoice string // staged choice: "" | "approve" | "reject"
-	forgeJob       string // active forge job id being polled ("" = none)
-	forgeSeen      int    // count of progress-history lines already shown
+	awaiting       bool                // an approval is pending (awaiting Y/N then Enter)
+	approvalID     string              // session the pending approval belongs to
+	approvalReady  bool                // box has rendered a frame; Y/N now accepted
+	approvalChoice string              // staged choice: "" | "approve" | "reject"
+	forgeJob       string              // active forge job id being polled ("" = none)
+	forgeSeen      int                 // count of progress-history lines already shown
+	pendingQs      []tui.ForgeQuestion // clarifying questions awaiting an answer
 	width          int
 	height         int
 }
@@ -312,12 +314,20 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.GotoBottom()
 				return m, cmd
 			}
+			// If clarifying questions are pending, map a "2 1" answer to the
+			// selected option texts (or pass free text through) and submit it.
+			submitText := text
+			if len(m.pendingQs) > 0 {
+				mapped, _ := parseOptionAnswer(text, m.pendingQs)
+				submitText = mapped
+				m.pendingQs = nil
+			}
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: text, Timestamp: time.Now()})
 			m.input.Reset()
 			m.thinking = true
 			m.viewport.SetContent(m.renderMessages())
 			m.viewport.GotoBottom()
-			return m, tea.Batch(m.submit(text), m.spinner.Tick)
+			return m, tea.Batch(m.submit(submitText), m.spinner.Tick)
 		case "ctrl+l":
 			m.messages = m.messages[:1] // keep the system greeting
 			m.viewport.SetContent(m.renderMessages())
@@ -415,6 +425,12 @@ func (m AgentsModel) handleForgeProgress(msg forgeProgress) (tea.Model, tea.Cmd)
 	case "failed":
 		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: "✗ Build failed: " + msg.job.Error, Timestamp: time.Now()})
 		m.forgeJob = ""
+	case "needs_clarification":
+		if len(msg.job.Questions) > 0 {
+			m.pendingQs = msg.job.Questions
+			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: renderQuestions(msg.job.Questions), Timestamp: time.Now()})
+			m.forgeJob = "" // stop polling; wait for the user's answer
+		}
 	}
 
 	m.viewport.SetContent(m.renderMessages())
@@ -427,6 +443,45 @@ func (m AgentsModel) handleForgeProgress(msg forgeProgress) (tea.Model, tea.Cmd)
 
 // ForgePolling reports whether a forge job is being polled (for tests).
 func (m AgentsModel) ForgePolling() bool { return m.forgeJob != "" }
+
+// PendingQuestions reports whether option-selection questions are awaiting an
+// answer (for tests).
+func (m AgentsModel) PendingQuestions() bool { return len(m.pendingQs) > 0 }
+
+// renderQuestions renders structured clarifying questions as a numbered
+// selection block (Claude-Code style).
+func renderQuestions(qs []tui.ForgeQuestion) string {
+	var b strings.Builder
+	b.WriteString("Before I build, a couple of quick questions:\n")
+	for i, q := range qs {
+		b.WriteString(fmt.Sprintf("\n%d. %s\n", i+1, q.Question))
+		for j, opt := range q.Options {
+			b.WriteString(fmt.Sprintf("   [%d] %s\n", j+1, opt))
+		}
+	}
+	b.WriteString("\nType numbers separated by space (e.g. \"2 1\"), or describe freely.")
+	return b.String()
+}
+
+// parseOptionAnswer maps a "2 1"-style answer to the selected option texts. If
+// the input isn't all numbers, it returns the raw text (free-text fallback) and
+// freeText=true.
+func parseOptionAnswer(input string, qs []tui.ForgeQuestion) (answer string, freeText bool) {
+	fields := strings.Fields(strings.TrimSpace(input))
+	// Every field must be a valid option index for the structured path.
+	if len(fields) == 0 || len(fields) > len(qs) {
+		return input, true
+	}
+	var picks []string
+	for i, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 1 || n > len(qs[i].Options) {
+			return input, true // not a clean numeric selection → free text
+		}
+		picks = append(picks, qs[i].Options[n-1])
+	}
+	return strings.Join(picks, ", "), false
+}
 
 // approvalResult is emitted after an approve/reject decision is sent. result is
 // the server-side execution transcript (the file write happens on approval).
