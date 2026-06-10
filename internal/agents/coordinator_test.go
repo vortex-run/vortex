@@ -873,3 +873,48 @@ func TestHandleResearch_StubWhenNotWired(t *testing.T) {
 		t.Errorf("unwired research should stub, got %q", out)
 	}
 }
+
+func TestRuleClassify_DevOps(t *testing.T) {
+	for _, msg := range []string{
+		"server status", "docker ps", "list containers", "restart service nginx",
+		"install package htop", "add nginx site api.example.com", "enable ssl x.com",
+		"disk space", "ssh into prod",
+	} {
+		if got := ruleClassify(msg); got != IntentDevOpsCheck {
+			t.Errorf("ruleClassify(%q) = %q, want DEVOPS_CHECK", msg, got)
+		}
+	}
+}
+
+func TestHandleMessage_DevOpsRoutesToHandler(t *testing.T) {
+	var gotMsg string
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{},
+		DevOps: func(_ context.Context, m string, _ func(string)) (string, error) {
+			gotMsg = m
+			return "Host: prod (ubuntu/amd64)", nil
+		},
+	})
+	out, err := c.HandleMessage(context.Background(), "server status", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMsg != "server status" {
+		t.Errorf("devops handler got %q", gotMsg)
+	}
+	if !strings.Contains(out, "ubuntu") {
+		t.Errorf("reply = %q", out)
+	}
+}
+
+func TestHandleDevOps_StubWhenNotWired(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	out, err := c.HandleMessage(context.Background(), "docker ps", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "DEVOPS_CHECK") {
+		t.Errorf("unwired devops should stub, got %q", out)
+	}
+}
