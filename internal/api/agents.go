@@ -251,7 +251,7 @@ func (s *Server) requireAPIKey(h http.Handler) http.Handler {
 			h.ServeHTTP(w, r)
 			return
 		}
-		s.authMW(h).ServeHTTP(w, r)
+		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
 	})
 }
 

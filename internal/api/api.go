@@ -83,6 +83,11 @@ type Server struct {
 	agentRuntime AgentRuntime
 	// agentLimiter rate-limits POST /api/agents/submit per source IP.
 	agentLimiter *security.HTTPRateLimiter
+	// M19 hardening: per-API-key budget (applied after auth), a whole-server
+	// global budget, and per-IP burst auto-banning, both applied server-wide.
+	keyLimiter    *security.APIKeyRateLimiter
+	globalLimiter *security.GlobalRateLimiter
+	burst         *security.BurstProtection
 	// webhooks maps /webhook/<platform> paths to rate-limited, signature-self-
 	// verifying handlers (Telegram/WhatsApp/Slack). Set via SetWebhooks.
 	webhooks map[string]http.Handler
@@ -271,6 +276,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		agentLimiter: security.NewHTTPRateLimiter(security.HTTPRateLimiterConfig{
 			RPM: 10, Burst: 5, Enabled: true,
 		}),
+		keyLimiter:    security.NewAPIKeyRateLimiter(security.APIKeyRateLimiterConfig{Enabled: true}),
+		globalLimiter: security.NewGlobalRateLimiter(0),
+		burst:         security.NewBurstProtection(security.BurstProtectionConfig{}),
 	}
 	mux := http.NewServeMux()
 	// Public endpoints — liveness/readiness must never require auth.
@@ -340,12 +348,51 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("DELETE /api/namespaces/{id}", s.protectedAdmin(http.HandlerFunc(s.handleDeleteNamespace)))
 	mux.Handle("GET /api/namespaces/{id}/stats", s.protectedAdmin(http.HandlerFunc(s.handleNamespaceStats)))
 
+	// Server-level protection (M19), outermost-in: correlation IDs, per-IP
+	// burst auto-banning, then the global request budget. Per-key limits are
+	// applied per-route after auth (see keyLimit).
+	handler := s.globalLimiter.Middleware()(mux)
+	handler = s.burst.Middleware()(handler)
 	s.srv = &http.Server{
 		Addr:              addr,
-		Handler:           s.correlationMiddleware(mux),
+		Handler:           s.correlationMiddleware(handler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s
+}
+
+// SetBurstNotifier wires the out-of-band alert (e.g. Telegram via the
+// notification router) sent when burst protection bans an IP.
+func (s *Server) SetBurstNotifier(fn func(title, body string)) {
+	s.burst.SetNotify(fn)
+}
+
+// keyLimit applies the per-API-key rate limiter to an authenticated request.
+// It runs inside the auth middleware so the authenticated user is in context;
+// unauthenticated requests (e.g. loopback bypass) pass through and rely on
+// the per-IP and global limiters instead. Admin keys are never limited.
+func (s *Server) keyLimit(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := auth.UserFromContext(r.Context())
+		if ok && s.keyLimiter != nil {
+			admin := false
+			for _, role := range user.Roles {
+				if role == auth.RoleAdmin {
+					admin = true
+					break
+				}
+			}
+			if !s.keyLimiter.Allow(user.ID, admin) {
+				s.log.Warn("API key rate limit exceeded", "user", user.ID, "path", r.URL.Path)
+				w.Header().Set("Retry-After", "60")
+				s.writeJSON(w, http.StatusTooManyRequests, map[string]string{
+					"error": "API key rate limit exceeded", "retry_after": "60",
+				})
+				return
+			}
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // protected wraps h with the auth middleware (if wired) — except for loopback
@@ -360,7 +407,7 @@ func (s *Server) protected(h http.Handler) http.Handler {
 			h.ServeHTTP(w, r)
 			return
 		}
-		s.authMW(h).ServeHTTP(w, r)
+		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
 	})
 }
 
@@ -373,7 +420,7 @@ func (s *Server) protectedAdmin(h http.Handler) http.Handler {
 			return
 		}
 		r = r.WithContext(auth.SetRequiredRole(r.Context(), auth.RoleAdmin))
-		s.authMW(h).ServeHTTP(w, r)
+		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
 	})
 }
 

@@ -15,6 +15,9 @@ type createKeyRequest struct {
 	Roles       []auth.Role `json:"roles"`
 	Description string      `json:"description"`
 	TTLSeconds  int64       `json:"ttl_seconds"` // 0 = never expires
+	// RateLimitRPM sets a custom per-minute request budget for this key's
+	// identity: 0 keeps the server default, negative makes it unlimited.
+	RateLimitRPM int `json:"rate_limit_rpm"`
 }
 
 // createKeyResponse returns the new key's public fields plus the one-time
@@ -62,6 +65,9 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issuing key: " + err.Error()})
 		return
+	}
+	if req.RateLimitRPM != 0 && s.keyLimiter != nil {
+		s.keyLimiter.SetKeyLimit(key.UserID, req.RateLimitRPM)
 	}
 	s.audit(clientIP(r), "apikey.create", key.ID, map[string]any{"org": key.OrgID, "user": key.UserID})
 	s.writeJSON(w, http.StatusCreated, createKeyResponse{

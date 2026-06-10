@@ -229,3 +229,313 @@ func hostOnly(addr string) string {
 func routeName(r *http.Request) string {
 	return r.Header.Get("X-Vortex-Route")
 }
+
+// --- M19 hardening: per-API-key, global, and burst limiters -----------------
+
+// DefaultAPIKeyRPM is the per-key request budget when none is configured.
+const DefaultAPIKeyRPM = 1000
+
+// DefaultGlobalRPM is the whole-server request budget when none is configured.
+const DefaultGlobalRPM = 10000
+
+// Burst-protection defaults: an IP making more than DefaultBurstThreshold
+// requests inside DefaultBurstWindow is banned for DefaultBurstBan.
+const (
+	DefaultBurstThreshold = 100
+	DefaultBurstWindow    = 1 * time.Second
+	DefaultBurstBan       = 5 * time.Minute
+)
+
+// APIKeyRateLimiterConfig configures a per-API-key rate limiter.
+type APIKeyRateLimiterConfig struct {
+	DefaultRPM int  // requests per minute per key; <= 0 uses DefaultAPIKeyRPM
+	Enabled    bool // when false, Allow always returns true
+}
+
+// APIKeyRateLimiter applies a token bucket per authenticated API-key identity.
+// Admin keys are never limited; individual keys can carry a custom budget set
+// at creation time via SetKeyLimit. Safe for concurrent use.
+type APIKeyRateLimiter struct {
+	cfg APIKeyRateLimiterConfig
+
+	mu      sync.Mutex
+	buckets map[string]*tokenBucket
+	limits  map[string]int // key → custom RPM; <= 0 means unlimited
+	now     func() time.Time
+}
+
+// NewAPIKeyRateLimiter builds a per-key limiter from cfg.
+func NewAPIKeyRateLimiter(cfg APIKeyRateLimiterConfig) *APIKeyRateLimiter {
+	if cfg.DefaultRPM <= 0 {
+		cfg.DefaultRPM = DefaultAPIKeyRPM
+	}
+	return &APIKeyRateLimiter{
+		cfg:     cfg,
+		buckets: make(map[string]*tokenBucket),
+		limits:  make(map[string]int),
+		now:     time.Now,
+	}
+}
+
+// SetClock overrides the limiter's time source (tests only).
+func (l *APIKeyRateLimiter) SetClock(now func() time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now != nil {
+		l.now = now
+	}
+}
+
+// SetKeyLimit assigns a custom per-minute budget to one key. A non-positive
+// rpm makes the key unlimited. The key's bucket is reset so the new budget
+// takes effect immediately.
+func (l *APIKeyRateLimiter) SetKeyLimit(key string, rpm int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.limits[key] = rpm
+	delete(l.buckets, key)
+}
+
+// Allow reports whether a request by the given key identity may proceed,
+// consuming one token. Admin keys and keys with a non-positive custom limit
+// are never limited.
+func (l *APIKeyRateLimiter) Allow(key string, admin bool) bool {
+	if !l.cfg.Enabled || admin {
+		return true
+	}
+	now := l.now()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	rpm := l.cfg.DefaultRPM
+	if custom, ok := l.limits[key]; ok {
+		if custom <= 0 {
+			return true
+		}
+		rpm = custom
+	}
+	burst := float64(rpm)
+	ratePerSec := float64(rpm) / 60.0
+
+	b, ok := l.buckets[key]
+	if !ok {
+		b = &tokenBucket{tokens: burst, lastSeen: now}
+		l.buckets[key] = b
+	} else {
+		elapsed := now.Sub(b.lastSeen).Seconds()
+		b.tokens = minFloat(burst, b.tokens+elapsed*ratePerSec)
+		b.lastSeen = now
+	}
+
+	if b.tokens >= 1 {
+		b.tokens--
+		return true
+	}
+	return false
+}
+
+// GlobalRateLimiter is a single token bucket shared by every request the
+// server handles, protecting against distributed floods that stay under any
+// per-IP or per-key budget. Safe for concurrent use.
+type GlobalRateLimiter struct {
+	mu         sync.Mutex
+	enabled    bool
+	ratePerSec float64
+	burst      float64
+	tokens     float64
+	last       time.Time
+	now        func() time.Time
+}
+
+// NewGlobalRateLimiter builds a global limiter allowing rpm requests per
+// minute across all clients; rpm <= 0 uses DefaultGlobalRPM.
+func NewGlobalRateLimiter(rpm int) *GlobalRateLimiter {
+	if rpm <= 0 {
+		rpm = DefaultGlobalRPM
+	}
+	return &GlobalRateLimiter{
+		enabled:    true,
+		ratePerSec: float64(rpm) / 60.0,
+		burst:      float64(rpm),
+		tokens:     float64(rpm),
+		now:        time.Now,
+	}
+}
+
+// SetClock overrides the limiter's time source (tests only).
+func (g *GlobalRateLimiter) SetClock(now func() time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if now != nil {
+		g.now = now
+		g.last = now()
+	}
+}
+
+// Allow reports whether one more request may proceed, consuming one token.
+func (g *GlobalRateLimiter) Allow() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.enabled {
+		return true
+	}
+	now := g.now()
+	if !g.last.IsZero() {
+		elapsed := now.Sub(g.last).Seconds()
+		g.tokens = minFloat(g.burst, g.tokens+elapsed*g.ratePerSec)
+	}
+	g.last = now
+
+	if g.tokens >= 1 {
+		g.tokens--
+		return true
+	}
+	return false
+}
+
+// Middleware rejects requests with 429 once the global budget is exhausted.
+func (g *GlobalRateLimiter) Middleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !g.Allow() {
+				slog.Default().Warn("global rate limit exceeded",
+					"ip", clientIP(r), "path", r.URL.Path)
+				w.Header().Set("Retry-After", "1")
+				writeRateLimited(w, 1)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// BurstProtectionConfig configures BurstProtection. Zero values take the
+// DefaultBurst* constants.
+type BurstProtectionConfig struct {
+	Threshold int           // requests inside Window that trigger a ban
+	Window    time.Duration // burst measurement window
+	BanFor    time.Duration // how long a triggered IP stays banned
+}
+
+// BurstProtection auto-bans IPs that exceed a request burst threshold (by
+// default >100 requests within one second bans the IP for five minutes). An
+// optional notifier (e.g. Telegram via the notification router) is alerted on
+// each triggered ban. Safe for concurrent use.
+type BurstProtection struct {
+	cfg BurstProtectionConfig
+
+	mu      sync.Mutex
+	windows map[string]*requestWindow
+	bans    map[string]time.Time // ip → banned-until
+	notify  func(title, body string)
+	now     func() time.Time
+}
+
+// NewBurstProtection builds a BurstProtection from cfg, applying defaults for
+// zero fields.
+func NewBurstProtection(cfg BurstProtectionConfig) *BurstProtection {
+	if cfg.Threshold <= 0 {
+		cfg.Threshold = DefaultBurstThreshold
+	}
+	if cfg.Window <= 0 {
+		cfg.Window = DefaultBurstWindow
+	}
+	if cfg.BanFor <= 0 {
+		cfg.BanFor = DefaultBurstBan
+	}
+	return &BurstProtection{
+		cfg:     cfg,
+		windows: make(map[string]*requestWindow),
+		bans:    make(map[string]time.Time),
+		now:     time.Now,
+	}
+}
+
+// SetClock overrides the protection's time source (tests only).
+func (b *BurstProtection) SetClock(now func() time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if now != nil {
+		b.now = now
+	}
+}
+
+// SetNotify wires the out-of-band alert callback invoked when a ban triggers.
+func (b *BurstProtection) SetNotify(fn func(title, body string)) {
+	b.mu.Lock()
+	b.notify = fn
+	b.mu.Unlock()
+}
+
+// Allow records a request from ip and reports whether it may proceed. It
+// returns false while ip is banned; crossing the burst threshold triggers the
+// ban, a WARN log, and the notifier.
+func (b *BurstProtection) Allow(ip string) bool {
+	now := b.now()
+
+	b.mu.Lock()
+	if until, ok := b.bans[ip]; ok {
+		if now.Before(until) {
+			b.mu.Unlock()
+			return false
+		}
+		delete(b.bans, ip) // expired
+	}
+
+	w, ok := b.windows[ip]
+	if !ok {
+		w = &requestWindow{}
+		b.windows[ip] = w
+	}
+	cutoff := now.Add(-b.cfg.Window)
+	kept := w.times[:0]
+	for _, ts := range w.times {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	kept = append(kept, now)
+	w.times = kept
+
+	if len(w.times) <= b.cfg.Threshold {
+		b.mu.Unlock()
+		return true
+	}
+
+	// Threshold crossed: ban, reset the window, alert.
+	b.bans[ip] = now.Add(b.cfg.BanFor)
+	w.times = nil
+	notify := b.notify
+	b.mu.Unlock()
+
+	slog.Default().Warn("burst protection triggered",
+		"ip", ip, "threshold", b.cfg.Threshold,
+		"window", b.cfg.Window.String(), "ban", b.cfg.BanFor.String())
+	if notify != nil {
+		go notify("🚨 VORTEX burst protection",
+			"IP "+ip+" exceeded "+strconv.Itoa(b.cfg.Threshold)+
+				" requests in "+b.cfg.Window.String()+
+				" — banned for "+b.cfg.BanFor.String())
+	}
+	return false
+}
+
+// Middleware rejects requests from banned IPs with 429 and a Retry-After of
+// the remaining ban duration (rounded up to a second).
+func (b *BurstProtection) Middleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !b.Allow(clientIP(r)) {
+				retry := int(b.cfg.BanFor.Seconds())
+				if retry < 1 {
+					retry = 1
+				}
+				w.Header().Set("Retry-After", strconv.Itoa(retry))
+				writeRateLimited(w, retry)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

@@ -330,6 +330,15 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- messaging (M11): AI gateway + notification router + approval -------
 	msg := buildMessaging(log)
 
+	// Burst-protection bans (M19) alert through the notification router
+	// (Telegram et al) when messaging is configured.
+	if msg.router != nil {
+		router := msg.router
+		apiSrv.SetBurstNotifier(func(title, body string) {
+			_ = router.Send(context.Background(), messaging.SeverityWarn, title, body)
+		})
+	}
+
 	// AI cost endpoint: report today's spend/budget from the gateway.
 	if msg.gateway != nil {
 		gw := msg.gateway
