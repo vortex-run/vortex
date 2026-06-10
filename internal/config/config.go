@@ -34,11 +34,23 @@ type Config struct {
 	Security      Security      `json:"security"`
 	Secrets       Secrets       `json:"secrets"`
 	Observability Observability `json:"observability"`
+	Servers       []Server      `json:"servers,omitempty"`
 
 	// hash is the SHA-256 of the canonical JSON encoding of the config,
 	// computed once at load time. It lets /health report which config is live
 	// so a reload can be verified externally.
 	hash string
+}
+
+// Server mirrors #Server in schema.cue: an SSH-reachable host for the DevOps
+// agent (M16). Password/KeyPath are credentials — prefer KeyPath.
+type Server struct {
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+	KeyPath  string `json:"key_path,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 // Cluster mirrors #Cluster in schema.cue.

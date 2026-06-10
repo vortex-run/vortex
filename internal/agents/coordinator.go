@@ -84,6 +84,11 @@ type BuildAppFunc func(ctx context.Context, userMsg, sessionID string) (string, 
 // updates. When nil, RESEARCH returns a not-implemented stub.
 type ResearchFunc func(ctx context.Context, query string, progressFn func(string)) (string, error)
 
+// DevOpsFunc handles a DEVOPS request (SSH/Docker/Nginx server management),
+// returning a user-facing reply. The M16 devops agent supplies it via start.go.
+// When nil, DEVOPS returns a not-implemented stub.
+type DevOpsFunc func(ctx context.Context, msg string, progressFn func(string)) (string, error)
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
 	Bus        *Bus
@@ -94,6 +99,7 @@ type CoordinatorConfig struct {
 	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
 	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
 	Research   ResearchFunc // RESEARCH handler (M15 research agent); nil = stub
+	DevOps     DevOpsFunc   // DEVOPS handler (M16 devops agent); nil = stub
 	// SessionClarifying reports whether the most recent build for a session is
 	// awaiting clarifying answers (forge JobClarify state). Optional.
 	SessionClarifying func(sessionID string) bool
@@ -604,6 +610,8 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 		return c.dispatchBuild(ctx, sessionID, userMsg)
 	case IntentResearch:
 		return c.handleResearch(ctx, userMsg)
+	case IntentDevOpsCheck:
+		return c.handleDevOps(ctx, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -620,7 +628,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	case IntentResearch:
 		return c.handleResearch(ctx, userMsg)
 	case IntentDevOpsCheck:
-		return c.modeStub("DEVOPS_CHECK"), nil
+		return c.handleDevOps(ctx, userMsg)
 	case IntentDataPipeline:
 		return c.modeStub("DATA_PIPELINE"), nil
 	default:
@@ -763,6 +771,13 @@ var researchKeywords = []string{
 	"tell me about ", "summarize ",
 }
 
+// devopsKeywords route a message to the DevOps agent (SSH/Docker/Nginx).
+var devopsKeywords = []string{
+	"ssh ", "server status", "vps ", "docker ", "container", "deploy ",
+	"nginx ", "ssl cert", "restart service", "install package",
+	"disk space", "list containers", "add nginx site", "enable ssl ",
+}
+
 // ruleClassify is a fast, AI-free classifier. It returns IntentLocalFile for
 // simple file/terminal operations and slash commands, IntentBuildApp for real
 // build requests, or IntentUnknown when no rule matches (caller falls back to
@@ -778,6 +793,11 @@ func ruleClassify(userMsg string) Intent {
 	for _, kw := range researchKeywords {
 		if strings.HasPrefix(msg, kw) {
 			return IntentResearch
+		}
+	}
+	for _, kw := range devopsKeywords {
+		if strings.Contains(msg, kw) {
+			return IntentDevOpsCheck
 		}
 	}
 	if strings.HasPrefix(msg, "/") {
@@ -825,6 +845,15 @@ func (c *Coordinator) handleResearch(ctx context.Context, userMsg string) (strin
 	// Progress is currently collected but not streamed back per-step (the runtime
 	// returns a single reply); the research agent's report is the result.
 	return c.cfg.Research(ctx, query, func(string) {})
+}
+
+// handleDevOps dispatches a DEVOPS request to the devops agent (or stubs when
+// not wired / no server connected).
+func (c *Coordinator) handleDevOps(ctx context.Context, userMsg string) (string, error) {
+	if c.cfg.DevOps == nil {
+		return c.modeStub("DEVOPS_CHECK"), nil
+	}
+	return c.cfg.DevOps(ctx, userMsg, func(string) {})
 }
 
 // handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,

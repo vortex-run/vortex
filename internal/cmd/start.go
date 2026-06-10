@@ -21,6 +21,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
+	"github.com/vortex-run/vortex/internal/devops"
 	"github.com/vortex-run/vortex/internal/forge"
 	"github.com/vortex-run/vortex/internal/healing"
 	"github.com/vortex-run/vortex/internal/messaging"
@@ -362,7 +363,9 @@ func runStart(ctx context.Context, pidfile string) error {
 	}
 	// --- research agent (M15) -----------------------------------------------
 	researchFn := buildResearch(gateway, msg, resolveWorkingDir(), apiSrv, log)
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn)
+	// --- devops agent (M16) -------------------------------------------------
+	devopsFn := buildDevOps(ctx, cfg, gateway, msg, apiSrv, log)
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn)
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -872,7 +875,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -912,6 +915,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		SessionClarifying: sessionClarifying,
 		SessionPending:    sessionPending,
 		Research:          research,
+		DevOps:            devops,
 		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
 		WorkingDir:        workingDir,
 	})
@@ -1145,6 +1149,61 @@ func buildResearch(gateway agents.AIGateway, msg messagingComponents, workingDir
 			reply += "\nReport saved to: " + report.FilePath
 		}
 		return reply, nil
+	}
+}
+
+// devopsNotifyAdapter bridges *messaging.Router to devops.Notifier.
+type devopsNotifyAdapter struct{ router *messaging.Router }
+
+func (a *devopsNotifyAdapter) Notify(ctx context.Context, title, body string) error {
+	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
+}
+
+// buildDevOps constructs the M16 DevOps agent from configured servers, connects
+// to each, registers the API, and returns a DevOpsFunc for the coordinator.
+// Returns nil when no servers are configured.
+func buildDevOps(ctx context.Context, cfg *config.Config, gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger) agents.DevOpsFunc {
+	if len(cfg.Servers) == 0 {
+		// No servers configured — still register the (empty) servers endpoint.
+		apiSrv.SetDevOpsProvider(func() []api.DevOpsServer { return nil }, nil)
+		return nil
+	}
+	var notifier devops.Notifier
+	if msg.router != nil {
+		notifier = &devopsNotifyAdapter{router: msg.router}
+	}
+	// Approval for DevOps mutating ops routes through the messaging approval gate
+	// when configured; otherwise denied (fail-safe).
+	approver := func(string) bool { return false }
+	if msg.approvalFn != nil {
+		approver = func(action string) bool {
+			return msg.approvalFn(ctx, agents.ApprovalRequest{Tool: "devops", Description: action})
+		}
+	}
+
+	agent := devops.NewDevOpsAgent(gateway, notifier, approver)
+	connected := 0
+	for _, srv := range cfg.Servers {
+		if err := agent.Connect(ctx, srv.Host, srv.User, srv.KeyPath); err != nil {
+			log.Warn("devops: failed to connect to server", "name", srv.Name, "host", srv.Host, "err", err)
+			continue
+		}
+		connected++
+	}
+
+	apiSrv.SetDevOpsProvider(func() []api.DevOpsServer {
+		out := make([]api.DevOpsServer, 0)
+		for _, h := range agent.Servers() {
+			out = append(out, api.DevOpsServer{Name: h})
+		}
+		return out
+	}, func(ctx context.Context, _, command string) (string, error) {
+		return agent.Handle(ctx, command, nil)
+	})
+
+	log.Info("devops agent enabled", "servers", connected)
+	return func(ctx context.Context, m string, progressFn func(string)) (string, error) {
+		return agent.Handle(ctx, m, progressFn)
 	}
 }
 

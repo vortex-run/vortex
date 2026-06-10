@@ -17,6 +17,21 @@ package vortex
 	security:      #Security
 	secrets:       #Secrets
 	observability: #Observability
+	// servers are SSH-reachable hosts the DevOps agent (M16) can manage. Empty
+	// for deployments that don't use remote VPS management.
+	servers: [...#Server] | *[]
+}
+
+// #Server is an SSH-reachable host the DevOps agent can manage.
+#Server: {
+	name:     string & !=""
+	host:     string & !=""
+	port:     int & >0 & <=65535 | *22
+	user:     string & !=""
+	key_path: string | *""
+	// password is the literal SSH password. Prefer key_path; leave empty to use
+	// a key.
+	password: string | *""
 }
 
 // #Cluster describes this node's membership in a VORTEX cluster.

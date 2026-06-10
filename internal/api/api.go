@@ -66,6 +66,8 @@ type Server struct {
 	healingProvider func() HealingStatus
 	researchList    func() []ResearchReport
 	researchGet     func(name string) (string, bool)
+	devopsServers   func() []DevOpsServer
+	devopsRun       func(ctx context.Context, server, command string) (string, error)
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
 
@@ -294,6 +296,8 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/healing/events", s.requireAPIKey(http.HandlerFunc(s.handleHealingEvents)))
 	mux.Handle("GET /api/research/reports", s.requireAPIKey(http.HandlerFunc(s.handleResearchReports)))
 	mux.Handle("GET /api/research/reports/{name}", s.requireAPIKey(http.HandlerFunc(s.handleResearchReport)))
+	mux.Handle("GET /api/devops/servers", s.requireAPIKey(http.HandlerFunc(s.handleDevOpsServers)))
+	mux.Handle("POST /api/devops/command", s.requireAPIKey(http.HandlerFunc(s.handleDevOpsCommand)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
