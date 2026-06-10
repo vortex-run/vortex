@@ -22,6 +22,7 @@ import (
 	"github.com/vortex-run/vortex/internal/cluster"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/forge"
+	"github.com/vortex-run/vortex/internal/healing"
 	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/perf"
@@ -377,6 +378,9 @@ func runStart(ctx context.Context, pidfile string) error {
 	if h := tlsChallengeHandler(tlsMgr, cfg); h != nil {
 		startChallengeServer(mgr, h, log)
 	}
+
+	// --- self-healing (M14): health monitor + recovery + SLO tracking -------
+	buildHealing(ctx, cfg, apiSrv, mgr, msg, auditLog, metrics, log)
 
 	log.Info("VORTEX started",
 		"version", version,
@@ -1076,6 +1080,133 @@ func (a *forgeNotifyAdapter) SendMessage(ctx context.Context, _ int64, text stri
 
 func (a *forgeNotifyAdapter) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
 	return a.router.SendFile(ctx, filename, data, caption)
+}
+
+// healingNotifyAdapter bridges *messaging.Router to healing.Notifier (string
+// severity → messaging.Severity).
+type healingNotifyAdapter struct{ router *messaging.Router }
+
+func (a *healingNotifyAdapter) Send(ctx context.Context, severity, title, body string) error {
+	sev := messaging.SeverityInfo
+	switch severity {
+	case "critical":
+		sev = messaging.SeverityCritical
+	case "warn":
+		sev = messaging.SeverityWarn
+	}
+	return a.router.Send(ctx, sev, title, body)
+}
+
+// buildHealing wires the M14 self-healing subsystem: a health monitor with a
+// check per route, a recovery manager with default rules, an SLO tracker, and
+// the event loop that routes health events to recovery. It registers shutdown
+// and exposes status via the API healing provider.
+func buildHealing(ctx context.Context, cfg *config.Config, apiSrv *api.Server,
+	mgr *lifecycle.Manager, msg messagingComponents, auditLog *audit.Log,
+	_ *observability.Metrics, log *slog.Logger) {
+
+	// One check per route: HTTP routes probe the listen addr as an endpoint,
+	// others TCP-dial it. Listen 0 means an ephemeral port — skip (untestable).
+	var checks []healing.HealthCheck
+	for _, r := range cfg.Routes {
+		if r.Listen <= 0 {
+			continue
+		}
+		addr := fmt.Sprintf("127.0.0.1:%d", r.Listen)
+		checks = append(checks, healing.HealthCheck{
+			Name: r.Name, Kind: healing.KindRoute, Target: addr,
+			Interval: 30 * time.Second, Timeout: 5 * time.Second, Threshold: 3,
+		})
+	}
+
+	monitor := healing.NewMonitor(checks)
+
+	// Default recovery rules: every route failure → notify (alert only). A
+	// config-check failure would reload; a sustained route failure restarts.
+	var rules []healing.RecoveryRule
+	for _, r := range cfg.Routes {
+		if r.Listen <= 0 {
+			continue
+		}
+		rules = append(rules, healing.RecoveryRule{
+			CheckName: r.Name, Action: healing.ActionNotify, NotifyOnly: true,
+		})
+	}
+
+	var notifier healing.Notifier
+	if msg.router != nil {
+		notifier = &healingNotifyAdapter{router: msg.router}
+	}
+	var auditAdapter healing.AuditLogger
+	if auditLog != nil {
+		auditAdapter = auditLog // *audit.Log satisfies AuditLogger
+	}
+
+	recovery := healing.NewRecoveryManager(rules, notifier, auditAdapter, healing.RecoveryDeps{
+		ReloadConfig: func(context.Context) error { mgr.Reload(); return nil },
+	})
+
+	// SLO tracker: 99% target per route. Compliance reads are best-effort (the
+	// metrics layer is write-only today) — returns no-data until a read API
+	// lands, so it registers routes without false alerts.
+	slo := healing.NewSLOTracker(func(string) (float64, bool) { return 0, false }, notifier)
+	sloRoutes := 0
+	for _, r := range cfg.Routes {
+		if r.Listen <= 0 {
+			continue
+		}
+		slo.AddSLO(r.Name, 0.99)
+		sloRoutes++
+	}
+
+	monitor.Start(ctx)
+	slo.Start(ctx)
+
+	// Event loop: route health events to the recovery manager.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-monitor.Events():
+				_ = recovery.Handle(ctx, ev)
+			}
+		}
+	}()
+
+	apiSrv.SetHealingProvider(func() api.HealingStatus {
+		return healingStatus(monitor, recovery, slo)
+	})
+
+	mgr.OnShutdown("healing", func(context.Context) error { return nil })
+
+	log.Info("self-healing enabled", "checks", len(checks), "rules", len(rules), "slo_routes", sloRoutes)
+}
+
+// healingStatus snapshots the healing subsystem for the API.
+func healingStatus(monitor *healing.Monitor, recovery *healing.RecoveryManager, slo *healing.SLOTracker) api.HealingStatus {
+	status := monitor.Status()
+	checks := make([]api.HealingCheck, 0, len(status))
+	for _, r := range status {
+		checks = append(checks, api.HealingCheck{
+			Name: r.Name, Healthy: r.Healthy, LatencyMs: r.LatencyMs,
+			LastCheck: r.Timestamp, ConsecutiveFailures: r.Attempts,
+		})
+	}
+	alerts := make([]api.HealingSLOAlert, 0)
+	for _, a := range slo.Status() {
+		alerts = append(alerts, api.HealingSLOAlert{
+			RouteName: a.RouteName, Target: a.Target, Current: a.Current,
+			BurnRate: a.BurnRate, AlertLevel: a.AlertLevel,
+		})
+	}
+	st := recovery.Stats()
+	return api.HealingStatus{
+		Healthy: monitor.Healthy(), Checks: checks, SLOAlerts: alerts,
+		RecoveryStats: api.HealingRecoveryStats{
+			TotalEvents: st.TotalEvents, ActionsExecuted: st.ActionsExecuted,
+		},
+	}
 }
 
 // messagingComponents holds the messaging subsystem built from environment

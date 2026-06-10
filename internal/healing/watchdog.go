@@ -61,7 +61,7 @@ func NewWatchdog(cfg WatchdogConfig) *Watchdog {
 		cfg.log = slog.Default()
 	}
 	if cfg.isAlive == nil {
-		cfg.isAlive = pidfileAlive
+		cfg.isAlive = PidfileAlive
 	}
 	w := &Watchdog{cfg: cfg}
 	if cfg.spawn == nil {
@@ -174,8 +174,9 @@ func (w *Watchdog) LastRestart() time.Time {
 	return w.lastRestart
 }
 
-// pidfileAlive reports whether the pidfile exists and names a running process.
-func pidfileAlive(pidfile string) bool {
+// PidfileAlive reports whether the pidfile names a running process (exported
+// for the watchdog status command).
+func PidfileAlive(pidfile string) bool {
 	data, err := os.ReadFile(pidfile)
 	if err != nil {
 		return false

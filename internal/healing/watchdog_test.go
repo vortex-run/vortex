@@ -23,7 +23,7 @@ func testWatchdog(cfg WatchdogConfig) *Watchdog {
 
 func TestWatchdog_DetectsMissingPidfileAsDown(t *testing.T) {
 	// A real liveness check against a non-existent pidfile must be "down".
-	if pidfileAlive(filepath.Join(t.TempDir(), "nope.pid")) {
+	if PidfileAlive(filepath.Join(t.TempDir(), "nope.pid")) {
 		t.Error("missing pidfile should report not alive")
 	}
 }
@@ -134,7 +134,7 @@ func TestWatchdog_PidfileAliveForRealProcess(t *testing.T) {
 	if err := os.WriteFile(pf, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if !pidfileAlive(pf) {
+	if !PidfileAlive(pf) {
 		t.Error("current process pidfile should be alive")
 	}
 }

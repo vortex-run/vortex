@@ -63,6 +63,7 @@ type Server struct {
 	// and secret subsystems.
 	statusProvider  func() StatusInfo
 	aiCostProvider  func() AICostInfo
+	healingProvider func() HealingStatus
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
 
@@ -287,6 +288,8 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// Dashboard data endpoints (protected: localhost or valid key).
 	mux.Handle("GET /api/status", s.protected(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("GET /api/ai/cost", s.requireAPIKey(http.HandlerFunc(s.handleAICost)))
+	mux.Handle("GET /api/healing/status", s.requireAPIKey(http.HandlerFunc(s.handleHealingStatus)))
+	mux.Handle("GET /api/healing/events", s.requireAPIKey(http.HandlerFunc(s.handleHealingEvents)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))

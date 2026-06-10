@@ -92,6 +92,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newTuneCommand())
 	root.AddCommand(newSetupCommand())
 	root.AddCommand(newUICommand())
+	root.AddCommand(newWatchdogCommand())
 
 	return root
 }
