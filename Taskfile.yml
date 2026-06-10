@@ -229,6 +229,23 @@ tasks:
     cmds:
       - go vet ./...
 
+  security:scan:
+    desc: Scan for known vulnerabilities (requires govulncheck)
+    cmds:
+      - govulncheck ./...
+
+  security:deps:
+    desc: List module dependencies for license review
+    cmds:
+      - go list -m all
+
+  security:all:
+    desc: Run all security checks
+    cmds:
+      - task: security:scan
+      - task: lint
+      - task: test
+
   tidy:
     desc: Tidy and verify module dependencies
     cmds:
