@@ -32,6 +32,9 @@ type FetchResult struct {
 // Fetcher downloads URLs and extracts clean text.
 type Fetcher struct {
 	client *http.Client
+	// allowLoopback permits fetching loopback addresses; set only by tests so
+	// they can reach an httptest server. Production fetches always SSRF-guard.
+	allowLoopback bool
 }
 
 // NewFetcher constructs a fetcher with a 15s timeout.
@@ -41,7 +44,7 @@ func NewFetcher() *Fetcher {
 
 // Fetch downloads url and returns its cleaned text content.
 func (f *Fetcher) Fetch(ctx context.Context, url string) (*FetchResult, error) {
-	if err := checkSSRF(url); err != nil {
+	if err := checkSSRF(url, f.allowLoopback); err != nil {
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -121,8 +124,9 @@ func blockedIP(ip net.IP) bool {
 		ip.IsPrivate() || ip.IsUnspecified()
 }
 
-// checkSSRF rejects non-http(s) schemes and private/loopback hosts.
-func checkSSRF(rawURL string) error {
+// checkSSRF rejects non-http(s) schemes and private/loopback hosts. When
+// allowLoopback is true (tests only) loopback addresses are permitted.
+func checkSSRF(rawURL string, allowLoopback bool) error {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("%w: invalid URL: %v", ErrSSRFBlocked, err)
@@ -134,8 +138,14 @@ func checkSSRF(rawURL string) error {
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrSSRFBlocked)
 	}
+	blocked := func(ip net.IP) bool {
+		if allowLoopback && ip != nil && ip.IsLoopback() {
+			return false
+		}
+		return blockedIP(ip)
+	}
 	if ip := net.ParseIP(host); ip != nil {
-		if blockedIP(ip) {
+		if blocked(ip) {
 			return fmt.Errorf("%w: %s", ErrSSRFBlocked, host)
 		}
 		return nil
@@ -145,7 +155,7 @@ func checkSSRF(rawURL string) error {
 		return fmt.Errorf("%w: resolve %q: %v", ErrSSRFBlocked, host, err)
 	}
 	for _, ip := range ips {
-		if blockedIP(ip) {
+		if blocked(ip) {
 			return fmt.Errorf("%w: %s resolves to %s", ErrSSRFBlocked, host, ip)
 		}
 	}
