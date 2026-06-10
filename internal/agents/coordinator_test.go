@@ -918,3 +918,47 @@ func TestHandleDevOps_StubWhenNotWired(t *testing.T) {
 		t.Errorf("unwired devops should stub, got %q", out)
 	}
 }
+
+func TestRuleClassify_Pipeline(t *testing.T) {
+	for _, msg := range []string{
+		"analyze sales.csv", "chart the revenue", "plot monthly users",
+		"visualize the data", "graph the results", "group by region",
+	} {
+		if got := ruleClassify(msg); got != IntentDataPipeline {
+			t.Errorf("ruleClassify(%q) = %q, want DATA_PIPELINE", msg, got)
+		}
+	}
+}
+
+func TestHandleMessage_PipelineRoutesToHandler(t *testing.T) {
+	var gotMsg string
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{},
+		Pipeline: func(_ context.Context, m string, _ func(string)) (string, error) {
+			gotMsg = m
+			return "📊 Produced 3 result rows", nil
+		},
+	})
+	out, err := c.HandleMessage(context.Background(), "analyze the sales data", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMsg != "analyze the sales data" {
+		t.Errorf("pipeline handler got %q", gotMsg)
+	}
+	if !strings.Contains(out, "result rows") {
+		t.Errorf("reply = %q", out)
+	}
+}
+
+func TestHandlePipeline_StubWhenNotWired(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	out, err := c.HandleMessage(context.Background(), "chart the revenue", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "DATA_PIPELINE") {
+		t.Errorf("unwired pipeline should stub, got %q", out)
+	}
+}
