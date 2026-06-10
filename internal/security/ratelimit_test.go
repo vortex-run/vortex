@@ -189,3 +189,260 @@ func TestRateLimit_CleanupRemovesStaleBuckets(t *testing.T) {
 		t.Errorf("buckets after cleanup = %d, want 0", len(r.buckets))
 	}
 }
+
+// --- M19 hardening: APIKeyRateLimiter / GlobalRateLimiter / BurstProtection --
+
+func TestAPIKeyLimiter_LimitsPerKey(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 3, Enabled: true})
+	l.SetClock(now)
+
+	for i := 0; i < 3; i++ {
+		if !l.Allow("key-a", false) {
+			t.Fatalf("request %d within budget should be allowed", i)
+		}
+	}
+	if l.Allow("key-a", false) {
+		t.Error("request over budget should be denied")
+	}
+	// Independent bucket: a different key is unaffected.
+	if !l.Allow("key-b", false) {
+		t.Error("other key should have its own budget")
+	}
+}
+
+func TestAPIKeyLimiter_AdminUnlimited(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 1, Enabled: true})
+	l.SetClock(now)
+
+	for i := 0; i < 100; i++ {
+		if !l.Allow("admin-key", true) {
+			t.Fatalf("admin request %d should never be limited", i)
+		}
+	}
+}
+
+func TestAPIKeyLimiter_CustomKeyLimit(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 1, Enabled: true})
+	l.SetClock(now)
+	l.SetKeyLimit("big", 5)
+
+	for i := 0; i < 5; i++ {
+		if !l.Allow("big", false) {
+			t.Fatalf("request %d within custom budget should be allowed", i)
+		}
+	}
+	if l.Allow("big", false) {
+		t.Error("request over custom budget should be denied")
+	}
+}
+
+func TestAPIKeyLimiter_NonPositiveCustomLimitUnlimited(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 1, Enabled: true})
+	l.SetClock(now)
+	l.SetKeyLimit("free", -1)
+
+	for i := 0; i < 50; i++ {
+		if !l.Allow("free", false) {
+			t.Fatalf("request %d for unlimited key should be allowed", i)
+		}
+	}
+}
+
+func TestAPIKeyLimiter_RefillAfterTime(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 60, Enabled: true})
+	l.SetClock(now)
+
+	for i := 0; i < 60; i++ {
+		if !l.Allow("k", false) {
+			t.Fatalf("request %d within budget should be allowed", i)
+		}
+	}
+	if l.Allow("k", false) {
+		t.Fatal("budget should be exhausted")
+	}
+	advance(time.Second) // 60 RPM = 1 token/sec
+	if !l.Allow("k", false) {
+		t.Error("request after refill should be allowed")
+	}
+}
+
+func TestAPIKeyLimiter_DisabledAlwaysAllows(t *testing.T) {
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 1, Enabled: false})
+	for i := 0; i < 10; i++ {
+		if !l.Allow("k", false) {
+			t.Fatal("disabled limiter should always allow")
+		}
+	}
+}
+
+func TestGlobalLimiter_AppliesAcrossAllRequests(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	g := NewGlobalRateLimiter(3)
+	g.SetClock(now)
+
+	// Budget is shared: different "clients" drain the same bucket.
+	for i := 0; i < 3; i++ {
+		if !g.Allow() {
+			t.Fatalf("request %d within global budget should be allowed", i)
+		}
+	}
+	if g.Allow() {
+		t.Error("request over global budget should be denied")
+	}
+}
+
+func TestGlobalLimiter_RefillAfterTime(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	g := NewGlobalRateLimiter(60)
+	g.SetClock(now)
+
+	for i := 0; i < 60; i++ {
+		if !g.Allow() {
+			t.Fatalf("request %d within budget should be allowed", i)
+		}
+	}
+	if g.Allow() {
+		t.Fatal("budget should be exhausted")
+	}
+	advance(time.Second)
+	if !g.Allow() {
+		t.Error("request after refill should be allowed")
+	}
+}
+
+func TestGlobalLimiter_Middleware429(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	g := NewGlobalRateLimiter(1)
+	g.SetClock(now)
+
+	h := g.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first request: got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second request: got %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 should carry Retry-After")
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body not JSON: %v", err)
+	}
+}
+
+func TestBurstProtection_TriggersOnRapidRequests(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 5, Window: time.Second, BanFor: 5 * time.Minute})
+	b.SetClock(now)
+
+	for i := 0; i < 5; i++ {
+		if !b.Allow("9.9.9.9") {
+			t.Fatalf("request %d under threshold should be allowed", i)
+		}
+	}
+	if b.Allow("9.9.9.9") {
+		t.Error("request crossing threshold should be denied and trigger a ban")
+	}
+	// Still banned on subsequent requests.
+	if b.Allow("9.9.9.9") {
+		t.Error("banned IP should stay denied")
+	}
+	// Other IPs unaffected.
+	if !b.Allow("8.8.8.8") {
+		t.Error("other IP should be unaffected by the ban")
+	}
+}
+
+func TestBurstProtection_BanExpires(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 2, Window: time.Second, BanFor: 5 * time.Minute})
+	b.SetClock(now)
+
+	b.Allow("9.9.9.9")
+	b.Allow("9.9.9.9")
+	if b.Allow("9.9.9.9") {
+		t.Fatal("threshold crossing should be denied")
+	}
+	advance(5*time.Minute + time.Second)
+	if !b.Allow("9.9.9.9") {
+		t.Error("request after ban expiry should be allowed")
+	}
+}
+
+func TestBurstProtection_SlowRequestsNeverTrigger(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 3, Window: time.Second, BanFor: time.Minute})
+	b.SetClock(now)
+
+	// 10 requests spaced 2s apart never have >3 inside any 1s window.
+	for i := 0; i < 10; i++ {
+		if !b.Allow("7.7.7.7") {
+			t.Fatalf("paced request %d should be allowed", i)
+		}
+		advance(2 * time.Second)
+	}
+}
+
+func TestBurstProtection_NotifierCalled(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 1, Window: time.Second, BanFor: time.Minute})
+	b.SetClock(now)
+
+	notified := make(chan string, 1)
+	b.SetNotify(func(title, body string) { notified <- title + " " + body })
+
+	b.Allow("6.6.6.6")
+	if b.Allow("6.6.6.6") {
+		t.Fatal("threshold crossing should be denied")
+	}
+	select {
+	case msg := <-notified:
+		if msg == "" {
+			t.Error("notification should not be empty")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("notifier was not called on ban")
+	}
+}
+
+func TestBurstProtection_Middleware429(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 1, Window: time.Second, BanFor: time.Minute})
+	b.SetClock(now)
+
+	h := b.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "5.5.5.5:1234"
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first request: got %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("banned request: got %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("429 should carry Retry-After")
+	}
+}
