@@ -24,6 +24,36 @@ func TestFetchLatestReleaseNoReleases(t *testing.T) {
 	}
 }
 
+func TestFetchReleaseByTag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/vortex-run/vortex/releases/tags/v0.2.0" {
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v0.2.0","assets":[{"name":"checksums.txt","browser_download_url":"https://x/sums"}]}`))
+	}))
+	defer srv.Close()
+
+	old := apiBaseURL
+	apiBaseURL = srv.URL
+	t.Cleanup(func() { apiBaseURL = old })
+
+	rel, err := FetchReleaseByTag(context.Background(), "vortex-run/vortex", "v0.2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.Tag != "v0.2.0" {
+		t.Errorf("Tag = %q, want v0.2.0", rel.Tag)
+	}
+	if len(rel.Assets) != 1 || rel.Assets[0].Name != "checksums.txt" {
+		t.Errorf("unexpected assets: %+v", rel.Assets)
+	}
+
+	if _, err := FetchReleaseByTag(context.Background(), "vortex-run/vortex", "v9.9.9"); !errors.Is(err, ErrNoReleases) {
+		t.Errorf("expected ErrNoReleases for unknown tag, got %v", err)
+	}
+}
+
 func sampleRelease() *Release {
 	return &Release{
 		Tag: "v1.2.3",

@@ -77,13 +77,24 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 // FetchLatestRelease returns the latest published release for repo (e.g.
 // "vortex-run/vortex"). It applies a 30s timeout derived from ctx.
 func FetchLatestRelease(ctx context.Context, repo string) (*Release, error) {
+	return fetchRelease(ctx, apiBaseURL+"/repos/"+repo+"/releases/latest")
+}
+
+// FetchReleaseByTag returns the published release with the given tag (e.g.
+// "v0.2.0"). A 404 maps to ErrNoReleases, matching FetchLatestRelease.
+func FetchReleaseByTag(ctx context.Context, repo, tag string) (*Release, error) {
+	return fetchRelease(ctx, apiBaseURL+"/repos/"+repo+"/releases/tags/"+tag)
+}
+
+// fetchRelease GETs a GitHub release API URL and decodes it. It applies a 30s
+// timeout derived from ctx.
+func fetchRelease(ctx context.Context, url string) (*Release, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	url := apiBaseURL + "/repos/" + repo + "/releases/latest"
 	resp, err := httpGet(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("fetching latest release: %w", err)
+		return nil, fmt.Errorf("fetching release: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
