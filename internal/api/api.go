@@ -17,6 +17,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/dashboard"
+	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
 	"github.com/vortex-run/vortex/internal/security"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
@@ -348,14 +349,16 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("DELETE /api/namespaces/{id}", s.protectedAdmin(http.HandlerFunc(s.handleDeleteNamespace)))
 	mux.Handle("GET /api/namespaces/{id}/stats", s.protectedAdmin(http.HandlerFunc(s.handleNamespaceStats)))
 
-	// Server-level protection (M19), outermost-in: correlation IDs, per-IP
-	// burst auto-banning, then the global request budget. Per-key limits are
-	// applied per-route after auth (see keyLimit).
+	// Server-level protection (M19), outermost-in: security headers,
+	// correlation IDs, per-IP burst auto-banning, then the global request
+	// budget. Per-key limits are applied per-route after auth (see keyLimit).
 	handler := s.globalLimiter.Middleware()(mux)
 	handler = s.burst.Middleware()(handler)
+	handler = s.correlationMiddleware(handler)
+	handler = proxyhttp.NewSecurityHeaders(proxyhttp.SecurityHeadersConfig{Version: version})(handler)
 	s.srv = &http.Server{
 		Addr:              addr,
-		Handler:           s.correlationMiddleware(handler),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return s

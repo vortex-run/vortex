@@ -274,6 +274,10 @@ func runStart(ctx context.Context, pidfile string) error {
 	if err != nil {
 		return fmt.Errorf("initialising TLS: %w", err)
 	}
+	if tlsMgr != nil {
+		// ACME renewal + 24h session ticket key rotation (M19).
+		tlsMgr.StartBackground(ctx)
+	}
 
 	// mTLS identity mesh: when any route has mtls:true, set up the cluster CA +
 	// node cert rotation and the mTLS config used to wrap those routes.

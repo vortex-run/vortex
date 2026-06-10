@@ -82,6 +82,9 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.EdgeMiddleware != nil {
 		handler = cfg.EdgeMiddleware(handler)
 	}
+	// Security headers wrap the whole chain (M19) so every response — including
+	// edge rejections and policy denials — is hardened and de-identified.
+	handler = SecurityHeadersMiddleware()(handler)
 
 	s := &Server{}
 	s.srv = &http.Server{
