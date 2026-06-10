@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const secretTestConfig = `
@@ -123,5 +124,48 @@ func TestSecret_ListShowsDeclaredStatus(t *testing.T) {
 	}
 	if !strings.Contains(out, "JWT_SECRET") || !strings.Contains(out, "[not set]") {
 		t.Errorf("list should show JWT_SECRET [not set]:\n%s", out)
+	}
+}
+
+func TestSecretSetLifecycleFlags(t *testing.T) {
+	c := newSecretSetCommand()
+	for _, name := range []string{"expires-in", "rotate-every"} {
+		if c.Flags().Lookup(name) == nil {
+			t.Errorf("--%s flag not registered", name)
+		}
+	}
+}
+
+func TestParseLifetime(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"90d", 90 * 24 * time.Hour, false},
+		{"1y", 365 * 24 * time.Hour, false},
+		{"2w", 14 * 24 * time.Hour, false},
+		{"36h", 36 * time.Hour, false},
+		{"1.5d", 36 * time.Hour, false},
+		{"", 0, true},
+		{"abc", 0, true},
+		{"-5d", 0, true},
+		{"0d", 0, true},
+	}
+	for _, c := range cases {
+		got, err := parseLifetime(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("parseLifetime(%q) should error, got %v", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseLifetime(%q): %v", c.in, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("parseLifetime(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
