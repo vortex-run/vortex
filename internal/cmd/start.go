@@ -26,6 +26,7 @@ import (
 	"github.com/vortex-run/vortex/internal/healing"
 	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/vortex-run/vortex/internal/orchestration"
 	"github.com/vortex-run/vortex/internal/perf"
 	"github.com/vortex-run/vortex/internal/pipeline"
 	"github.com/vortex-run/vortex/internal/plugins"
@@ -368,7 +369,9 @@ func runStart(ctx context.Context, pidfile string) error {
 	devopsFn := buildDevOps(ctx, cfg, gateway, msg, apiSrv, log)
 	// --- data pipeline agent (M17) ------------------------------------------
 	pipelineFn := buildPipeline(gateway, msg, resolveWorkingDir(), apiSrv, log)
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn)
+	// --- multi-agent orchestration (M18) ------------------------------------
+	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn)
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -878,7 +881,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -920,6 +923,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		Research:          research,
 		DevOps:            devops,
 		Pipeline:          pipeline,
+		Orchestrate:       orchestrate,
 		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
 		WorkingDir:        workingDir,
 	})
@@ -1153,6 +1157,61 @@ func buildResearch(gateway agents.AIGateway, msg messagingComponents, workingDir
 			reply += "\nReport saved to: " + report.FilePath
 		}
 		return reply, nil
+	}
+}
+
+// orchestrateNotifyAdapter bridges *messaging.Router to orchestration.Notifier.
+type orchestrateNotifyAdapter struct{ router *messaging.Router }
+
+func (a *orchestrateNotifyAdapter) Notify(ctx context.Context, title, body string) error {
+	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
+}
+
+// buildOrchestration constructs the M18 multi-agent orchestration agent: a
+// planner-driven runner whose AgentRouter dispatches each task to the right
+// specialized agent handler (research/devops/data_pipeline) or the gateway
+// (general). Registers the API and returns an OrchestrateFunc. Returns nil when
+// no AI gateway is configured (planning needs it).
+func buildOrchestration(gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger,
+	research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc) agents.OrchestrateFunc {
+	if gateway == nil {
+		apiSrv.SetOrchestrateProvider(nil)
+		return nil
+	}
+	// Router: dispatch a task to its agent type. Each handler is the same *Func
+	// the coordinator uses; "general" falls back to a direct gateway completion.
+	router := orchestration.AgentRouterFunc(func(ctx context.Context, agentType, input string) (string, error) {
+		switch agentType {
+		case "research":
+			if research != nil {
+				return research(ctx, input, nil)
+			}
+		case "devops":
+			if devops != nil {
+				return devops(ctx, input, nil)
+			}
+		case "data_pipeline":
+			if pipeline != nil {
+				return pipeline(ctx, input, nil)
+			}
+		}
+		// general / build_app / unwired → a direct model completion.
+		return gateway.Complete(ctx, input, "You are a VORTEX agent. Complete the task concisely.")
+	})
+
+	var notifier orchestration.Notifier
+	if msg.router != nil {
+		notifier = &orchestrateNotifyAdapter{router: msg.router}
+	}
+	agent := orchestration.NewOrchestrationAgent(gateway, router, notifier)
+
+	apiSrv.SetOrchestrateProvider(func(ctx context.Context, goal string) (string, error) {
+		return agent.Run(ctx, goal, nil)
+	})
+
+	log.Info("multi-agent orchestration enabled")
+	return func(ctx context.Context, goal string, progressFn func(string)) (string, error) {
+		return agent.Run(ctx, goal, progressFn)
 	}
 }
 

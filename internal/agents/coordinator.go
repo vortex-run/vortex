@@ -54,6 +54,7 @@ const (
 	IntentResearch        Intent = "RESEARCH"
 	IntentDevOpsCheck     Intent = "DEVOPS_CHECK"
 	IntentDataPipeline    Intent = "DATA_PIPELINE"
+	IntentOrchestrate     Intent = "ORCHESTRATE"
 	IntentGeneralQuestion Intent = "GENERAL_QUESTION"
 	IntentUnknown         Intent = "UNKNOWN"
 )
@@ -94,18 +95,24 @@ type DevOpsFunc func(ctx context.Context, msg string, progressFn func(string)) (
 // start.go. When nil, DATA_PIPELINE returns a not-implemented stub.
 type PipelineFunc func(ctx context.Context, msg string, progressFn func(string)) (string, error)
 
+// OrchestrateFunc handles a multi-agent goal (M18): decompose into tasks and
+// run them across specialized agents, returning a summary. Supplied via
+// start.go. When nil, orchestration returns a not-implemented stub.
+type OrchestrateFunc func(ctx context.Context, goal string, progressFn func(string)) (string, error)
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
-	Bus        *Bus
-	Tools      *SandboxedToolRegistry
-	LocalTools *ToolRegistry // local FS + terminal tools (real machine access)
-	AIGateway  AIGateway
-	MaxAgents  int          // concurrent sub-agent limit (default 8)
-	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
-	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
-	Research   ResearchFunc // RESEARCH handler (M15 research agent); nil = stub
-	DevOps     DevOpsFunc   // DEVOPS handler (M16 devops agent); nil = stub
-	Pipeline   PipelineFunc // DATA_PIPELINE handler (M17 pipeline agent); nil = stub
+	Bus         *Bus
+	Tools       *SandboxedToolRegistry
+	LocalTools  *ToolRegistry // local FS + terminal tools (real machine access)
+	AIGateway   AIGateway
+	MaxAgents   int             // concurrent sub-agent limit (default 8)
+	Approval    ApprovalFunc    // human-in-the-loop approval; nil = deny gated actions
+	BuildApp    BuildAppFunc    // BUILD_APP handler (VORTEX Forge); nil = stub
+	Research    ResearchFunc    // RESEARCH handler (M15 research agent); nil = stub
+	DevOps      DevOpsFunc      // DEVOPS handler (M16 devops agent); nil = stub
+	Pipeline    PipelineFunc    // DATA_PIPELINE handler (M17 pipeline agent); nil = stub
+	Orchestrate OrchestrateFunc // ORCHESTRATE handler (M18 multi-agent); nil = stub
 	// SessionClarifying reports whether the most recent build for a session is
 	// awaiting clarifying answers (forge JobClarify state). Optional.
 	SessionClarifying func(sessionID string) bool
@@ -620,6 +627,8 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 		return c.handleDevOps(ctx, userMsg)
 	case IntentDataPipeline:
 		return c.handlePipeline(ctx, userMsg)
+	case IntentOrchestrate:
+		return c.handleOrchestrate(ctx, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -799,8 +808,13 @@ var pipelineKeywords = []string{
 // precedence over build keywords so "create a file" never reaches Forge.
 func ruleClassify(userMsg string) Intent {
 	msg := strings.ToLower(strings.TrimSpace(userMsg))
-	// Research first — it is the most specific intent and uses prefix matching,
-	// so "/research …" must NOT be swallowed by the generic "/" → LOCAL_FILE.
+	// Orchestration first — an explicit /orchestrate (or "orchestrate:") signals
+	// a multi-agent goal that should decompose, not route to one agent.
+	if strings.HasPrefix(msg, "/orchestrate") || strings.HasPrefix(msg, "orchestrate:") {
+		return IntentOrchestrate
+	}
+	// Research next — it is a specific intent and uses prefix matching, so
+	// "/research …" must NOT be swallowed by the generic "/" → LOCAL_FILE.
 	if strings.HasPrefix(msg, "/research") {
 		return IntentResearch
 	}
@@ -882,6 +896,26 @@ func (c *Coordinator) handlePipeline(ctx context.Context, userMsg string) (strin
 		return c.modeStub("DATA_PIPELINE"), nil
 	}
 	return c.cfg.Pipeline(ctx, userMsg, func(string) {})
+}
+
+// handleOrchestrate dispatches a multi-agent goal to the orchestration agent
+// (or stubs when not wired). It strips a leading /orchestrate or "orchestrate:".
+func (c *Coordinator) handleOrchestrate(ctx context.Context, userMsg string) (string, error) {
+	if c.cfg.Orchestrate == nil {
+		return c.modeStub("ORCHESTRATE"), nil
+	}
+	goal := strings.TrimSpace(userMsg)
+	low := strings.ToLower(goal)
+	switch {
+	case strings.HasPrefix(low, "/orchestrate"):
+		goal = strings.TrimSpace(goal[len("/orchestrate"):])
+	case strings.HasPrefix(low, "orchestrate:"):
+		goal = strings.TrimSpace(goal[len("orchestrate:"):])
+	}
+	if goal == "" {
+		return "What goal should I orchestrate? Describe the multi-step task.", nil
+	}
+	return c.cfg.Orchestrate(ctx, goal, func(string) {})
 }
 
 // handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,

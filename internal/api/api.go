@@ -69,6 +69,7 @@ type Server struct {
 	devopsServers   func() []DevOpsServer
 	devopsRun       func(ctx context.Context, server, command string) (string, error)
 	pipelineAnalyze func(ctx context.Context, source, data, request string) (PipelineResultInfo, error)
+	orchestrateRun  func(ctx context.Context, goal string) (string, error)
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
 
@@ -300,6 +301,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/devops/servers", s.requireAPIKey(http.HandlerFunc(s.handleDevOpsServers)))
 	mux.Handle("POST /api/devops/command", s.requireAPIKey(http.HandlerFunc(s.handleDevOpsCommand)))
 	mux.Handle("POST /api/pipeline/analyze", s.requireAPIKey(http.HandlerFunc(s.handlePipelineAnalyze)))
+	mux.Handle("POST /api/orchestrate", s.requireAPIKey(http.HandlerFunc(s.handleOrchestrate)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
