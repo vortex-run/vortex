@@ -770,6 +770,16 @@ var researchKeywords = []string{
 // precedence over build keywords so "create a file" never reaches Forge.
 func ruleClassify(userMsg string) Intent {
 	msg := strings.ToLower(strings.TrimSpace(userMsg))
+	// Research first — it is the most specific intent and uses prefix matching,
+	// so "/research …" must NOT be swallowed by the generic "/" → LOCAL_FILE.
+	if strings.HasPrefix(msg, "/research") {
+		return IntentResearch
+	}
+	for _, kw := range researchKeywords {
+		if strings.HasPrefix(msg, kw) {
+			return IntentResearch
+		}
+	}
 	if strings.HasPrefix(msg, "/") {
 		return IntentLocalFile
 	}
@@ -781,14 +791,6 @@ func ruleClassify(userMsg string) Intent {
 	for _, kw := range buildAppKeywords {
 		if strings.Contains(msg, kw) {
 			return IntentBuildApp
-		}
-	}
-	if strings.HasPrefix(msg, "/research ") || strings.HasPrefix(msg, "/research") {
-		return IntentResearch
-	}
-	for _, kw := range researchKeywords {
-		if strings.HasPrefix(msg, kw) {
-			return IntentResearch
 		}
 	}
 	return IntentUnknown

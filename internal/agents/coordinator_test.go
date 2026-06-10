@@ -811,3 +811,65 @@ func TestClarification_NewRequestWhenBuildDone(t *testing.T) {
 		t.Errorf("a new request after the build finished should not merge: %q", submissions[1])
 	}
 }
+
+func TestRuleClassify_Research(t *testing.T) {
+	for _, msg := range []string{
+		"/research golang frameworks",
+		"research the best databases",
+		"look up rust web servers",
+		"search for kubernetes operators",
+		"tell me about vector databases",
+		"summarize the latest go release",
+	} {
+		if got := ruleClassify(msg); got != IntentResearch {
+			t.Errorf("ruleClassify(%q) = %q, want RESEARCH", msg, got)
+		}
+	}
+}
+
+func TestExtractResearchQuery(t *testing.T) {
+	cases := map[string]string{
+		"/research golang frameworks": "golang frameworks",
+		"research the best databases": "the best databases",
+		"tell me about vector dbs":    "vector dbs",
+		"summarize the go release":    "the go release",
+	}
+	for in, want := range cases {
+		if got := extractResearchQuery(in); got != want {
+			t.Errorf("extractResearchQuery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestHandleMessage_ResearchRoutesToHandler(t *testing.T) {
+	var gotQuery string
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{},
+		Research: func(_ context.Context, query string, _ func(string)) (string, error) {
+			gotQuery = query
+			return "📊 Research complete: " + query, nil
+		},
+	})
+	out, err := c.HandleMessage(context.Background(), "research go web frameworks", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "go web frameworks" {
+		t.Errorf("research handler got query %q", gotQuery)
+	}
+	if !strings.Contains(out, "Research complete") {
+		t.Errorf("reply = %q", out)
+	}
+}
+
+func TestHandleResearch_StubWhenNotWired(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	out, err := c.HandleMessage(context.Background(), "/research something", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "RESEARCH") {
+		t.Errorf("unwired research should stub, got %q", out)
+	}
+}
