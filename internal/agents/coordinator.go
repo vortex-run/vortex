@@ -89,6 +89,11 @@ type ResearchFunc func(ctx context.Context, query string, progressFn func(string
 // When nil, DEVOPS returns a not-implemented stub.
 type DevOpsFunc func(ctx context.Context, msg string, progressFn func(string)) (string, error)
 
+// PipelineFunc handles a DATA_PIPELINE request (analyze data → chart → report),
+// returning a user-facing reply. The M17 pipeline agent supplies it via
+// start.go. When nil, DATA_PIPELINE returns a not-implemented stub.
+type PipelineFunc func(ctx context.Context, msg string, progressFn func(string)) (string, error)
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
 	Bus        *Bus
@@ -100,6 +105,7 @@ type CoordinatorConfig struct {
 	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
 	Research   ResearchFunc // RESEARCH handler (M15 research agent); nil = stub
 	DevOps     DevOpsFunc   // DEVOPS handler (M16 devops agent); nil = stub
+	Pipeline   PipelineFunc // DATA_PIPELINE handler (M17 pipeline agent); nil = stub
 	// SessionClarifying reports whether the most recent build for a session is
 	// awaiting clarifying answers (forge JobClarify state). Optional.
 	SessionClarifying func(sessionID string) bool
@@ -612,6 +618,8 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 		return c.handleResearch(ctx, userMsg)
 	case IntentDevOpsCheck:
 		return c.handleDevOps(ctx, userMsg)
+	case IntentDataPipeline:
+		return c.handlePipeline(ctx, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -630,7 +638,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	case IntentDevOpsCheck:
 		return c.handleDevOps(ctx, userMsg)
 	case IntentDataPipeline:
-		return c.modeStub("DATA_PIPELINE"), nil
+		return c.handlePipeline(ctx, userMsg)
 	default:
 		return "I'm not sure what you'd like me to do. Could you clarify whether you want me to build an app, research something, run a DevOps check, or answer a question?", nil
 	}
@@ -778,6 +786,12 @@ var devopsKeywords = []string{
 	"disk space", "list containers", "add nginx site", "enable ssl ",
 }
 
+// pipelineKeywords route a message to the data pipeline agent.
+var pipelineKeywords = []string{
+	"analyze ", "analyse ", "chart ", "plot ", "graph ", "visualize ",
+	"visualise ", "csv ", "dataset", "data from ", "group by ",
+}
+
 // ruleClassify is a fast, AI-free classifier. It returns IntentLocalFile for
 // simple file/terminal operations and slash commands, IntentBuildApp for real
 // build requests, or IntentUnknown when no rule matches (caller falls back to
@@ -798,6 +812,11 @@ func ruleClassify(userMsg string) Intent {
 	for _, kw := range devopsKeywords {
 		if strings.Contains(msg, kw) {
 			return IntentDevOpsCheck
+		}
+	}
+	for _, kw := range pipelineKeywords {
+		if strings.HasPrefix(msg, kw) || strings.Contains(msg, " "+kw) {
+			return IntentDataPipeline
 		}
 	}
 	if strings.HasPrefix(msg, "/") {
@@ -854,6 +873,15 @@ func (c *Coordinator) handleDevOps(ctx context.Context, userMsg string) (string,
 		return c.modeStub("DEVOPS_CHECK"), nil
 	}
 	return c.cfg.DevOps(ctx, userMsg, func(string) {})
+}
+
+// handlePipeline dispatches a DATA_PIPELINE request to the pipeline agent (or
+// stubs when not wired).
+func (c *Coordinator) handlePipeline(ctx context.Context, userMsg string) (string, error) {
+	if c.cfg.Pipeline == nil {
+		return c.modeStub("DATA_PIPELINE"), nil
+	}
+	return c.cfg.Pipeline(ctx, userMsg, func(string) {})
 }
 
 // handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,

@@ -27,6 +27,7 @@ import (
 	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
 	"github.com/vortex-run/vortex/internal/perf"
+	"github.com/vortex-run/vortex/internal/pipeline"
 	"github.com/vortex-run/vortex/internal/plugins"
 	"github.com/vortex-run/vortex/internal/policy"
 	"github.com/vortex-run/vortex/internal/proxy"
@@ -365,7 +366,9 @@ func runStart(ctx context.Context, pidfile string) error {
 	researchFn := buildResearch(gateway, msg, resolveWorkingDir(), apiSrv, log)
 	// --- devops agent (M16) -------------------------------------------------
 	devopsFn := buildDevOps(ctx, cfg, gateway, msg, apiSrv, log)
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn)
+	// --- data pipeline agent (M17) ------------------------------------------
+	pipelineFn := buildPipeline(gateway, msg, resolveWorkingDir(), apiSrv, log)
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn)
 	if agentRuntime != nil {
 		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
@@ -875,7 +878,7 @@ func atoiDefault(s string, def int) int {
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -916,6 +919,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		SessionPending:    sessionPending,
 		Research:          research,
 		DevOps:            devops,
+		Pipeline:          pipeline,
 		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
 		WorkingDir:        workingDir,
 	})
@@ -1150,6 +1154,71 @@ func buildResearch(gateway agents.AIGateway, msg messagingComponents, workingDir
 		}
 		return reply, nil
 	}
+}
+
+// pipelineNotifyAdapter bridges *messaging.Router to pipeline.Notifier.
+type pipelineNotifyAdapter struct{ router *messaging.Router }
+
+func (a *pipelineNotifyAdapter) Notify(ctx context.Context, title, body string) error {
+	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
+}
+
+func (a *pipelineNotifyAdapter) NotifyFile(ctx context.Context, filename string, data []byte, caption string) error {
+	return a.router.SendFile(ctx, filename, data, caption)
+}
+
+// buildPipeline constructs the M17 data pipeline agent, registers the analyze
+// API, and returns a PipelineFunc for the coordinator. Returns nil when no AI
+// gateway is configured (planning needs it, though analysis degrades).
+func buildPipeline(gateway agents.AIGateway, msg messagingComponents, workingDir string, apiSrv *api.Server, log *slog.Logger) agents.PipelineFunc {
+	if gateway == nil {
+		apiSrv.SetPipelineProvider(nil)
+		return nil
+	}
+	var notifier pipeline.Notifier
+	if msg.router != nil {
+		notifier = &pipelineNotifyAdapter{router: msg.router}
+	}
+	agent := pipeline.NewDataPipelineAgent(gateway, notifier, workingDir)
+
+	apiSrv.SetPipelineProvider(func(ctx context.Context, source, data, request string) (api.PipelineResultInfo, error) {
+		res, err := agent.Analyze(ctx, source, []byte(data), request, nil)
+		if err != nil {
+			return api.PipelineResultInfo{}, err
+		}
+		return api.PipelineResultInfo{
+			Summary: res.Summary, DataPath: res.DataPath, ChartPath: res.ChartPath,
+			Rows: res.Rows, Columns: res.Columns,
+		}, nil
+	})
+
+	log.Info("data pipeline agent enabled")
+	return func(ctx context.Context, m string, progressFn func(string)) (string, error) {
+		// Chat requests carry the analysis instruction; the data source must be a
+		// URL embedded in the message (inline data comes via the API).
+		res, err := agent.Analyze(ctx, extractURL(m), nil, m, progressFn)
+		if err != nil {
+			return "", err
+		}
+		reply := "📊 " + res.Summary
+		if res.ChartPath != "" {
+			reply += "\nChart: " + res.ChartPath
+		}
+		if res.DataPath != "" {
+			reply += "\nData: " + res.DataPath
+		}
+		return reply, nil
+	}
+}
+
+// extractURL returns the first http(s) URL in s, or "".
+func extractURL(s string) string {
+	for _, tok := range strings.Fields(s) {
+		if strings.HasPrefix(tok, "http://") || strings.HasPrefix(tok, "https://") {
+			return tok
+		}
+	}
+	return ""
 }
 
 // devopsNotifyAdapter bridges *messaging.Router to devops.Notifier.
