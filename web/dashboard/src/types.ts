@@ -56,3 +56,25 @@ export interface NodeInfo {
   protocols: string[];
   uptime: string;
 }
+
+// HealingStatus mirrors GET /api/healing/status (M14 self-healing).
+export interface HealingCheck {
+  name: string;
+  healthy: boolean;
+  latency_ms: number;
+  last_check: string;
+  consecutive_failures: number;
+}
+export interface HealingSLOAlert {
+  route_name: string;
+  target: number;
+  current: number;
+  burn_rate: number;
+  alert_level: string;
+}
+export interface HealingStatus {
+  healthy: boolean;
+  checks: HealingCheck[];
+  slo_alerts: HealingSLOAlert[];
+  recovery_stats: { total_events: number; actions_executed: number };
+}

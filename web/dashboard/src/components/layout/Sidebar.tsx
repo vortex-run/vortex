@@ -11,6 +11,7 @@ import {
   FileText,
   Key,
   Settings,
+  HeartPulse,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { label: "Plugins", to: "/dashboard/plugins", icon: Puzzle },
   { label: "Audit Log", to: "/dashboard/audit", icon: FileText },
   { label: "Secrets", to: "/dashboard/secrets", icon: Key },
+  { label: "Healing", to: "/dashboard/healing", icon: HeartPulse },
   { label: "Settings", to: "/dashboard/settings", icon: Settings },
 ];
 

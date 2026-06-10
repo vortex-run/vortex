@@ -52,3 +52,12 @@ export async function reloadConfig(): Promise<void> {
     throw new Error(`reload returned ${res.status}`);
   }
 }
+
+// fetchHealing retrieves self-healing status (GET /api/healing/status). A 404
+// yields a healthy empty status so the UI degrades gracefully.
+export async function fetchHealing(): Promise<import("../types").HealingStatus> {
+  const res = await fetch("/api/healing/status", { headers: { Accept: "application/json" } });
+  if (res.status === 404) return { healthy: true, checks: [], slo_alerts: [], recovery_stats: { total_events: 0, actions_executed: 0 } };
+  if (!res.ok) throw new Error(`/api/healing/status returned ${res.status}`);
+  return (await res.json()) as import("../types").HealingStatus;
+}

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchHealth, fetchStatus, fetchAudit } from "./api";
+import { fetchHealth, fetchStatus, fetchAudit, fetchHealing } from "./api";
 
 // useHealth polls the management /health endpoint every 5 seconds.
 export function useHealth() {
@@ -33,4 +33,12 @@ export function useAudit(limit = 50) {
 export function useRoutes() {
   const q = useHealth();
   return { ...q, routes: q.data?.routes ?? [] };
+}
+
+export function useHealing() {
+  return useQuery({
+    queryKey: ["healing"],
+    queryFn: () => fetchHealing(),
+    refetchInterval: 10000,
+  });
 }

@@ -12,6 +12,7 @@ import { Secrets } from "./pages/Secrets";
 import { Nodes } from "./pages/Nodes";
 import { Plugins } from "./pages/Plugins";
 import { Settings } from "./pages/Settings";
+ import { Healing } from "./pages/Healing";
 import { Stub } from "./pages/Stub";
 
 const queryClient = new QueryClient();
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="plugins" element={<Plugins />} />
             <Route path="audit" element={<AuditLog />} />
             <Route path="secrets" element={<Secrets />} />
+            <Route path="healing" element={<Healing />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>
