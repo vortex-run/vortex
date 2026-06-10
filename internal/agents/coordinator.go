@@ -78,6 +78,12 @@ type ApprovalFunc func(ctx context.Context, req ApprovalRequest) bool
 // avoid an import cycle. When nil, BUILD_APP returns a not-implemented stub.
 type BuildAppFunc func(ctx context.Context, userMsg, sessionID string) (string, error)
 
+// ResearchFunc handles a RESEARCH request, returning a user-facing reply. The
+// M15 research agent supplies the implementation via start.go (keeping the
+// coordinator decoupled from the research package). progressFn streams step
+// updates. When nil, RESEARCH returns a not-implemented stub.
+type ResearchFunc func(ctx context.Context, query string, progressFn func(string)) (string, error)
+
 // CoordinatorConfig configures the user-facing coordinator agent.
 type CoordinatorConfig struct {
 	Bus        *Bus
@@ -87,6 +93,7 @@ type CoordinatorConfig struct {
 	MaxAgents  int          // concurrent sub-agent limit (default 8)
 	Approval   ApprovalFunc // human-in-the-loop approval; nil = deny gated actions
 	BuildApp   BuildAppFunc // BUILD_APP handler (VORTEX Forge); nil = stub
+	Research   ResearchFunc // RESEARCH handler (M15 research agent); nil = stub
 	// SessionClarifying reports whether the most recent build for a session is
 	// awaiting clarifying answers (forge JobClarify state). Optional.
 	SessionClarifying func(sessionID string) bool
@@ -590,10 +597,13 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	// Rule-based fast path FIRST: simple file/terminal operations and slash
 	// commands route to local tools directly — no AI call, instant. Only fall
 	// back to the AI classifier when the rules don't match.
-	if intent := ruleClassify(userMsg); intent == IntentLocalFile {
+	switch ruleClassify(userMsg) {
+	case IntentLocalFile:
 		return c.handleLocalFile(ctx, sessionID, userMsg)
-	} else if intent == IntentBuildApp {
+	case IntentBuildApp:
 		return c.dispatchBuild(ctx, sessionID, userMsg)
+	case IntentResearch:
+		return c.handleResearch(ctx, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -608,7 +618,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	case IntentBuildApp:
 		return c.dispatchBuild(ctx, sessionID, userMsg)
 	case IntentResearch:
-		return c.modeStub("RESEARCH"), nil
+		return c.handleResearch(ctx, userMsg)
 	case IntentDevOpsCheck:
 		return c.modeStub("DEVOPS_CHECK"), nil
 	case IntentDataPipeline:
@@ -747,6 +757,12 @@ var buildAppKeywords = []string{
 	"create a project", "build and deploy", "scaffold a project",
 }
 
+// researchKeywords route a message to the research agent.
+var researchKeywords = []string{
+	"research ", "look up ", "search for ", "find information about ",
+	"tell me about ", "summarize ",
+}
+
 // ruleClassify is a fast, AI-free classifier. It returns IntentLocalFile for
 // simple file/terminal operations and slash commands, IntentBuildApp for real
 // build requests, or IntentUnknown when no rule matches (caller falls back to
@@ -767,7 +783,46 @@ func ruleClassify(userMsg string) Intent {
 			return IntentBuildApp
 		}
 	}
+	if strings.HasPrefix(msg, "/research ") || strings.HasPrefix(msg, "/research") {
+		return IntentResearch
+	}
+	for _, kw := range researchKeywords {
+		if strings.HasPrefix(msg, kw) {
+			return IntentResearch
+		}
+	}
 	return IntentUnknown
+}
+
+// extractResearchQuery strips a leading research command/keyword to get the
+// actual query.
+func extractResearchQuery(userMsg string) string {
+	msg := strings.TrimSpace(userMsg)
+	low := strings.ToLower(msg)
+	if strings.HasPrefix(low, "/research") {
+		return strings.TrimSpace(msg[len("/research"):])
+	}
+	for _, kw := range researchKeywords {
+		if strings.HasPrefix(low, kw) {
+			return strings.TrimSpace(msg[len(kw):])
+		}
+	}
+	return msg
+}
+
+// handleResearch dispatches a RESEARCH request to the research agent, streaming
+// progress; returns the user-facing reply (or a stub when not wired).
+func (c *Coordinator) handleResearch(ctx context.Context, userMsg string) (string, error) {
+	if c.cfg.Research == nil {
+		return c.modeStub("RESEARCH"), nil
+	}
+	query := extractResearchQuery(userMsg)
+	if query == "" {
+		return "What would you like me to research?", nil
+	}
+	// Progress is currently collected but not streamed back per-step (the runtime
+	// returns a single reply); the research agent's report is the result.
+	return c.cfg.Research(ctx, query, func(string) {})
 }
 
 // handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,

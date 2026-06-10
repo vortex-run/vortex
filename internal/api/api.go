@@ -64,6 +64,8 @@ type Server struct {
 	statusProvider  func() StatusInfo
 	aiCostProvider  func() AICostInfo
 	healingProvider func() HealingStatus
+	researchList    func() []ResearchReport
+	researchGet     func(name string) (string, bool)
 	secretsProvider func() []SecretStatus
 	pluginsProvider func() []PluginInfo
 
@@ -290,6 +292,8 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/ai/cost", s.requireAPIKey(http.HandlerFunc(s.handleAICost)))
 	mux.Handle("GET /api/healing/status", s.requireAPIKey(http.HandlerFunc(s.handleHealingStatus)))
 	mux.Handle("GET /api/healing/events", s.requireAPIKey(http.HandlerFunc(s.handleHealingEvents)))
+	mux.Handle("GET /api/research/reports", s.requireAPIKey(http.HandlerFunc(s.handleResearchReports)))
+	mux.Handle("GET /api/research/reports/{name}", s.requireAPIKey(http.HandlerFunc(s.handleResearchReport)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
