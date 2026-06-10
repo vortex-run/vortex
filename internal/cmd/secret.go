@@ -4,9 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/vortex-run/vortex/internal/secrets"
 )
 
 // errSecret signals a secret-command failure whose detail was already printed;
@@ -29,27 +34,104 @@ func newSecretCommand() *cobra.Command {
 }
 
 func newSecretSetCommand() *cobra.Command {
-	return &cobra.Command{
+	var (
+		expiresIn   string
+		rotateEvery string
+	)
+	c := &cobra.Command{
 		Use:   "set <name> <value>",
 		Short: "Set a secret value (encrypted)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, value := args[0], args[1]
-			a, _, err := openSecretAdapter()
+			errOut := cmd.OutOrStderr()
+
+			// Lifecycle flags (M19) are tracked by the local encrypted store
+			// only; external backends (Vault/SSM/GCP) manage their own TTLs.
+			var meta secrets.SecretMetadata
+			withMeta := expiresIn != "" || rotateEvery != ""
+			if expiresIn != "" {
+				d, err := parseLifetime(expiresIn)
+				if err != nil {
+					fmt.Fprintf(errOut, "error: --expires-in: %v\n", err)
+					return errSecret
+				}
+				meta.ExpiresAt = time.Now().Add(d)
+			}
+			if rotateEvery != "" {
+				d, err := parseLifetime(rotateEvery)
+				if err != nil {
+					fmt.Fprintf(errOut, "error: --rotate-every: %v\n", err)
+					return errSecret
+				}
+				meta.RotateEvery = d
+			}
+
+			a, cfg, err := openSecretAdapter()
 			if err != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+				fmt.Fprintf(errOut, "error: %v\n", err)
 				return errSecret
 			}
-			if err := a.Set(cmd.Context(), name, value); err != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+
+			if withMeta {
+				ac, err := buildAdapterConfig(cfg)
+				if err != nil || ac.Local == nil {
+					fmt.Fprintf(errOut, "error: --expires-in/--rotate-every require the local secret backend\n")
+					return errSecret
+				}
+				if err := ac.Local.SetWithMetadata(name, value, meta); err != nil {
+					fmt.Fprintf(errOut, "error: %v\n", err)
+					return errSecret
+				}
+			} else if err := a.Set(cmd.Context(), name, value); err != nil {
+				fmt.Fprintf(errOut, "error: %v\n", err)
 				return errSecret
 			}
 			// Audit the operation, never the secret value.
 			auditCLI(cmd, "secret.set", name)
-			fmt.Fprintf(cmd.OutOrStdout(), "Secret %q set successfully\n", name)
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Secret %q set successfully\n", name)
+			if !meta.ExpiresAt.IsZero() {
+				fmt.Fprintf(out, "Expires: %s\n", meta.ExpiresAt.Format("2006-01-02"))
+			}
+			if meta.RotateEvery > 0 {
+				fmt.Fprintf(out, "Rotate every: %s\n", rotateEvery)
+			}
 			return nil
 		},
 	}
+	c.Flags().StringVar(&expiresIn, "expires-in", "", "expiry from now (e.g. 90d, 1y); alerts fire when passed")
+	c.Flags().StringVar(&rotateEvery, "rotate-every", "", "rotation interval (e.g. 30d); alerts fire when due")
+	return c
+}
+
+// parseLifetime parses a duration that may use d (days), w (weeks), or y
+// (years) suffixes in addition to Go's native units (e.g. "90d", "1y", "36h").
+func parseLifetime(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	var unit time.Duration
+	switch {
+	case strings.HasSuffix(s, "d"):
+		unit = 24 * time.Hour
+	case strings.HasSuffix(s, "w"):
+		unit = 7 * 24 * time.Hour
+	case strings.HasSuffix(s, "y"):
+		unit = 365 * 24 * time.Hour
+	default:
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return 0, fmt.Errorf("invalid duration %q (use e.g. 90d, 12w, 1y, 36h)", s)
+		}
+		if d <= 0 {
+			return 0, fmt.Errorf("duration must be positive, got %q", s)
+		}
+		return d, nil
+	}
+	n, err := strconv.ParseFloat(strings.TrimSuffix(s, s[len(s)-1:]), 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid duration %q (use e.g. 90d, 12w, 1y, 36h)", s)
+	}
+	return time.Duration(n * float64(unit)), nil
 }
 
 func newSecretGetCommand() *cobra.Command {

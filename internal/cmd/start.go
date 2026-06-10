@@ -343,6 +343,10 @@ func runStart(ctx context.Context, pidfile string) error {
 		})
 	}
 
+	// Secret expiry / rotation startup check (M19): warn + alert for any
+	// local-store secret that is expired or due for rotation.
+	go checkSecretRotation(cfg, msg.router, log)
+
 	// AI cost endpoint: report today's spend/budget from the gateway.
 	if msg.gateway != nil {
 		gw := msg.gateway
@@ -2017,6 +2021,46 @@ func loadSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) (map
 	}
 	log.Info("secrets loaded", "count", len(present), "missing", len(missing))
 	return env, nil
+}
+
+// checkSecretRotation scans the local secret store for expired or
+// rotation-due secrets (M19), logging a WARN and alerting through the
+// notification router (Telegram et al) for each. External backends are
+// skipped — they manage their own TTLs. router may be nil (no messaging).
+func checkSecretRotation(cfg *config.Config, router *messaging.Router, log *slog.Logger) {
+	ac, err := buildAdapterConfig(cfg)
+	if err != nil || ac.Local == nil {
+		return
+	}
+	alerts, err := ac.Local.CheckRotation()
+	if err != nil {
+		log.Warn("secret rotation check failed", "err", err)
+		return
+	}
+	for _, a := range alerts {
+		hint := "vortex secret set " + a.Name + " <value>"
+		if a.Expired {
+			days := int(time.Since(a.Deadline).Hours() / 24)
+			log.Warn("secret EXPIRED", "name", a.Name,
+				"expired", a.Deadline.Format("2006-01-02"), "days_ago", days, "hint", hint)
+			if router != nil {
+				_ = router.Send(context.Background(), messaging.SeverityWarn,
+					"⚠️ Secret EXPIRED: "+a.Name,
+					fmt.Sprintf("Expired: %s (%d days ago)\nUpdate with: %s",
+						a.Deadline.Format("2006-01-02"), days, hint))
+			}
+			continue
+		}
+		days := int(time.Until(a.Deadline).Hours() / 24)
+		log.Warn("secret rotation due", "name", a.Name,
+			"rotate_by", a.Deadline.Format("2006-01-02"), "days_left", days, "hint", hint)
+		if router != nil {
+			_ = router.Send(context.Background(), messaging.SeverityWarn,
+				"⚠️ Secret rotation due: "+a.Name,
+				fmt.Sprintf("Rotate by: %s (%d days)\nUpdate with: %s",
+					a.Deadline.Format("2006-01-02"), days, hint))
+		}
+	}
 }
 
 // needsMTLS reports whether any route has mtls:true.

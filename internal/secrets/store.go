@@ -119,6 +119,10 @@ func (s *SecretStore) Delete(name string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("secrets: deleting secret %q: %w", name, err)
 	}
+	// Lifecycle metadata (if any) goes with the value.
+	if err := os.Remove(s.metaFileFor(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("secrets: deleting metadata for %q: %w", name, err)
+	}
 	return nil
 }
 
