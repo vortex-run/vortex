@@ -32,6 +32,11 @@ jobs:
       - name: Run tests before release
         run: go test -race ./...
 
+      # syft must be on PATH before GoReleaser runs: the sboms block in
+      # .goreleaser.yaml shells out to it for the per-archive SPDX documents.
+      - name: Install syft
+        run: go install github.com/anchore/syft/cmd/syft@latest
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -40,3 +45,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Whole-repository SBOM (source dependencies, not just the shipped
+      # archives) kept as a workflow artifact for audit/compliance trails.
+      - name: Generate SBOM
+        run: syft packages . -o spdx-json > vortex-sbom.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: vortex-sbom.json
