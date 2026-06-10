@@ -962,3 +962,62 @@ func TestHandlePipeline_StubWhenNotWired(t *testing.T) {
 		t.Errorf("unwired pipeline should stub, got %q", out)
 	}
 }
+
+func TestRuleClassify_Orchestrate(t *testing.T) {
+	for _, msg := range []string{
+		"/orchestrate research X then summarize",
+		"orchestrate: build and deploy the app",
+	} {
+		if got := ruleClassify(msg); got != IntentOrchestrate {
+			t.Errorf("ruleClassify(%q) = %q, want ORCHESTRATE", msg, got)
+		}
+	}
+}
+
+func TestHandleMessage_OrchestrateRoutesToHandler(t *testing.T) {
+	var gotGoal string
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus:       NewBus(),
+		AIGateway: StubAIGateway{},
+		Orchestrate: func(_ context.Context, goal string, _ func(string)) (string, error) {
+			gotGoal = goal
+			return "2 completed, 0 failed", nil
+		},
+	})
+	out, err := c.HandleMessage(context.Background(), "/orchestrate investigate X and report", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The /orchestrate prefix is stripped before dispatch.
+	if gotGoal != "investigate X and report" {
+		t.Errorf("orchestrate handler got goal %q", gotGoal)
+	}
+	if !strings.Contains(out, "completed") {
+		t.Errorf("reply = %q", out)
+	}
+}
+
+func TestHandleOrchestrate_StubWhenNotWired(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{Bus: NewBus(), AIGateway: StubAIGateway{}})
+	out, err := c.HandleMessage(context.Background(), "/orchestrate do stuff", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ORCHESTRATE") {
+		t.Errorf("unwired orchestrate should stub, got %q", out)
+	}
+}
+
+func TestHandleOrchestrate_EmptyGoalAsks(t *testing.T) {
+	c, _ := NewCoordinator(CoordinatorConfig{
+		Bus: NewBus(), AIGateway: StubAIGateway{},
+		Orchestrate: func(context.Context, string, func(string)) (string, error) { return "ran", nil },
+	})
+	out, err := c.HandleMessage(context.Background(), "/orchestrate", "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(out), "what goal") {
+		t.Errorf("empty goal should ask for one, got %q", out)
+	}
+}
