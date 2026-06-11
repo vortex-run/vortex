@@ -747,6 +747,10 @@ func RegisterBuiltins(registry *ToolRegistry, sandboxDir string, allowedCommands
 		NewRunCommandTool(sandboxDir, allowedCommands),
 		VortexAPITool{BaseURL: apiBaseURL},
 		SendMessageTool{Bus: bus, From: agentName},
+		// LSP diagnostics (M20): read-only code intelligence. The sandbox dir is
+		// the workspace root; the tool degrades to an empty result when no
+		// language server is installed.
+		&LSPDiagnosticsTool{WorkDir: sandboxDir},
 	}
 	for _, t := range tools {
 		if err := registry.Register(t); err != nil {
