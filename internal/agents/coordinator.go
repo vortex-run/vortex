@@ -192,6 +192,11 @@ type Coordinator struct {
 	// relevant episodes are recalled into the system prompt for each message,
 	// and each completed exchange is mined for durable facts asynchronously.
 	episodic *EpisodicStore
+
+	// workflows, when set, records multi-step tasks durably (upgrade 4):
+	// orchestration progress is persisted step by step so an interrupted goal
+	// is found by ListIncomplete and resumed on the next startup.
+	workflows *WorkflowStore
 }
 
 // SetMemoryStore wires the SQLite conversation store, making it the persistence
@@ -273,6 +278,20 @@ func (c *Coordinator) rememberExchangeAsync(sessionID, userMsg, reply string) {
 			slog.Debug("episodic memory extraction skipped", "error", err)
 		}
 	}()
+}
+
+// SetWorkflowStore wires the durable workflow store. Pass nil to disable.
+func (c *Coordinator) SetWorkflowStore(s *WorkflowStore) {
+	c.mu.Lock()
+	c.workflows = s
+	c.mu.Unlock()
+}
+
+// workflowStore returns the workflow store under lock (nil when disabled).
+func (c *Coordinator) workflowStore() *WorkflowStore {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.workflows
 }
 
 // skillMinSuccessRate is the floor below which a stored skill is not trusted
@@ -843,7 +862,7 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 	case IntentDataPipeline:
 		return c.handlePipeline(ctx, userMsg)
 	case IntentOrchestrate:
-		return c.handleOrchestrate(ctx, userMsg)
+		return c.handleOrchestrate(ctx, sessionID, userMsg)
 	}
 
 	intent := c.classify(ctx, userMsg)
@@ -1180,7 +1199,7 @@ func (c *Coordinator) handlePipeline(ctx context.Context, userMsg string) (strin
 
 // handleOrchestrate dispatches a multi-agent goal to the orchestration agent
 // (or stubs when not wired). It strips a leading /orchestrate or "orchestrate:".
-func (c *Coordinator) handleOrchestrate(ctx context.Context, userMsg string) (string, error) {
+func (c *Coordinator) handleOrchestrate(ctx context.Context, sessionID, userMsg string) (string, error) {
 	if c.cfg.Orchestrate == nil {
 		return c.modeStub("ORCHESTRATE"), nil
 	}
@@ -1196,15 +1215,32 @@ func (c *Coordinator) handleOrchestrate(ctx context.Context, userMsg string) (st
 		return "What goal should I orchestrate? Describe the multi-step task.", nil
 	}
 
+	// Record the goal durably BEFORE starting (upgrade 4): if VORTEX crashes
+	// mid-run, startup finds this workflow incomplete and resumes it.
+	var wf *WorkflowState
+	if store := c.workflowStore(); store != nil {
+		if created, werr := store.Create(goal, sessionID, nil); werr != nil {
+			slog.Warn("workflow record creation failed", "error", werr)
+		} else {
+			wf = created
+		}
+	}
+
 	// Surface a proven skill (if any) to the orchestrator, collect progress
 	// steps, and feed the completed run back to the skill writer so the next
-	// similar goal starts from a known-good procedure.
+	// similar goal starts from a known-good procedure. Each progress line is
+	// also persisted as a completed workflow step (durable progress).
 	var stepsMu sync.Mutex
 	var steps []string
 	progress := func(s string) {
 		stepsMu.Lock()
 		steps = append(steps, s)
 		stepsMu.Unlock()
+		if wf != nil {
+			if store := c.workflowStore(); store != nil {
+				_ = store.AppendCompletedStep(wf.ID, s)
+			}
+		}
 	}
 	skill := c.findSkill(goal)
 	runGoal := goal
@@ -1218,6 +1254,15 @@ func (c *Coordinator) handleOrchestrate(ctx context.Context, userMsg string) (st
 	stepsMu.Lock()
 	taken := append([]string(nil), steps...)
 	stepsMu.Unlock()
+	if wf != nil {
+		if store := c.workflowStore(); store != nil {
+			if err != nil {
+				_ = store.Fail(wf.ID, err.Error())
+			} else {
+				_ = store.Complete(wf.ID, reply)
+			}
+		}
+	}
 	c.maybeLearn(ctx, goal, taken, reply, err == nil)
 	return reply, err
 }

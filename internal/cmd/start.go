@@ -408,11 +408,23 @@ func runStart(ctx context.Context, pidfile string) error {
 	pipelineFn := buildPipeline(gateway, msg, resolveWorkingDir(), apiSrv, log)
 	// --- multi-agent orchestration (M18) ------------------------------------
 	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn)
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
+	// Durable workflow store (upgrade 4 — crash recovery): opened here so the
+	// startup resume below can notify via the messaging router.
+	var workflowStore *agents.WorkflowStore
+	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
+		wfDB := filepath.Join(cacheDir, "vortex", "memory", "workflows.db")
+		if ws, werr := agents.NewWorkflowStore(wfDB); werr != nil {
+			log.Warn("workflow store unavailable, crash recovery disabled", "err", werr)
+		} else {
+			workflowStore = ws
+		}
+	}
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn, workflowStore)
 	if agentRuntime != nil {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
 		apiSrv.SetAgentRuntime(adapter)
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
+		resumeInterruptedWorkflows(ctx, workflowStore, agentRuntime, msg.router, log)
 
 		// Aggregate agent-plane health into /ready (production audit I3): report
 		// not-ready when the submit queue is deeply backed up, so an orchestration
@@ -977,11 +989,54 @@ func atoiDefault(s string, def int) int {
 	return n
 }
 
+// resumeInterruptedWorkflows finds workflows left incomplete by a crash and
+// resubmits their goals to the agent runtime in the background (upgrade 4),
+// notifying via the messaging router when one is configured. Each interrupted
+// workflow is marked terminal first so the resubmission (which records a fresh
+// workflow) cannot be re-resumed forever on subsequent restarts.
+func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore, rt *agents.Runtime, router *messaging.Router, log *slog.Logger) {
+	if store == nil || rt == nil {
+		return
+	}
+	incomplete, err := store.ListIncomplete()
+	if err != nil {
+		log.Warn("workflow recovery check failed", "err", err)
+		return
+	}
+	log.Info("workflow recovery checked", "interrupted", len(incomplete))
+	if len(incomplete) == 0 {
+		return
+	}
+	log.Info("resuming interrupted workflows", "count", len(incomplete))
+	for _, wf := range incomplete {
+		wf := wf
+		_ = store.Fail(wf.ID, "interrupted by shutdown; resubmitted on startup")
+		if router != nil {
+			_ = router.Send(ctx, messaging.SeverityInfo, "VORTEX",
+				fmt.Sprintf("🔄 Resuming interrupted task:\n%s (step %d of %d)",
+					wf.Goal, wf.CurrentStep+1, len(wf.Steps)+1))
+		}
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("workflow resume panic recovered", "panic", r)
+				}
+			}()
+			ch, serr := rt.Submit(ctx, "/orchestrate "+wf.Goal, wf.SessionID)
+			if serr != nil {
+				log.Warn("workflow resume submit failed", "goal", wf.Goal, "err", serr)
+				return
+			}
+			<-ch // drain the (buffered) response so the runtime can finish it
+		}()
+	}
+}
+
 // buildAgentRuntime constructs and starts the agent runtime: a message bus, a
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc, workflows *agents.WorkflowStore) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -1066,6 +1121,12 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	} else {
 		coord.SetEpisodicStore(episodes)
 		log.Info("episodic memory loaded", "db", episodesDB)
+	}
+
+	// Durable workflows (upgrade 4): orchestration progress persists step by
+	// step so interrupted goals are resumed on the next startup.
+	if workflows != nil {
+		coord.SetWorkflowStore(workflows)
 	}
 	rt, err := agents.NewRuntime(agents.RuntimeConfig{
 		Bus: bus, Coordinator: coord, MaxAgents: 8,
