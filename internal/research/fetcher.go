@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/safedial"
 )
 
 // maxFetchWords caps extracted content to keep summaries bounded.
@@ -37,9 +39,21 @@ type Fetcher struct {
 	allowLoopback bool
 }
 
-// NewFetcher constructs a fetcher with a 15s timeout.
+// NewFetcher constructs a fetcher with a 15s timeout. The HTTP client uses a
+// rebinding-safe dialer (resolve-once, validate, dial-the-pinned-IP) and
+// re-validates every redirect hop, closing the DNS-rebinding TOCTOU in the
+// old check-then-fetch flow (production audit H2).
 func NewFetcher() *Fetcher {
-	return &Fetcher{client: &http.Client{Timeout: 15 * time.Second}}
+	return newFetcher(false)
+}
+
+// newFetcher builds a fetcher whose client permits loopback iff allowLoopback
+// (tests reaching httptest servers). Production always passes false.
+func newFetcher(allowLoopback bool) *Fetcher {
+	return &Fetcher{
+		client:        safedial.Client(safedial.Config{Timeout: 15 * time.Second, AllowLoopback: allowLoopback}),
+		allowLoopback: allowLoopback,
+	}
 }
 
 // Fetch downloads url and returns its cleaned text content.

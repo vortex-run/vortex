@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/safedial"
 )
 
 // Tool is a single, declared, enumerable action an agent may perform. Every
@@ -139,8 +141,9 @@ func blockedIP(ip net.IP) bool {
 
 // isSSRFTarget resolves rawURL's host and returns ErrSSRFBlocked if the scheme
 // is not http/https, the host is in no allow-list, or any resolved IP is a
-// blocked (internal) address. Resolution happens here AND again in the dialer
-// (checkedDialer) to defeat DNS rebinding.
+// blocked (internal) address. This is the pre-flight check; the safedial
+// client used by Execute re-resolves, validates, and dials the pinned IP, so
+// a DNS rebind between this check and the connection cannot slip through.
 func (t HTTPGetTool) isSSRFTarget(rawURL string) error {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {
@@ -191,22 +194,6 @@ func (t HTTPGetTool) hostAllowed(host string) bool {
 	return false
 }
 
-// checkedDialer wraps a net.Dialer, re-validating the resolved IP at dial time
-// so a DNS rebind (safe at check, internal at dial) cannot bypass the guard.
-func checkedDialer() func(ctx context.Context, network, addr string) (net.Conn, error) {
-	d := &net.Dialer{Timeout: 10 * time.Second}
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			host = addr
-		}
-		if ip := net.ParseIP(host); ip != nil && blockedIP(ip) {
-			return nil, fmt.Errorf("%w: dial %s", ErrSSRFBlocked, host)
-		}
-		return d.DialContext(ctx, network, addr)
-	}
-}
-
 // Execute fetches the URL after SSRF validation. Only http/https schemes are
 // permitted and internal/metadata addresses are blocked.
 func (t HTTPGetTool) Execute(ctx context.Context, params map[string]any) (any, error) {
@@ -219,16 +206,15 @@ func (t HTTPGetTool) Execute(ctx context.Context, params map[string]any) (any, e
 	}
 	client := t.Client
 	if client == nil {
-		dial := checkedDialer()
-		// With an explicit host allow-list the operator has opted in (and the
-		// host was validated above), so the dialer-level internal-IP block is
-		// not applied — otherwise an allowed internal host could never connect.
+		// safedial resolves once, validates, and dials the pinned IP, and
+		// re-validates each redirect hop — robust against DNS rebinding
+		// (production audit H2). With an explicit host allow-list the operator
+		// has opted in (and the host was validated above), so loopback/internal
+		// targets are permitted; otherwise they are blocked at dial time too.
 		if len(t.AllowedHosts) > 0 {
-			dial = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
-		}
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: &http.Transport{DialContext: dial},
+			client = safedial.Client(safedial.Config{AllowLoopback: true})
+		} else {
+			client = safedial.Client(safedial.Config{})
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)

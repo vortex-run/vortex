@@ -28,9 +28,7 @@ const samplePage = `<html>
 
 // loopbackFetcher returns a fetcher that may reach httptest (loopback) servers.
 func loopbackFetcher() *Fetcher {
-	f := NewFetcher()
-	f.allowLoopback = true
-	return f
+	return newFetcher(true)
 }
 
 func TestFetch_ExtractsCleanText(t *testing.T) {
