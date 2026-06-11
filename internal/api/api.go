@@ -309,11 +309,11 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// (if one has been wired via SetAuth) so a missing/invalid credential is
 	// rejected before the handler runs.
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
-	// /internal/shutdown is the most destructive endpoint: it never honours
-	// loopback trust, so a co-located/sidecar process cannot shut the server
-	// down without a credential (production audit M1). When no auth is wired
-	// (tests) it still runs — there is no key to require.
-	mux.Handle("POST /internal/shutdown", s.protectedStrict(http.HandlerFunc(s.handleInternalShutdown)))
+	// /internal/shutdown is the SIGTERM equivalent used by `vortex stop` from
+	// the same host, so it honours loopback trust like reload. Operators behind
+	// a same-host reverse proxy set VORTEX_TRUST_LOOPBACK=false to require a
+	// credential here too (production audit M1) — see protected().
+	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
 	// /metrics is protected like the control plane: reachable from localhost
 	// (scrapers commonly run on-box) or with a valid key.
 	mux.Handle("GET /metrics", s.protected(http.HandlerFunc(s.handleMetrics)))
@@ -440,19 +440,6 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 func (s *Server) protected(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
-			h.ServeHTTP(w, r)
-			return
-		}
-		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
-	})
-}
-
-// protectedStrict is like protected but never grants the loopback bypass: a
-// valid credential is always required when auth is wired. Used for the
-// destructive /internal/shutdown endpoint.
-func (s *Server) protectedStrict(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authMW == nil {
 			h.ServeHTTP(w, r)
 			return
 		}

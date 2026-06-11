@@ -454,15 +454,21 @@ func severityName(s int) string {
 func pathToURI(p string) string {
 	p = filepath.ToSlash(p)
 	if !strings.HasPrefix(p, "/") {
-		p = "/" + p // Windows drive paths: file:///C:/...
+		// Windows drive path (C:/...) → file:///C:/...
+		p = "/" + p
 	}
 	return "file://" + p
 }
 
-// uriToPath converts a file:// URI back to a filesystem path.
+// uriToPath converts a file:// URI back to a filesystem path. The leading
+// slash is only stripped for Windows drive-letter paths (file:///C:/...);
+// Unix absolute paths (file:///home/...) keep their leading slash.
 func uriToPath(uri string) string {
 	p := strings.TrimPrefix(uri, "file://")
-	p = strings.TrimPrefix(p, "/")
+	// "/C:/..." → "C:/..."; "/home/..." stays "/home/...".
+	if len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+		p = p[1:]
+	}
 	return filepath.FromSlash(p)
 }
 

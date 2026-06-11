@@ -4,7 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -97,11 +97,24 @@ func TestURIRoundTrip(t *testing.T) {
 	abs, _ := filepath.Abs("foo/bar.go")
 	uri := pathToURI(abs)
 	back := uriToPath(uri)
-	// On Windows the round-trip normalises separators; compare base names.
-	if filepath.Base(back) != "bar.go" {
-		t.Errorf("uri round trip lost the file: %q -> %q -> %q", abs, uri, back)
+	// The round trip must preserve the absolute path on every platform: Unix
+	// absolute paths keep their leading slash; Windows drive paths round-trip
+	// to the original drive-letter form.
+	if back != abs {
+		t.Errorf("uri round trip = %q, want %q (via %q)", back, abs, uri)
 	}
-	if runtime.GOOS != "windows" && back != abs {
-		t.Errorf("uri round trip = %q, want %q", back, abs)
+	if !strings.HasPrefix(uri, "file://") {
+		t.Errorf("uri %q should start with file://", uri)
+	}
+}
+
+func TestURIToPath_PlatformForms(t *testing.T) {
+	// Unix absolute path must keep its leading slash.
+	if got := uriToPath("file:///home/user/main.go"); filepath.ToSlash(got) != "/home/user/main.go" {
+		t.Errorf("unix uriToPath = %q, want /home/user/main.go", got)
+	}
+	// Windows drive path must drop the URI's leading slash.
+	if got := uriToPath("file:///C:/proj/main.go"); filepath.ToSlash(got) != "C:/proj/main.go" {
+		t.Errorf("windows uriToPath = %q, want C:/proj/main.go", got)
 	}
 }
