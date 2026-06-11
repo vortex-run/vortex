@@ -38,6 +38,11 @@ vortex.pid
 *.pid
 *.pid.lock
 
+# Agent runtime output (pipeline analyses, research reports) written at the
+# repo root when VORTEX runs here during development — scratch, not source.
+/pipeline/
+/research/
+
 # env file
 .env
 

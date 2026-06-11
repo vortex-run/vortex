@@ -295,3 +295,74 @@ func TestAppend_AutoArchivesOverThreshold(t *testing.T) {
 		t.Errorf("log should verify after auto-archive + append: %v", err)
 	}
 }
+
+func TestRekey_RecomputesChainUnderNewKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	old, err := NewLog(path, []byte("old-cluster-audit-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvents(t, old)
+	if !old.Verifies() {
+		t.Fatal("log should verify under its original key")
+	}
+
+	if err := old.Rekey([]byte("new-master-audit-key")); err != nil {
+		t.Fatal(err)
+	}
+
+	// New key verifies; old key does not.
+	fresh, _ := NewLog(path, []byte("new-master-audit-key"))
+	if !fresh.Verifies() {
+		t.Error("log should verify under the new key after rekey")
+	}
+	stale, _ := NewLog(path, []byte("old-cluster-audit-key"))
+	if stale.Verifies() {
+		t.Error("log should NOT verify under the old key after rekey")
+	}
+
+	// Entries (seq/actor/action) are preserved; only hashes changed.
+	entries, err := fresh.Query(QueryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 6 {
+		t.Errorf("rekey changed entry count: %d, want 6", len(entries))
+	}
+
+	// Appending after rekey continues the new chain.
+	if err := fresh.Append(context.Background(), "cli", "config.reload", "x", nil); err != nil {
+		t.Fatal(err)
+	}
+	if !fresh.Verifies() {
+		t.Error("appends after rekey should verify")
+	}
+}
+
+func TestRekey_RefusesTamperedLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	l, err := NewLog(path, []byte("k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvents(t, l)
+
+	// Tamper on disk.
+	b, _ := os.ReadFile(path)
+	tampered := bytes.Replace(b, []byte(`"actor":"admin"`), []byte(`"actor":"evil"`), 1)
+	if err := os.WriteFile(path, tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := l.Rekey([]byte("new")); err == nil {
+		t.Error("Rekey should refuse a tampered log")
+	}
+}
+
+func TestRekey_EmptyLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	l, _ := NewLog(path, []byte("k"))
+	if err := l.Rekey([]byte("new")); err != nil {
+		t.Errorf("rekey of empty log should succeed: %v", err)
+	}
+}

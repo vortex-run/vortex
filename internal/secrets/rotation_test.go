@@ -238,3 +238,57 @@ func TestDelete_RemovesMetadata(t *testing.T) {
 		t.Errorf("metadata should be deleted with the secret, got %v", err)
 	}
 }
+
+func TestRekey_ReEncryptsUnderNewKey(t *testing.T) {
+	dir := t.TempDir()
+	old, err := NewSecretStore(dir, []byte("old-cluster-secrets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Set("db_password", "s3cr3t"); err != nil {
+		t.Fatal(err)
+	}
+	if err := old.SetWithMetadata("jwt", "tok", SecretMetadata{ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := old.Rekey([]byte("new-master-derived-key")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh store on the NEW key can read; on the OLD key it cannot.
+	fresh, _ := NewSecretStore(dir, []byte("new-master-derived-key"))
+	if v, err := fresh.Get("db_password"); err != nil || v != "s3cr3t" {
+		t.Errorf("after rekey, new key Get = %q, %v", v, err)
+	}
+	if !fresh.CanDecrypt() {
+		t.Error("new-key store should decrypt after rekey")
+	}
+	stale, _ := NewSecretStore(dir, []byte("old-cluster-secrets"))
+	if stale.CanDecrypt() {
+		t.Error("old-key store should no longer decrypt after rekey")
+	}
+	// Metadata survives the rekey untouched.
+	if _, err := fresh.GetMetadata("jwt"); err != nil {
+		t.Errorf("metadata should survive rekey: %v", err)
+	}
+}
+
+func TestCanDecrypt_EmptyStoreIsTrue(t *testing.T) {
+	s, _ := NewSecretStore(t.TempDir(), []byte("k"))
+	if !s.CanDecrypt() {
+		t.Error("empty store should report CanDecrypt true")
+	}
+}
+
+func TestCanDecrypt_WrongKeyIsFalse(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := NewSecretStore(dir, []byte("right-key"))
+	if err := s.Set("a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	wrong, _ := NewSecretStore(dir, []byte("wrong-key"))
+	if wrong.CanDecrypt() {
+		t.Error("store on wrong key should report CanDecrypt false")
+	}
+}

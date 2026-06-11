@@ -103,6 +103,34 @@ changelog:
     - title: "Other"
       order: 999
 
+# Linux distro packages (deb/rpm/apk) built from the same binaries (M20).
+nfpms:
+  - id: vortex
+    package_name: vortex
+    vendor: VORTEX Contributors
+    homepage: "https://vortex.run"
+    maintainer: VORTEX Contributors <maintainers@vortex.run>
+    description: VORTEX — autonomous infrastructure platform (proxy, security, AI agent)
+    license: Apache-2.0
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    contents:
+      - src: vortex.cue
+        dst: /etc/vortex/vortex.cue
+        type: config|noreplace
+      - src: LICENSE
+        dst: /usr/share/doc/vortex/LICENSE
+
+# Homebrew cask (M20). Published to vortex-run/homebrew-tap on release.
+# (GoReleaser replaced the deprecated `brews:` formula block with casks.)
+homebrew_casks:
+  - name: vortex
+    repository:
+      owner: vortex-run
+      name: homebrew-tap
+    description: "One binary. Any server. Fully autonomous."
+    homepage: "https://vortex.run"
+
 release:
   github:
     owner: vortex-run
