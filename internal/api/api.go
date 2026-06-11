@@ -593,6 +593,16 @@ func (s *Server) Start() {
 	}()
 }
 
+// StartCleanup runs the background sweeps that bound the rate-limiter maps
+// (per-IP agent limiter, per-key limiter, burst-protection windows/bans) so
+// none grows without bound under a churn of distinct IPs/keys (production
+// audit H5). It returns when ctx is cancelled.
+func (s *Server) StartCleanup(ctx context.Context) {
+	go s.agentLimiter.StartCleanup(ctx)
+	go s.keyLimiter.StartCleanup(ctx)
+	go s.burst.StartCleanup(ctx)
+}
+
 // Shutdown gracefully stops the server, respecting ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.srv.Shutdown(ctx)

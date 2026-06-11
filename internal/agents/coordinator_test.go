@@ -1021,3 +1021,43 @@ func TestHandleOrchestrate_EmptyGoalAsks(t *testing.T) {
 		t.Errorf("empty goal should ask for one, got %q", out)
 	}
 }
+
+func TestEvictOldestSessions_EnforcesCap(t *testing.T) {
+	m := map[string]*SessionState{}
+	base := time.Now()
+	for i := 0; i < 100; i++ {
+		m[fmtID(i)] = &SessionState{LastActivity: base.Add(time.Duration(i) * time.Second)}
+	}
+	evictOldestSessions(m, 10)
+	if len(m) != 10 {
+		t.Fatalf("after eviction len = %d, want 10", len(m))
+	}
+	// The 10 newest (ids 90..99) should remain.
+	for i := 90; i < 100; i++ {
+		if _, ok := m[fmtID(i)]; !ok {
+			t.Errorf("newest session %d should survive eviction", i)
+		}
+	}
+}
+
+func TestEvictOldestMemories_EnforcesCap(t *testing.T) {
+	m := map[string]*Memory{}
+	base := time.Now()
+	for i := 0; i < 50; i++ {
+		m[fmtID(i)] = &Memory{UpdatedAt: base.Add(time.Duration(i) * time.Second)}
+	}
+	evictOldestMemories(m, 5)
+	if len(m) != 5 {
+		t.Fatalf("after eviction len = %d, want 5", len(m))
+	}
+}
+
+func TestEvictOldest_NoOpUnderCap(t *testing.T) {
+	m := map[string]*SessionState{"a": {LastActivity: time.Now()}}
+	evictOldestSessions(m, 10)
+	if len(m) != 1 {
+		t.Errorf("under-cap map should be unchanged, len = %d", len(m))
+	}
+}
+
+func fmtID(i int) string { return fmt.Sprintf("s%d", i) }

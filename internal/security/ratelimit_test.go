@@ -446,3 +446,53 @@ func TestBurstProtection_Middleware429(t *testing.T) {
 		t.Error("429 should carry Retry-After")
 	}
 }
+
+func TestAPIKeyLimiter_SweepRemovesIdleBuckets(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	l := NewAPIKeyRateLimiter(APIKeyRateLimiterConfig{DefaultRPM: 10, Enabled: true})
+	l.SetClock(now)
+
+	l.Allow("k1", false)
+	l.Allow("k2", false)
+	if got := len(l.buckets); got != 2 {
+		t.Fatalf("buckets = %d, want 2", got)
+	}
+	advance(20 * time.Minute)
+	l.Sweep(bucketIdleTTL)
+	if got := len(l.buckets); got != 0 {
+		t.Errorf("after sweep buckets = %d, want 0", got)
+	}
+}
+
+func TestBurstProtection_SweepRemovesIdleWindows(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 5, Window: time.Second, BanFor: time.Minute})
+	b.SetClock(now)
+
+	b.Allow("1.2.3.4")
+	if len(b.windows) != 1 {
+		t.Fatalf("windows = %d, want 1", len(b.windows))
+	}
+	advance(time.Minute)
+	b.Sweep()
+	if len(b.windows) != 0 {
+		t.Errorf("after sweep windows = %d, want 0", len(b.windows))
+	}
+}
+
+func TestBurstProtection_SweepRemovesExpiredBans(t *testing.T) {
+	now, advance := fixedClock(time.Now())
+	b := NewBurstProtection(BurstProtectionConfig{Threshold: 1, Window: time.Second, BanFor: time.Minute})
+	b.SetClock(now)
+
+	b.Allow("9.9.9.9")
+	b.Allow("9.9.9.9") // triggers ban
+	if len(b.bans) != 1 {
+		t.Fatalf("bans = %d, want 1", len(b.bans))
+	}
+	advance(2 * time.Minute)
+	b.Sweep()
+	if len(b.bans) != 0 {
+		t.Errorf("after sweep bans = %d, want 0", len(b.bans))
+	}
+}

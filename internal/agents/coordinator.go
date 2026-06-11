@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -151,6 +152,15 @@ type SessionState struct {
 
 // sessionTTL clears idle session state after this long.
 const sessionTTL = 10 * time.Minute
+
+// Hard caps on the in-memory session/memory maps, a backstop against
+// unbounded growth from a burst of distinct session IDs within one TTL window
+// (production audit H5). Memories reload from disk on demand, so eviction is
+// lossless; session state is transient clarification context.
+const (
+	maxCachedSessions = 10000
+	maxCachedMemories = 10000
+)
 
 // Coordinator is the single user-facing agent. It classifies user messages,
 // routes them to the appropriate mode handler, and supervises spawned
@@ -734,16 +744,71 @@ func (c *Coordinator) ClearSession(sessionID string) {
 	c.mu.Unlock()
 }
 
-// pruneIdleSessions clears session state idle longer than sessionTTL.
+// pruneIdleSessions evicts session state and in-memory conversation memories
+// that are idle longer than sessionTTL, then enforces a hard cap on both maps
+// so neither grows without bound under a stream of distinct session IDs
+// (production audit H5). Memories are loaded from disk on demand, so evicting
+// the cached copy is lossless. The hard cap evicts the oldest entries first.
 func (c *Coordinator) pruneIdleSessions() {
 	cutoff := time.Now().Add(-sessionTTL)
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	for id, st := range c.sessions {
 		if st.LastActivity.Before(cutoff) {
 			delete(c.sessions, id)
 		}
 	}
-	c.mu.Unlock()
+	for id, m := range c.memories {
+		if m.UpdatedAt.Before(cutoff) {
+			delete(c.memories, id)
+		}
+	}
+
+	// Hard caps as a backstop against a burst of fresh IDs within one TTL
+	// window (which idle-eviction alone would not catch).
+	evictOldestSessions(c.sessions, maxCachedSessions)
+	evictOldestMemories(c.memories, maxCachedMemories)
+}
+
+// evictOldestSessions trims the sessions map to at most limit entries,
+// removing those with the oldest LastActivity first.
+func evictOldestSessions(m map[string]*SessionState, limit int) {
+	if len(m) <= limit {
+		return
+	}
+	type kv struct {
+		id string
+		ts time.Time
+	}
+	entries := make([]kv, 0, len(m))
+	for id, st := range m {
+		entries = append(entries, kv{id, st.LastActivity})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ts.Before(entries[j].ts) })
+	for _, e := range entries[:len(m)-limit] {
+		delete(m, e.id)
+	}
+}
+
+// evictOldestMemories trims the memories map to at most limit entries,
+// removing those with the oldest UpdatedAt first.
+func evictOldestMemories(m map[string]*Memory, limit int) {
+	if len(m) <= limit {
+		return
+	}
+	type kv struct {
+		id string
+		ts time.Time
+	}
+	entries := make([]kv, 0, len(m))
+	for id, mem := range m {
+		entries = append(entries, kv{id, mem.UpdatedAt})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ts.Before(entries[j].ts) })
+	for _, e := range entries[:len(m)-limit] {
+		delete(m, e.id)
+	}
 }
 
 // classify asks the AI gateway to classify the message, normalising the reply

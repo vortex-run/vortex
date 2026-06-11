@@ -335,6 +335,33 @@ func (l *APIKeyRateLimiter) Allow(key string, admin bool) bool {
 	return false
 }
 
+// Sweep removes per-key buckets that have been idle beyond idleTTL, bounding
+// memory under a churn of distinct keys (production audit H5).
+func (l *APIKeyRateLimiter) Sweep(idleTTL time.Duration) {
+	cutoff := l.now().Add(-idleTTL)
+	l.mu.Lock()
+	for key, b := range l.buckets {
+		if b.lastSeen.Before(cutoff) {
+			delete(l.buckets, key)
+		}
+	}
+	l.mu.Unlock()
+}
+
+// StartCleanup periodically sweeps idle per-key buckets until ctx is cancelled.
+func (l *APIKeyRateLimiter) StartCleanup(ctx context.Context) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.Sweep(bucketIdleTTL)
+		}
+	}
+}
+
 // GlobalRateLimiter is a single token bucket shared by every request the
 // server handles, protecting against distributed floods that stay under any
 // per-IP or per-key budget. Safe for concurrent use.
@@ -519,6 +546,48 @@ func (b *BurstProtection) Allow(ip string) bool {
 				" — banned for "+b.cfg.BanFor.String())
 	}
 	return false
+}
+
+// Sweep removes per-IP burst windows and expired bans, bounding memory under
+// a churn of distinct source IPs (production audit H5). Active bans are kept.
+func (b *BurstProtection) Sweep() {
+	now := b.now()
+	windowCutoff := now.Add(-b.cfg.Window)
+	b.mu.Lock()
+	for ip, w := range b.windows {
+		// A window with no recent timestamps is dead weight.
+		live := false
+		for _, ts := range w.times {
+			if ts.After(windowCutoff) {
+				live = true
+				break
+			}
+		}
+		if !live {
+			delete(b.windows, ip)
+		}
+	}
+	for ip, until := range b.bans {
+		if now.After(until) {
+			delete(b.bans, ip)
+		}
+	}
+	b.mu.Unlock()
+}
+
+// StartCleanup periodically sweeps idle burst windows and expired bans until
+// ctx is cancelled.
+func (b *BurstProtection) StartCleanup(ctx context.Context) {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.Sweep()
+		}
+	}
 }
 
 // Middleware rejects requests from banned IPs with 429 and a Retry-After of

@@ -174,6 +174,8 @@ func runStart(ctx context.Context, pidfile string) error {
 	apiSrv.SetReloadFunc(func() error { mgr.Reload(); return nil })
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
 	apiSrv.Start()
+	// Background sweeps that bound the rate-limiter maps (production audit H5).
+	apiSrv.StartCleanup(ctx)
 	mgr.OnShutdown("api", func(ctx context.Context) error {
 		return apiSrv.Shutdown(ctx)
 	})
