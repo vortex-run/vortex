@@ -460,24 +460,33 @@ func newCorrelationID() string {
 // Addr returns the configured listen address.
 func (s *Server) Addr() string { return s.srv.Addr }
 
-// healthResponse is the JSON body returned by /health.
+// healthResponse is the JSON body returned by /health. ClusterName is omitted
+// for anonymous callers — a deployment identifier should not leak on an
+// unauthenticated endpoint (production audit C1) — and included only for
+// authenticated/loopback requests.
 type healthResponse struct {
 	Status      string        `json:"status"`
 	Version     string        `json:"version"`
 	ConfigHash  string        `json:"config_hash"`
-	ClusterName string        `json:"cluster_name"`
+	ClusterName string        `json:"cluster_name,omitempty"`
 	Uptime      string        `json:"uptime"`
 	Routes      []RouteHealth `json:"routes,omitempty"`
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	cfg := s.holder.Get()
 	resp := healthResponse{
-		Status:      "ok",
-		Version:     s.version,
-		ConfigHash:  cfg.Hash(),
-		ClusterName: cfg.Cluster.Name,
-		Uptime:      time.Since(s.startTime).Round(time.Second).String(),
+		Status:     "ok",
+		Version:    s.version,
+		ConfigHash: cfg.Hash(),
+		Uptime:     time.Since(s.startTime).Round(time.Second).String(),
+	}
+	// Only reveal the cluster name to trusted callers. Loopback peers are
+	// trusted like the rest of the control plane; remote authenticated callers
+	// read it from /api/status instead. When no auth is wired (tests/legacy)
+	// the field is populated as before so existing behaviour is preserved.
+	if s.authMW == nil || localhostOnly(r) {
+		resp.ClusterName = cfg.Cluster.Name
 	}
 	if s.routeStats != nil {
 		resp.Routes = s.routeStats()

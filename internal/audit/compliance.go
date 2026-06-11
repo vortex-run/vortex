@@ -302,6 +302,61 @@ func (l *Log) archivePath(now time.Time) string {
 		now.Year(), int(now.Month()), now.Format("02T150405")))
 }
 
+// Rekey rewrites the entire live log, recomputing the HMAC chain under
+// newKey, used by the master-key migration (production audit C1) to move a
+// legacy cluster-name-keyed log onto the master-derived key. The sequence
+// numbers, timestamps, and payloads are preserved; only the chain hashes are
+// recomputed. The pre-migration log verifies under the OLD key (this Log's
+// current key); after Rekey it verifies under newKey. It returns an error if
+// the existing chain does not verify under the current key (refusing to
+// "launder" a tampered log onto a fresh key).
+func (l *Log) Rekey(newKey []byte) error {
+	if len(newKey) == 0 {
+		return fmt.Errorf("audit: new key must not be empty")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	entries, err := l.readAll()
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		l.key = newKey
+		return nil
+	}
+	if err := l.verifyLocked(entries); err != nil {
+		return fmt.Errorf("audit: refusing to rekey a log that fails verification: %w", err)
+	}
+
+	next := &Log{path: l.path, key: newKey}
+	var buf strings.Builder
+	prevHash := ""
+	for _, e := range entries {
+		e.Hash = next.computeHash(prevHash, e.Seq, e.Timestamp, e.Actor, e.Action, e.Resource)
+		line, merr := json.Marshal(e)
+		if merr != nil {
+			return fmt.Errorf("audit: rekey encoding entry %d: %w", e.Seq, merr)
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+		prevHash = e.Hash
+	}
+	if err := os.WriteFile(l.path, []byte(buf.String()), 0o600); err != nil {
+		return fmt.Errorf("audit: rekey writing log: %w", err)
+	}
+	l.key = newKey
+	l.lastHash = prevHash
+	l.lastSeq = entries[len(entries)-1].Seq
+	return nil
+}
+
+// Verifies reports whether the live log verifies under this Log's current
+// key — a probe used by migration to detect which key a log is on.
+func (l *Log) Verifies() bool {
+	return l.Verify() == nil
+}
+
 // pruneArchivesLocked removes audit-*.log.gz files beside the live log whose
 // modification time is older than retention. Best-effort: errors are ignored
 // (a failed prune must never break logging).

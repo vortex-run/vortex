@@ -143,6 +143,13 @@ func (l *Log) Verify() error {
 	if err != nil {
 		return err
 	}
+	return l.verifyLocked(entries)
+}
+
+// verifyLocked recomputes the chain over already-read entries. It does not
+// itself take l.mu (readAll does its own file I/O); callers that already hold
+// l.mu (Rekey) pass the entries they read under the lock.
+func (l *Log) verifyLocked(entries []Entry) error {
 	prevHash := ""
 	var expectSeq uint64 = 1
 	for _, e := range entries {

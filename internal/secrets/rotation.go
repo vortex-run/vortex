@@ -191,3 +191,51 @@ func rotationDeadline(meta *SecretMetadata) time.Time {
 func (s *SecretStore) metaFileFor(name string) string {
 	return s.fileFor(name) + metaExt
 }
+
+// Rekey re-encrypts every stored secret from this store's current key to
+// newKey, used by the master-key migration (production audit C1) to move
+// legacy cluster-name-keyed stores onto the master-derived key. On success
+// the store's in-memory key is updated to newKey. Metadata files are
+// plaintext JSON and are left untouched. It is best-effort atomic per file:
+// each secret is decrypted, re-encrypted, and rewritten; a mid-run failure
+// leaves already-converted files on the new key and the rest on the old, but
+// the returned error names the failure so the caller can retry.
+func (s *SecretStore) Rekey(newKey []byte) error {
+	if len(newKey) == 0 {
+		return errors.New("secrets: new key must not be empty")
+	}
+	names, err := s.List()
+	if err != nil {
+		return err
+	}
+	next := SecretStore{path: s.path}
+	next.key = sha256Key(newKey)
+
+	for _, name := range names {
+		plain, err := s.Get(name)
+		if err != nil {
+			return fmt.Errorf("secrets: rekey reading %q: %w", name, err)
+		}
+		enc, err := next.encrypt([]byte(plain))
+		if err != nil {
+			return fmt.Errorf("secrets: rekey encrypting %q: %w", name, err)
+		}
+		if err := os.WriteFile(s.fileFor(name), enc, 0o600); err != nil {
+			return fmt.Errorf("secrets: rekey writing %q: %w", name, err)
+		}
+	}
+	s.key = next.key
+	return nil
+}
+
+// CanDecrypt reports whether at least one stored secret decrypts with this
+// store's key — a cheap probe to detect whether a store is on this key
+// (used by migration to decide whether re-keying is needed).
+func (s *SecretStore) CanDecrypt() bool {
+	names, err := s.List()
+	if err != nil || len(names) == 0 {
+		return true // empty store: nothing to migrate, treat as decryptable
+	}
+	_, err = s.Get(names[0])
+	return err == nil
+}

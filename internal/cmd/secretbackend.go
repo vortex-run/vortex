@@ -38,7 +38,11 @@ func buildAdapterConfig(cfg *config.Config) (secrets.AdapterConfig, error) {
 
 	switch kind {
 	case "local":
-		store, err := secrets.NewSecretStore(secretStorePath(), []byte(cfg.Cluster.Name+"-secrets"))
+		secretKey, err := deriveKey("secrets")
+		if err != nil {
+			return ac, err
+		}
+		store, err := secrets.NewSecretStore(secretStorePath(), secretKey)
 		if err != nil {
 			return ac, fmt.Errorf("opening secret store: %w", err)
 		}

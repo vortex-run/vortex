@@ -120,9 +120,15 @@ func runStart(ctx context.Context, pidfile string) error {
 	mgr := lifecycle.New(lifecycle.Config{Logger: log})
 	cfgMgr.RegisterReload(mgr)
 
-	// Audit log: tamper-proof record of security-relevant events. Keyed by the
-	// cluster name so the `vortex audit` CLI can verify the same chain.
-	auditLog, err := openRuntimeAuditLog(cfg, log)
+	// One-time migration (production audit C1): re-key any legacy
+	// cluster-name-keyed secret store / audit log onto the master key. Runs
+	// before those subsystems open so they see the migrated data.
+	migrateLegacyKeys(cfg, log)
+
+	// Audit log: tamper-proof record of security-relevant events. Keyed by a
+	// master-key-derived subkey so the `vortex audit` CLI verifies the same
+	// chain (both derive "audit" from the shared master key).
+	auditLog, err := openRuntimeAuditLog(log)
 	if err != nil {
 		return fmt.Errorf("initialising audit log: %w", err)
 	}
@@ -526,7 +532,10 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 		cacheDir = os.TempDir()
 	}
 	storePath := filepath.Join(cacheDir, "vortex", "certs")
-	storeKey := []byte(cfg.Cluster.Name + "-tls-key")
+	storeKey, err := deriveKey("tls-store")
+	if err != nil {
+		return nil, err
+	}
 
 	log.Info("initialising TLS manager", "provider", cfg.TLS.Provider, "store", storePath)
 	return vtls.NewManager(vtls.ManagerConfig{
@@ -568,7 +577,11 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 		}
 		storePath = filepath.Join(cacheDir, "vortex", "mtls")
 	}
-	store, err := vtls.NewStore(storePath, []byte(cfg.Cluster.Name+"-mtls-key"))
+	mtlsKey, err := deriveKey("mtls-store")
+	if err != nil {
+		return nil, err
+	}
+	store, err := vtls.NewStore(storePath, mtlsKey)
 	if err != nil {
 		return nil, fmt.Errorf("creating mTLS store: %w", err)
 	}
@@ -624,16 +637,20 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 }
 
 // openRuntimeAuditLog opens the audit log used by the running server. The path
-// (VORTEX_AUDIT_LOG or <cache>/vortex/audit.log) and HMAC key (cluster name)
-// match the `vortex audit` CLI so the same chain is verifiable. A failure to
-// open is fatal — an unwritable audit log is a security regression, not
-// something to silently skip.
-func openRuntimeAuditLog(cfg *config.Config, log *slog.Logger) (*audit.Log, error) {
+// (VORTEX_AUDIT_LOG or <cache>/vortex/audit.log) and the master-key-derived
+// HMAC key match the `vortex audit` CLI so the same chain is verifiable. A
+// failure to open is fatal — an unwritable audit log is a security
+// regression, not something to silently skip.
+func openRuntimeAuditLog(log *slog.Logger) (*audit.Log, error) {
 	path := auditLogPath()
 	if derr := os.MkdirAll(filepath.Dir(path), 0o700); derr != nil {
 		log.Warn("creating audit log dir failed", "path", filepath.Dir(path), "err", derr)
 	}
-	al, err := audit.NewLog(path, []byte(cfg.Cluster.Name+"-audit-key"))
+	auditKey, err := deriveKey("audit")
+	if err != nil {
+		return nil, err
+	}
+	al, err := audit.NewLog(path, auditKey)
 	if err != nil {
 		return nil, err
 	}

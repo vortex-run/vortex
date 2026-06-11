@@ -45,8 +45,13 @@ func NewSecretStore(path string, key []byte) (*SecretStore, error) {
 		return nil, fmt.Errorf("secrets: creating store directory: %w", err)
 	}
 	s := &SecretStore{path: path}
-	s.key = sha256.Sum256(key)
+	s.key = sha256Key(key)
 	return s, nil
+}
+
+// sha256Key derives the 32-byte store key from caller key material.
+func sha256Key(key []byte) [chacha20poly1305.KeySize]byte {
+	return sha256.Sum256(key)
 }
 
 // ValidateName reports whether name is a legal secret name (alphanumeric and

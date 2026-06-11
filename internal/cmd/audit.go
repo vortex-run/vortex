@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/config"
 )
 
 // errAudit signals an audit-command failure whose detail was already printed.
@@ -30,15 +29,15 @@ func auditLogPath() string {
 	return filepath.Join(cacheDir, "vortex", "audit.log")
 }
 
-// openAuditLog loads the config to derive the cluster-scoped HMAC key, then
-// opens the audit log. The key must match the one start.go uses so verification
-// succeeds across processes.
+// openAuditLog opens the audit log keyed by the master-key-derived audit
+// subkey. The key must match the one start.go uses so verification succeeds
+// across processes (both derive "audit" from the shared master key).
 func openAuditLog() (*audit.Log, error) {
-	cfg, err := config.Load(flags.configPath)
+	auditKey, err := deriveKey("audit")
 	if err != nil {
 		return nil, err
 	}
-	return audit.NewLog(auditLogPath(), []byte(cfg.Cluster.Name+"-audit-key"))
+	return audit.NewLog(auditLogPath(), auditKey)
 }
 
 // auditCLI records a CLI-initiated audit event (actor "cli"), never logging
