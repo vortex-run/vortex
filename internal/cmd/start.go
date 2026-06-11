@@ -1819,6 +1819,36 @@ func providerFromFile(log *slog.Logger) *messaging.AIProvider {
 	}
 }
 
+// backupProvidersFromFile builds the fallback providers recorded by the setup
+// wizard's backup-key step, in slot order, with priorities after the primary.
+func backupProvidersFromFile(log *slog.Logger) []messaging.AIProvider {
+	cfg, ok := loadProviderConfig()
+	if !ok {
+		return nil
+	}
+	var out []messaging.AIProvider
+	for i, b := range cfg.Backups {
+		key, err := decryptKey(b.APIKeyEnc)
+		if err != nil {
+			log.Warn("could not decrypt backup AI key, skipping slot", "slot", i+2, "err", err)
+			continue
+		}
+		if b.Provider != messaging.ProviderOllama && key == "" {
+			continue
+		}
+		models := []string(nil)
+		if b.Model != "" {
+			models = []string{b.Model}
+		}
+		out = append(out, messaging.AIProvider{
+			Name: b.Provider, APIKey: key, Endpoint: b.Endpoint,
+			Models: models, Priority: i + 1,
+		})
+		log.Info("backup AI provider loaded from setup config", "provider", b.Provider, "slot", i+2)
+	}
+	return out
+}
+
 // buildMessaging constructs the AI gateway, notification router, and platform
 // bots from environment variables. All credentials come from the environment,
 // never from the config file. Returns a struct whose fields are nil when the
@@ -1901,6 +1931,9 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 	if len(providers) == 0 {
 		if p := providerFromFile(log); p != nil {
 			providers = append(providers, *p)
+			// Backup key slots from setup (part 3): lower-priority fallbacks the
+			// gateway tries in order when the primary fails or is rate-limited.
+			providers = append(providers, backupProvidersFromFile(log)...)
 		}
 	}
 	if len(providers) > 0 {
