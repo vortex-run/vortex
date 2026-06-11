@@ -368,3 +368,82 @@ func TestAIGateway_CostFreeForOllama(t *testing.T) {
 		t.Error("ollama should report free")
 	}
 }
+
+func TestModelIDs(t *testing.T) {
+	gw, err := NewAIGateway(AIGatewayConfig{Providers: []AIProvider{
+		{Name: ProviderDeepSeek, Models: []string{"deepseek-chat"}, Priority: 1},
+		{Name: ProviderClaude, Models: []string{"claude-sonnet-4", "claude-haiku-4-5"}, Priority: 2},
+		{Name: ProviderOllama, Priority: 3}, // no models → listed under provider name
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := gw.ModelIDs()
+	want := []string{"deepseek-chat", "claude-sonnet-4", "claude-haiku-4-5", "ollama"}
+	if len(got) != len(want) {
+		t.Fatalf("ModelIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ModelIDs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestProviderForModelRouting(t *testing.T) {
+	gw, err := NewAIGateway(AIGatewayConfig{Providers: []AIProvider{
+		{Name: ProviderDeepSeek, Models: []string{"deepseek-chat"}, Priority: 1},
+		{Name: ProviderClaude, Models: []string{"claude-sonnet-4"}, Priority: 2},
+		{Name: ProviderOpenAI, Priority: 3},
+		{Name: ProviderOllama, Priority: 4},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		"deepseek-chat":   ProviderDeepSeek, // exact configured match
+		"claude-opus-4-8": ProviderClaude,   // family heuristic
+		"gpt-4o":          ProviderOpenAI,
+		"llama3.2":        ProviderOllama,
+		"mistral-small":   ProviderOllama,
+		"totally-unknown": ProviderDeepSeek, // default → primary provider
+	}
+	for model, want := range cases {
+		p, ok := gw.providerForModel(model)
+		if !ok || p.Name != want {
+			t.Errorf("providerForModel(%q) = %q (ok=%v), want %q", model, p.Name, ok, want)
+		}
+	}
+}
+
+func TestCompleteForModelSendsRequestedModel(t *testing.T) {
+	var gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"routed"}}],"usage":{"total_tokens":12}}`)
+	}))
+	defer srv.Close()
+
+	gw, err := NewAIGateway(AIGatewayConfig{Providers: []AIProvider{
+		{Name: ProviderDeepSeek, APIKey: "k", Endpoint: srv.URL, Models: []string{"deepseek-chat"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Request a model that is not the provider default: it must be sent upstream.
+	text, tokens, err := gw.CompleteForModel(context.Background(), "deepseek-reasoner", "hi", "sys")
+	if err != nil {
+		t.Fatalf("CompleteForModel: %v", err)
+	}
+	if text != "routed" || tokens != 12 {
+		t.Errorf("got (%q, %d), want (routed, 12)", text, tokens)
+	}
+	if gotModel != "deepseek-reasoner" {
+		t.Errorf("upstream model = %q, want deepseek-reasoner", gotModel)
+	}
+}
