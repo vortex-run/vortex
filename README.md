@@ -1,263 +1,240 @@
 # VORTEX
 
-**One binary. Any server. Fully autonomous.**
+> **One binary. Any server. Fully autonomous.**
 
-VORTEX is a self-hosted platform you run on any VPS or server. It handles your
-reverse proxy, TLS, secrets, clustering, metrics, and a built-in AI agent that
-can read, write, and run things on your machine — and build apps for you — all
-controlled from a terminal dashboard or from Telegram on your phone.
+VORTEX is a self-hosted autonomous infrastructure platform: a single static Go
+binary that owns your edge (reverse proxy, TLS, QUIC), your security (mTLS,
+RBAC, OPA policy, tamper-proof audit), your observability (Prometheus, OTel),
+and an AI agent runtime that can read, write, and run things on your machine,
+build apps, run research, and manage your servers — all controlled from a
+terminal dashboard, a browser, or Telegram on your phone.
+
+```
+$ curl -fsSL https://vortex.run/install | sh
+$ vortex setup        # pick an AI provider, optional Telegram
+$ vortex start        # edge + security + agent runtime, one process
+```
+
+> _Screenshot / demo gif placeholder — `docs/` has full walkthroughs._
 
 ---
 
-## Install
+## What is VORTEX?
 
-### Download a release
+VORTEX collapses the stack you normally assemble from a reverse proxy, a
+secrets manager, a cert manager, an observability stack, and a pile of glue
+scripts into **one binary with no external dependencies**. It runs your
+internet-facing edge and an AI agent that operates the box for you — both in
+the same process, both configured from one `vortex.cue` file.
 
-Grab the single binary for your platform from the
-[Releases](https://github.com/vortex-run/vortex/releases) page, then make it
-executable and put it on your `PATH`:
-
-```bash
-chmod +x vortex
-sudo mv vortex /usr/local/bin/
-```
-
-### Verify it works
-
-```bash
-vortex version
-vortex --help
-```
-
-VORTEX is a single static binary — there is nothing else to install.
+It is **self-hosted and single-tenant by design**: you run it on your own VPS,
+it stores its own state, and nothing phones home.
 
 ---
 
-## Quick start
+## Features
 
-### 1. Run first-time setup
+| | |
+|---|---|
+| 🤖 **AI Agent** | Claude, DeepSeek, OpenAI, Gemini, Groq, AWS Bedrock, Azure OpenAI, OpenRouter, Ollama |
+| 🌐 **Reverse Proxy** | HTTP/HTTPS/TCP/UDP/QUIC with load balancing and health checks |
+| 🔒 **Zero Trust** | mTLS identity mesh, RBAC, OPA policy engine, edge rate limiting |
+| 📱 **Telegram Control** | Drive the agent and get alerts from your phone |
+| 🏗️ **Autonomous Builds** | VORTEX Forge builds apps + Android APKs from a prompt |
+| 🔍 **Research Agent** | Web search + summarize into reports (SSRF-hardened) |
+| 🖥️ **DevOps Agent** | SSH, Docker, Nginx management over your fleet |
+| 📊 **Data Pipelines** | CSV/JSON analysis + chart generation |
+| 🏥 **Self-Healing** | Auto-detect failures and recover, with SLO tracking |
+| 🤝 **Multi-Agent** | Orchestrate complex tasks across specialised agents |
+| 📟 **Terminal UI** | Full dashboard in your terminal (optional vim keybindings) |
+| 🌐 **Web Dashboard** | Browser-based management at `/dashboard/` |
+| 🔐 **Encrypted Secrets** | XChaCha20-Poly1305 at rest, keyed by a random master key |
+| 📋 **Tamper-Proof Audit** | HMAC hash-chained, compliance-report exportable |
+| 📦 **Signed Releases** | Ed25519-signed checksums, verified before self-update |
+
+---
+
+## Quick Start (30 seconds)
 
 ```bash
+curl -fsSL https://vortex.run/install | sh
 vortex setup
-```
-
-This interactive wizard walks you through:
-
-- **Choosing an AI provider** — Anthropic Claude, DeepSeek, OpenAI, Google
-  Gemini, or local **Ollama** (free). It verifies your API key live.
-- **Optional Telegram** — connect a bot so you can control VORTEX from your
-  phone.
-- **Your API key** — VORTEX prints a key once. Save it; you'll use it for the
-  dashboard and API.
-
-Everything you enter is stored locally (the API key is encrypted at rest).
-
-### 2. Start the server
-
-```bash
 vortex start
 ```
 
-The management server listens on **`http://localhost:9090`** by default. Leave
-this running — VORTEX is meant to run 24/7.
+Then open the dashboard at <http://localhost:9090/dashboard/> or the terminal
+UI with `vortex ui`.
 
-To check it's up from another terminal:
+---
 
+## Compared to Claude Code
+
+VORTEX does everything an AI coding agent does **and operates the server it
+runs on**:
+
+| | Claude Code | VORTEX |
+|---|:---:|:---:|
+| AI coding agent | ✅ | ✅ |
+| Multiple AI providers | — | ✅ (9 providers) |
+| Conversation persistence | ✅ | ✅ (SQLite + full-text search) |
+| LSP code intelligence | ✅ | ✅ |
+| Reverse proxy / TLS | — | ✅ |
+| Secrets manager | — | ✅ (encrypted at rest) |
+| mTLS / RBAC / policy | — | ✅ |
+| Telegram / phone control | — | ✅ |
+| Autonomous app builds | — | ✅ (Forge) |
+| Self-healing infra | — | ✅ |
+| Multi-agent orchestration | — | ✅ |
+| Audit log (tamper-proof) | — | ✅ |
+| Single self-hosted binary | — | ✅ |
+
+---
+
+## Installation
+
+See [docs/install.md](docs/install.md) for the full guide. In short:
+
+**Linux / macOS:**
 ```bash
-vortex status
+curl -fsSL https://vortex.run/install | sh
 ```
 
-### 3. Open the dashboard
+**Windows:** download `vortex_windows_amd64.zip` from the
+[Releases](https://github.com/vortex-run/vortex/releases) page, extract
+`vortex.exe`, and run `vortex service install`.
 
+**Verify a release** before trusting it:
 ```bash
-vortex ui
-```
-
-This opens the full-screen **terminal dashboard**: an overview screen, live
-logs, metrics, routes, security, secrets, and an interactive **agent chat**.
-
-Prefer the web view? Open <http://localhost:9090/dashboard/> in your browser.
-
-To start the server **and** open the dashboard in one step:
-
-```bash
-vortex ui --start
+vortex verify            # checks this binary against the signed release
+./scripts/verify-release.sh v0.2.0
 ```
 
 ---
 
-## Using the agent
+## Configuration (`vortex.cue`)
 
-Inside the dashboard's **Agents** screen (or over Telegram), just talk to it.
+VORTEX is configured by a single [CUE](https://cuelang.org) file. A minimal
+working example:
 
-### Files and commands
-
-Read-only actions run instantly. Anything that writes or runs asks for your
-approval first (press **Y** then **Enter** to approve, **N** to reject).
-
-| You type | What happens |
-|---|---|
-| `/ls` | List files in the working directory |
-| `/read main.go` | Show a file's contents |
-| `/search func main` | Search file contents |
-| `/find *.go` | Find files by name |
-| `/run python calc.py` | Run a command (asks approval, streams output) |
-| `create a file and save it to /path/file.py` | Generates the code, shows a preview, asks approval, writes it |
-| `/edit notes.txt` | Edit a file |
-| `/undo` | Restore the last file you wrote (asks approval) |
-| `git status` · `/diff` · `/commit fix the bug` | Git operations (commits ask approval) |
-
-### Building apps
-
-Describe what you want and VORTEX builds it:
-
-```
-build me a flutter calculator app
+```cue
+cluster: { name: "my-cluster" }
+tls: { provider: "internal", acme_email: "you@example.com" }
+routes: [
+  { name: "web", protocol: "https", listen: 443,
+    backends: [{ host: "127.0.0.1", port: 8080 }] },
+]
+secrets: { keys: ["db_password"] }
+observability: { log_level: "info" }
 ```
 
-If it needs to know more, it asks a couple of quick questions with **numbered
-options** — type the numbers (e.g. `2 1`) or describe what you want in your own
-words. Then it generates, builds, and delivers the result.
-
-### Conversation history
-
-- `/history` — list your past sessions
-- `/resume <session-id>` — reload a past conversation
-
-### Ask anything
-
-```
-what is 2 + 2
-```
-
-The agent answers directly using your configured provider.
-
----
-
-## Controlling VORTEX from Telegram
-
-If you connected Telegram during `vortex setup`, you can drive VORTEX from your
-phone.
-
-For local use (no public URL needed), start VORTEX in polling mode:
+All options are documented in [docs/configuration.md](docs/configuration.md).
+Validate without starting:
 
 ```bash
-VORTEX_TELEGRAM_POLLING=true vortex start
-```
-
-Then message your bot:
-
-| Command | Does |
-|---|---|
-| `/status` | Show VORTEX status |
-| `/routes` | List active routes |
-| `/ls` | List files in the working directory |
-| `/build <description>` | Start a build |
-| `/cost` | Show today's AI usage cost |
-| `/approve` · `/reject` | Approve or reject a pending action |
-| `/help` | Show all commands |
-
-When the agent needs approval or wants to ask a question, you'll get **tap
-buttons** right in the chat. Plain messages are sent to the agent as requests.
-
----
-
-## Configuration
-
-VORTEX reads its config from a `vortex.cue` file. Validate it before starting:
-
-```bash
-vortex check
-vortex start --config /path/to/vortex.cue
-```
-
-Reload config without restarting:
-
-```bash
-vortex reload
-```
-
-### Secrets
-
-```bash
-vortex secret set db_password
-vortex secret list
-```
-
-Secrets are encrypted at rest and injected into your routes — they never appear
-in the config file or logs.
-
----
-
-## Common commands
-
-| Command | Description |
-|---|---|
-| `vortex setup` | Interactive first-run setup |
-| `vortex start` | Start the server |
-| `vortex stop` | Stop the running server |
-| `vortex status` | Show status of the running server |
-| `vortex ui` | Open the terminal dashboard |
-| `vortex reload` | Reload configuration without restarting |
-| `vortex check` | Validate config without starting |
-| `vortex secret` | Manage secrets (encrypted at rest) |
-| `vortex cluster` | Inspect and manage cluster membership |
-| `vortex namespace` | Manage tenant namespaces and quotas |
-| `vortex plugin` | Manage plugins |
-| `vortex audit` | Verify and export the audit log |
-| `vortex tune` | Inspect/apply OS tuning and run benchmarks |
-| `vortex service` | Manage VORTEX as a system service |
-| `vortex self-update` | Update to the latest release |
-| `vortex version` | Print version information |
-
-Run any command with `--help` for its full options.
-
----
-
-## API quick reference
-
-All API endpoints are served from the management address (default
-`localhost:9090`) and require your API key via the `X-API-Key` header.
-
-```bash
-KEY="<your-api-key>"
-
-# Health (no key needed)
-curl http://localhost:9090/health
-
-# Status, AI cost, agent status
-curl -H "X-API-Key: $KEY" http://localhost:9090/api/status
-curl -H "X-API-Key: $KEY" http://localhost:9090/api/ai/cost
-curl -H "X-API-Key: $KEY" http://localhost:9090/api/agents/status
-
-# Prometheus metrics
-curl http://localhost:9090/metrics
+vortex check --config vortex.cue
 ```
 
 ---
 
-## Running as a service
+## Agent Commands
 
-To keep VORTEX running across reboots:
+Talk to the coordinator from the TUI, the web dashboard, Telegram, or the API.
+Examples:
 
-```bash
-vortex service install
-vortex service status
-```
+- _"Build me a Flutter todo app and send me the APK."_
+- _"Research the top 3 Go HTTP routers and summarise the trade-offs."_
+- _"SSH into web-1 and restart nginx, then confirm it's healthy."_
+- _"Analyse sales.csv and chart revenue by month."_
+- _"Set up a TCP route for postgres on :5432 with mTLS."_
+
+Capabilities and examples: [docs/agents.md](docs/agents.md).
 
 ---
 
-## Updating
+## Telegram Setup
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
+2. Run `vortex setup` and choose to configure Telegram, or set
+   `VORTEX_TELEGRAM_TOKEN` and `VORTEX_TELEGRAM_DEFAULT_CHAT`.
+3. Message your bot; it drives the agent and forwards alerts.
+
+Full steps: [docs/telegram.md](docs/telegram.md).
+
+---
+
+## API Reference
+
+The management API listens on `:9090`. Key endpoints:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Liveness + config hash |
+| GET | `/ready` | Readiness (aggregates subsystem health) |
+| GET | `/metrics` | Prometheus metrics |
+| GET | `/api/status` | Extended status |
+| POST | `/api/agents/submit` | Send a message to the agent |
+| GET | `/api/agents/history` | List conversation sessions |
+| POST | `/api/keys` | Issue an API key (admin) |
+| GET | `/api/audit` | Audit log entries |
+
+Full reference: [docs/api.md](docs/api.md).
+
+---
+
+## Architecture
+
+```
+                ┌──────────────────────────────────────────────┐
+   Internet ───▶│ Edge: rate limit · IP block · TLS/mTLS · QUIC │
+                └───────────────┬──────────────────────────────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                 ▼
+        ┌──────────┐     ┌────────────┐    ┌──────────────┐
+        │  Proxy   │     │  Policy    │    │ Management   │
+        │ (HTTP/   │     │  (OPA) +   │    │ API + TUI +  │
+        │  TCP/UDP)│     │  RBAC      │    │ Dashboard    │
+        └──────────┘     └────────────┘    └──────┬───────┘
+                                                  │
+                          ┌───────────────────────┼──────────────────┐
+                          ▼                        ▼                  ▼
+                   ┌─────────────┐         ┌──────────────┐   ┌─────────────┐
+                   │ Agent       │         │ Secrets +    │   │ Audit (HMAC │
+                   │ runtime +   │         │ keyring      │   │ chain)      │
+                   │ tools (LSP, │         │ (master key) │   └─────────────┘
+                   │ FS, http)   │         └──────────────┘
+                   └─────────────┘
+```
+
+The security model — keys, mTLS, the audit chain, the agent sandbox — is
+explained in [docs/security.md](docs/security.md).
+
+---
+
+## Building from Source
 
 ```bash
-vortex self-update
+git clone https://github.com/vortex-run/vortex
+cd vortex
+task build      # produces ./bin/vortex
+task test       # unit tests
+task lint       # golangci-lint
 ```
+
+Go 1.26+ and [Task](https://taskfile.dev) are required. Details in
+[docs/development.md](docs/development.md).
+
+---
+
+## Contributing
+
+Issues and PRs are welcome. CI runs build, race-enabled tests, lint, and the
+integration suite on every push and PR. Please run `task test` and `task lint`
+before opening a PR, and keep the stdlib-first, single-binary ethos. See
+[docs/development.md](docs/development.md).
 
 ---
 
 ## License
 
-Copyright 2026 VORTEX Contributors.
-
-Licensed under the [Apache License, Version 2.0](LICENSE). You may obtain a copy
-of the License at http://www.apache.org/licenses/LICENSE-2.0.
+Apache 2.0 — Copyright 2026 VORTEX Contributors. See [LICENSE](LICENSE).
