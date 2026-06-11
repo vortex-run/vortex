@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/audit"
@@ -98,6 +100,14 @@ type Server struct {
 	forgeRuntime ForgeRuntime
 	// logBuffer backs GET /api/logs (recent structured log lines). Optional.
 	logBuffer *LogBuffer
+
+	// trustLoopback controls whether loopback callers bypass auth on the
+	// control plane. Default true (on-box `vortex reload`/`stop` work without a
+	// key). Set false for deployments behind a same-host reverse proxy, where
+	// every request presents a loopback RemoteAddr and the bypass would expose
+	// the control plane (production audit M1). The destructive
+	// /internal/shutdown endpoint never honours loopback trust regardless.
+	trustLoopback bool
 }
 
 // NamespaceInfo mirrors a tenant namespace for the API.
@@ -280,6 +290,10 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		keyLimiter:    security.NewAPIKeyRateLimiter(security.APIKeyRateLimiterConfig{Enabled: true}),
 		globalLimiter: security.NewGlobalRateLimiter(0),
 		burst:         security.NewBurstProtection(security.BurstProtectionConfig{}),
+		// Loopback trust defaults on; operators behind a same-host proxy set
+		// VORTEX_TRUST_LOOPBACK=false so a loopback RemoteAddr does not bypass
+		// control-plane auth (production audit M1).
+		trustLoopback: loopbackTrustEnabled(),
 	}
 	mux := http.NewServeMux()
 	// Public endpoints — liveness/readiness must never require auth.
@@ -292,7 +306,11 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// (if one has been wired via SetAuth) so a missing/invalid credential is
 	// rejected before the handler runs.
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
-	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
+	// /internal/shutdown is the most destructive endpoint: it never honours
+	// loopback trust, so a co-located/sidecar process cannot shut the server
+	// down without a credential (production audit M1). When no auth is wired
+	// (tests) it still runs — there is no key to require.
+	mux.Handle("POST /internal/shutdown", s.protectedStrict(http.HandlerFunc(s.handleInternalShutdown)))
 	// /metrics is protected like the control plane: reachable from localhost
 	// (scrapers commonly run on-box) or with a valid key.
 	mux.Handle("GET /metrics", s.protected(http.HandlerFunc(s.handleMetrics)))
@@ -399,19 +417,44 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 }
 
 // protected wraps h with the auth middleware (if wired) — except for loopback
-// requests, which are allowed through without a credential. The /internal/*
-// control-plane endpoints are already restricted to localhost (the Windows-safe
-// SIGHUP/SIGTERM equivalents used by `vortex reload`/`stop`), so an on-box call
-// is implicitly trusted; a remote call still needs a valid key. With no auth
+// requests, which are allowed through without a credential WHEN loopback trust
+// is enabled (the default). The /internal/* control-plane endpoints stand in
+// for SIGHUP/SIGTERM used by `vortex reload`/`stop`, so an on-box call is
+// implicitly trusted. Operators behind a same-host reverse proxy disable the
+// bypass with VORTEX_TRUST_LOOPBACK=false (production audit M1). With no auth
 // wired the handler runs unchanged.
 func (s *Server) protected(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authMW == nil || localhostOnly(r) {
+		if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
 			h.ServeHTTP(w, r)
 			return
 		}
 		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
 	})
+}
+
+// protectedStrict is like protected but never grants the loopback bypass: a
+// valid credential is always required when auth is wired. Used for the
+// destructive /internal/shutdown endpoint.
+func (s *Server) protectedStrict(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.authMW == nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+		s.authMW(s.keyLimit(h)).ServeHTTP(w, r)
+	})
+}
+
+// loopbackTrustEnabled reports whether loopback callers bypass control-plane
+// auth. Enabled by default; set VORTEX_TRUST_LOOPBACK=false/0/no to disable.
+func loopbackTrustEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VORTEX_TRUST_LOOPBACK"))) {
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // protectedAdmin is like protected but additionally requires the admin role,
@@ -485,7 +528,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// trusted like the rest of the control plane; remote authenticated callers
 	// read it from /api/status instead. When no auth is wired (tests/legacy)
 	// the field is populated as before so existing behaviour is preserved.
-	if s.authMW == nil || localhostOnly(r) {
+	if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
 		resp.ClusterName = cfg.Cluster.Name
 	}
 	if s.routeStats != nil {
