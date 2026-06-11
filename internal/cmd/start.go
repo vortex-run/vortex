@@ -734,6 +734,59 @@ func peersExcludingSelf(nodes []string, self string) []string {
 	return out
 }
 
+// secretsStatusTTL bounds how long the secret set/unset snapshot is cached
+// before the backend is re-queried.
+const secretsStatusTTL = 10 * time.Second
+
+// newSecretsStatusProvider returns a provider for GET /api/secrets/status that
+// reuses one secret adapter and caches the set/unset snapshot for
+// secretsStatusTTL, instead of rebuilding the adapter and re-querying the
+// backend on every request (production audit L4). The adapter is rebuilt only
+// when the backend kind changes across a config reload.
+func newSecretsStatusProvider(cfgMgr *config.Manager) func() []api.SecretStatus {
+	var (
+		mu          sync.Mutex
+		adapter     secrets.Adapter
+		adapterKind string
+		cached      []api.SecretStatus
+		cachedAt    time.Time
+	)
+	return func() []api.SecretStatus {
+		cfg := cfgMgr.Current()
+		ac, err := buildAdapterConfig(cfg)
+		if err != nil {
+			return nil
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Rebuild the adapter only when missing or the backend kind changed.
+		if adapter == nil || adapterKind != ac.Kind {
+			a, aerr := secrets.NewAdapter(ac)
+			if aerr != nil {
+				return nil
+			}
+			adapter = a
+			adapterKind = ac.Kind
+			cached = nil // invalidate snapshot for the new backend
+		}
+
+		if cached != nil && time.Since(cachedAt) < secretsStatusTTL {
+			return cached
+		}
+
+		out := make([]api.SecretStatus, 0, len(cfg.Secrets.Keys))
+		for _, key := range cfg.Secrets.Keys {
+			_, gerr := adapter.Get(context.Background(), key)
+			out = append(out, api.SecretStatus{Name: key, Set: gerr == nil})
+		}
+		cached = out
+		cachedAt = time.Now()
+		return out
+	}
+}
+
 // wireDashboardProviders attaches the dashboard data providers to the API
 // server: extended status, declared-secret set/unset state (never values), and
 // installed plugins. Each provider reads live state when called.
@@ -772,23 +825,11 @@ func wireDashboardProviders(
 		return info
 	})
 
-	apiSrv.SetSecretsProvider(func() []api.SecretStatus {
-		cfg := cfgMgr.Current()
-		out := make([]api.SecretStatus, 0, len(cfg.Secrets.Keys))
-		ac, err := buildAdapterConfig(cfg)
-		if err != nil {
-			return out
-		}
-		adapter, err := secrets.NewAdapter(ac)
-		if err != nil {
-			return out
-		}
-		for _, key := range cfg.Secrets.Keys {
-			_, gerr := adapter.Get(context.Background(), key)
-			out = append(out, api.SecretStatus{Name: key, Set: gerr == nil})
-		}
-		return out
-	})
+	// The secret adapter (and its backend clients) is built once and reused
+	// rather than reconstructed per request, with a short cache of the
+	// set/unset states; the cache is keyed by the backend kind so a config
+	// reload that switches backends rebuilds it (production audit L4).
+	apiSrv.SetSecretsProvider(newSecretsStatusProvider(cfgMgr))
 
 	apiSrv.SetPluginsProvider(func() []api.PluginInfo {
 		if pluginRegistry == nil {
