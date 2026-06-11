@@ -41,8 +41,11 @@ jobs:
       - name: Build
         run: task build
 
-      - name: Test
-        run: task test
+      - name: Test (race)
+        # ubuntu-latest has a C toolchain, so run the race detector on the
+        # whole unit suite — the merge gate must catch data races on every
+        # push/PR, not only at release time (audit M7).
+        run: task test:race
 
   lint:
     name: Lint
