@@ -1579,6 +1579,23 @@ func providerFromFile(log *slog.Logger) *messaging.AIProvider {
 	if !ok || cfg.Provider == "" || cfg.Provider == "none" {
 		return nil
 	}
+	// Bedrock stores no key in the setup file — its credentials come from the
+	// AWS environment variables at runtime (production: never persist AWS
+	// secrets). Assemble the access:secret key here.
+	if cfg.Provider == messaging.ProviderBedrock {
+		ak, sk := os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY")
+		if ak == "" || sk == "" {
+			log.Warn("bedrock configured but AWS credentials are not set; skipping", "provider", cfg.Provider)
+			return nil
+		}
+		models := []string(nil)
+		if cfg.Model != "" {
+			models = []string{cfg.Model}
+		}
+		log.Info("AI provider loaded from setup config", "provider", cfg.Provider)
+		return &messaging.AIProvider{Name: cfg.Provider, APIKey: ak + ":" + sk, Endpoint: cfg.Endpoint, Models: models}
+	}
+
 	key, err := decryptKey(cfg.APIKeyEnc)
 	if err != nil {
 		log.Warn("could not decrypt saved AI key, ignoring setup config", "err", err)
@@ -1637,6 +1654,44 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderGemini, APIKey: k,
 			Models: []string{"gemini-1.5-flash"}, Priority: 3,
+		})
+	}
+	// --- M20 providers ------------------------------------------------------
+	if k := os.Getenv("VORTEX_GROQ_KEY"); k != "" {
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderGroq, APIKey: k,
+			Models: []string{"llama-3.1-70b-versatile"}, Priority: 2, // fast + cheap
+		})
+	}
+	if region := os.Getenv("VORTEX_BEDROCK_REGION"); region != "" {
+		if ak, sk := os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY"); ak != "" && sk != "" {
+			providers = append(providers, messaging.AIProvider{
+				Name:     messaging.ProviderBedrock,
+				APIKey:   ak + ":" + sk,
+				Endpoint: region, // Bedrock carries the region in Endpoint
+				Models:   []string{"anthropic.claude-3-5-sonnet-20240620-v1:0"},
+				Priority: 1,
+			})
+		}
+	}
+	if k := os.Getenv("VORTEX_AZURE_OPENAI_KEY"); k != "" {
+		ep := os.Getenv("VORTEX_AZURE_OPENAI_ENDPOINT")
+		dep := os.Getenv("VORTEX_AZURE_OPENAI_DEPLOYMENT")
+		if ep != "" && dep != "" {
+			providers = append(providers, messaging.AIProvider{
+				Name: messaging.ProviderAzureOpenAI, APIKey: k,
+				Endpoint: ep, Models: []string{dep}, Priority: 1,
+			})
+		}
+	}
+	if k := os.Getenv("VORTEX_OPENROUTER_KEY"); k != "" {
+		model := os.Getenv("VORTEX_OPENROUTER_MODEL")
+		if model == "" {
+			model = "openai/gpt-4o"
+		}
+		providers = append(providers, messaging.AIProvider{
+			Name: messaging.ProviderOpenRouter, APIKey: k,
+			Models: []string{model}, Priority: 4,
 		})
 	}
 	// Fall back to the saved `vortex setup` config only when NO provider env var

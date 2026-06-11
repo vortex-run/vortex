@@ -14,11 +14,15 @@ import (
 
 // Provider names.
 const (
-	ProviderClaude   = "claude"
-	ProviderOpenAI   = "openai"
-	ProviderOllama   = "ollama"
-	ProviderDeepSeek = "deepseek"
-	ProviderGemini   = "gemini"
+	ProviderClaude      = "claude"
+	ProviderOpenAI      = "openai"
+	ProviderOllama      = "ollama"
+	ProviderDeepSeek    = "deepseek"
+	ProviderGemini      = "gemini"
+	ProviderGroq        = "groq"         // OpenAI-compatible, very fast (M20)
+	ProviderBedrock     = "bedrock"      // AWS Bedrock, SigV4-signed (M20)
+	ProviderAzureOpenAI = "azure-openai" // Azure OpenAI deployment (M20)
+	ProviderOpenRouter  = "openrouter"   // 75+ models via one API (M20)
 )
 
 // AIProvider describes one upstream model provider.
@@ -166,6 +170,14 @@ func (g *AIGateway) callProvider(ctx context.Context, p AIProvider, prompt, syst
 		return g.callDeepSeek(ctx, p, prompt, systemPrompt)
 	case ProviderGemini:
 		return g.callGemini(ctx, p, prompt, systemPrompt)
+	case ProviderGroq:
+		return g.callGroq(ctx, p, prompt, systemPrompt)
+	case ProviderBedrock:
+		return g.callBedrock(ctx, p, prompt, systemPrompt)
+	case ProviderAzureOpenAI:
+		return g.callAzureOpenAI(ctx, p, prompt, systemPrompt)
+	case ProviderOpenRouter:
+		return g.callOpenRouter(ctx, p, prompt, systemPrompt)
 	default:
 		return "", 0, fmt.Errorf("messaging: unknown provider %q", p.Name)
 	}
@@ -254,6 +266,47 @@ func (g *AIGateway) doJSON(ctx context.Context, url string, headers map[string]s
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, data)
+	}
+	if out != nil {
+		if err := json.Unmarshal(data, out); err != nil {
+			return data, err
+		}
+	}
+	return data, nil
+}
+
+// doSignedJSON is like doJSON but lets sign mutate the request headers based on
+// the marshalled body (used for AWS SigV4, which signs the payload). The
+// signer receives the header map to populate and the request body bytes.
+func (g *AIGateway) doSignedJSON(ctx context.Context, url string, sign func(headers map[string]string, body []byte), payload, out any) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	headers := map[string]string{"Content-Type": "application/json"}
+	sign(headers, body)
+
+	callCtx, cancel := context.WithTimeout(context.Background(), minAICallTimeout)
+	defer cancel()
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) > minAICallTimeout {
+		callCtx, cancel = context.WithDeadline(context.Background(), dl)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

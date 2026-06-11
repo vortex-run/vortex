@@ -114,8 +114,8 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
 
 	var out bytes.Buffer
-	// Option 6 (skip), then decline Telegram.
-	if err := runSetup(&out, strings.NewReader("6\nN\n")); err != nil {
+	// Option 10 (skip), then decline Telegram.
+	if err := runSetup(&out, strings.NewReader("10\nN\n")); err != nil {
 		t.Fatalf("runSetup: %v", err)
 	}
 	if _, ok := loadProviderConfig(); ok {

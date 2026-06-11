@@ -152,7 +152,7 @@ func runSetup(out io.Writer, in io.Reader) error {
 
 	fmt.Fprintln(out, welcomeBanner)
 	fmt.Fprintln(out, providerMenu)
-	fmt.Fprint(out, "Select [1-6]: ")
+	fmt.Fprint(out, "Select [1-10]: ")
 	choice := readLine(r)
 
 	cfg := AIProviderConfig{ConfiguredAt: time.Now().UTC().Format(time.RFC3339)}
@@ -171,8 +171,20 @@ func runSetup(out io.Writer, in io.Reader) error {
 		setupKeyProvider(out, r, &cfg, "gemini", "https://aistudio.google.com",
 			"", "gemini-1.5-flash", verifyGemini)
 	case "5":
+		setupKeyProvider(out, r, &cfg, "groq", "https://console.groq.com/keys",
+			"gsk_", "llama-3.1-70b-versatile",
+			verifyOpenAICompat("https://api.groq.com/openai/v1/chat/completions", "llama-3.1-70b-versatile"))
+	case "6":
+		setupBedrock(out, r, &cfg)
+	case "7":
+		setupAzureOpenAI(out, r, &cfg)
+	case "8":
+		setupKeyProvider(out, r, &cfg, "openrouter", "https://openrouter.ai/keys",
+			"sk-or-", "openai/gpt-4o",
+			verifyOpenRouter)
+	case "9":
 		setupOllama(out, r, &cfg)
-	case "6", "":
+	case "10", "":
 		fmt.Fprintln(out, "\nSkipping AI setup. You can configure later:")
 		fmt.Fprintln(out, "  vortex setup")
 		fmt.Fprintln(out, "  or set VORTEX_ANTHROPIC_KEY=... env var")
@@ -372,6 +384,63 @@ func verifyGemini(key string) string {
 		map[string]any{"contents": []map[string]any{{"parts": []map[string]any{{"text": "hi"}}}}})
 }
 
+// verifyOpenRouter checks an OpenRouter key, including the attribution headers
+// OpenRouter expects.
+func verifyOpenRouter(key string) string {
+	return httpVerify(http.MethodPost, "https://openrouter.ai/api/v1/chat/completions",
+		map[string]string{
+			"Authorization": "Bearer " + key,
+			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
+			"X-Title":       "VORTEX",
+		},
+		map[string]any{"model": "openai/gpt-4o", "max_tokens": 5,
+			"messages": []map[string]any{{"role": "user", "content": "hi"}}})
+}
+
+// setupBedrock handles the AWS Bedrock flow. Credentials come from the
+// environment (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY); the wizard records
+// only the region and default model, never the secret key.
+func setupBedrock(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
+	fmt.Fprintln(out, "\nAWS Bedrock uses your AWS credentials (SigV4-signed requests).")
+	fmt.Fprintln(out, "Set these environment variables before starting VORTEX:")
+	fmt.Fprintln(out, "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, VORTEX_BEDROCK_REGION")
+	fmt.Fprint(out, "AWS region (default: us-east-1): ")
+	region := readLine(r)
+	if region == "" {
+		region = "us-east-1"
+	}
+	cfg.Provider = "bedrock"
+	cfg.Endpoint = region
+	cfg.Model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+	fmt.Fprintln(out, "✓ Bedrock selected. Credentials are read from the environment at startup.")
+}
+
+// setupAzureOpenAI handles the Azure OpenAI flow: resource endpoint +
+// deployment name + key.
+func setupAzureOpenAI(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
+	fmt.Fprintln(out, "\nAzure OpenAI uses your Azure resource endpoint and a deployment name.")
+	fmt.Fprint(out, "Resource endpoint (https://<resource>.openai.azure.com): ")
+	endpoint := readLine(r)
+	fmt.Fprint(out, "Deployment name: ")
+	deployment := readLine(r)
+	fmt.Fprint(out, "API key: ")
+	key := readLine(r)
+	if endpoint == "" || deployment == "" || key == "" {
+		fmt.Fprintln(out, "Endpoint, deployment, and key are all required; skipping.")
+		return
+	}
+	enc, err := encryptKey(key)
+	if err != nil {
+		fmt.Fprintf(out, "⚠ Could not encrypt key: %v\n", err)
+		return
+	}
+	cfg.Provider = "azure-openai"
+	cfg.APIKeyEnc = enc
+	cfg.Endpoint = endpoint
+	cfg.Model = deployment
+	fmt.Fprintln(out, "✓ Azure OpenAI configured.")
+}
+
 // listOllamaModels fetches the model list from <endpoint>/api/tags.
 func listOllamaModels(endpoint string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -410,18 +479,26 @@ const welcomeBanner = `╔══════════════════
 
 const providerMenu = `
 Select your AI provider:
-1. Anthropic Claude (Recommended)
-   Best reasoning, most capable
-2. DeepSeek
-   Fast, cost-effective, OpenAI-compatible
-3. OpenAI GPT
-   GPT-4o and GPT-4o-mini
-4. Google Gemini
-   Gemini 1.5 Pro and Flash
-5. Ollama (Local, Free)
-   Run AI models on your own machine
-6. Skip for now
-   Configure later with: vortex setup`
+1.  Anthropic Claude (Recommended)
+    Best reasoning, most capable
+2.  DeepSeek
+    Fast, cost-effective, OpenAI-compatible
+3.  OpenAI GPT
+    GPT-4o and GPT-4o-mini
+4.  Google Gemini
+    Gemini 1.5 Pro and Flash
+5.  Groq (Fast + Free tier)
+    Llama 3.1 / Mixtral at very low latency
+6.  AWS Bedrock
+    Claude & Titan via your AWS account (SigV4)
+7.  Azure OpenAI
+    GPT models on your Azure resource
+8.  OpenRouter (75+ models)
+    One key, many models
+9.  Ollama (Local, Free)
+    Run AI models on your own machine
+10. Skip for now
+    Configure later with: vortex setup`
 
 const completionFooter = `
 Start VORTEX:  vortex start
