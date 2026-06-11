@@ -534,7 +534,13 @@ Start VORTEX:  vortex start
 Dashboard:     http://localhost:9090/dashboard/
 
 Set AI provider in env (alternative to this setup):
-  export VORTEX_ANTHROPIC_KEY=<your-key>`
+  export VORTEX_ANTHROPIC_KEY=<your-key>
+
+VORTEX runs an OpenAI-compatible server.
+To use VORTEX with Claude Code, Aider, Cline, Cursor:
+  export OPENAI_BASE_URL=http://localhost:9090/v1
+  export OPENAI_API_KEY=<your-vortex-key>
+All AI requests will route through VORTEX.`
 
 // apiKeyBanner renders the one-time API-key box.
 func apiKeyBanner(secret string) string {

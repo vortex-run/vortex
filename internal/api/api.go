@@ -104,6 +104,12 @@ type Server struct {
 	// readinessFunc, when set, aggregates subsystem readiness for /ready.
 	readinessFunc func() error
 
+	// OpenAI-compatible /v1/* endpoints (upgrade 3): openaiModels lists
+	// servable model IDs, openaiComplete routes to the AI gateway by model.
+	// Wired via SetOpenAIGateway; nil yields 503.
+	openaiModels   func() []string
+	openaiComplete OpenAICompleteFunc
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -356,6 +362,13 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 
 	// Recent structured logs (for the TUI log viewer), auth-gated.
 	mux.Handle("GET /api/logs", s.requireAPIKey(http.HandlerFunc(s.handleLogs)))
+
+	// OpenAI-compatible surface (upgrade 3): lets any OpenAI-speaking tool
+	// (Claude Code, Aider, Cline, Cursor) use VORTEX as its AI backend. Data
+	// plane — requires a key (Bearer or X-API-Key) even from localhost.
+	mux.Handle("GET /v1/models", s.requireAPIKey(http.HandlerFunc(s.handleOpenAIModels)))
+	mux.Handle("POST /v1/chat/completions", s.requireAPIKey(http.HandlerFunc(s.handleChatCompletions)))
+	mux.Handle("POST /v1/responses", s.requireAPIKey(http.HandlerFunc(s.handleResponses)))
 
 	// Messaging webhooks (M11): no API-key auth (each verifies its own platform
 	// signature), per-IP rate limited. Both GET (WhatsApp verification) and POST

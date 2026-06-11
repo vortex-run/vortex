@@ -373,6 +373,10 @@ func runStart(ctx context.Context, pidfile string) error {
 				DailyBudget: c.DailyBudget, RemainingBudget: c.RemainingBudget, Free: c.Free,
 			}
 		})
+		// OpenAI-compatible /v1/* surface (upgrade 3): any OpenAI-speaking tool
+		// can use VORTEX as its AI backend with provider routing + cost tracking.
+		apiSrv.SetOpenAIGateway(gw.ModelIDs, gw.CompleteForModel)
+		log.Info("OpenAI-compatible server enabled", "endpoint", "/v1/chat/completions", "models", gw.ModelIDs())
 	}
 
 	// --- agent runtime (M10/M11) --------------------------------------------

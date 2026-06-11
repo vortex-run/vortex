@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -476,4 +477,96 @@ func (g *AIGateway) ProviderNames() []string {
 		out = append(out, p.Name)
 	}
 	return out
+}
+
+// ModelIDs returns every model this gateway can serve, in provider priority
+// order (a provider with no configured models is listed under its own name).
+// Backs GET /v1/models on the OpenAI-compatible server (upgrade 3).
+func (g *AIGateway) ModelIDs() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	for _, p := range g.cfg.Providers {
+		if len(p.Models) == 0 {
+			add(p.Name)
+			continue
+		}
+		for _, m := range p.Models {
+			add(m)
+		}
+	}
+	return out
+}
+
+// CompleteForModel routes a completion to the provider serving model (upgrade
+// 3 — OpenAI-compatible server). Unlike Complete it does NOT fall back across
+// providers: the caller asked for a specific model, so a failure surfaces
+// rather than silently answering with a different one. Returns the text and
+// the provider-reported token count.
+func (g *AIGateway) CompleteForModel(ctx context.Context, model, prompt, systemPrompt string) (string, int, error) {
+	if g.budgetExceeded() {
+		return "", 0, ErrBudgetExceeded
+	}
+	p, ok := g.providerForModel(model)
+	if !ok {
+		return "", 0, fmt.Errorf("messaging: no provider configured for model %q", model)
+	}
+	// Send the requested model name upstream (not the provider's default).
+	if model != "" {
+		p.Models = []string{model}
+	}
+	text, tokens, err := g.callProvider(ctx, p, prompt, systemPrompt)
+	if err != nil {
+		return "", 0, err
+	}
+	g.recordCost(model, tokens)
+	g.mu.Lock()
+	g.rolloverLocked()
+	g.requestsToday++
+	g.mu.Unlock()
+	return text, tokens, nil
+}
+
+// providerForModel picks the provider for a model name: an exact match against
+// configured models wins, then family heuristics (claude-* → claude, gpt-* →
+// openai, deepseek* → deepseek, gemini* → gemini, llama*/mistral* → ollama),
+// falling back to the primary (highest-priority) provider.
+func (g *AIGateway) providerForModel(model string) (AIProvider, bool) {
+	if len(g.cfg.Providers) == 0 {
+		return AIProvider{}, false
+	}
+	for _, p := range g.cfg.Providers {
+		for _, m := range p.Models {
+			if m == model {
+				return p, true
+			}
+		}
+	}
+	low := strings.ToLower(model)
+	want := ""
+	switch {
+	case strings.HasPrefix(low, "claude"):
+		want = ProviderClaude
+	case strings.HasPrefix(low, "gpt"), strings.HasPrefix(low, "o1"), strings.HasPrefix(low, "o3"):
+		want = ProviderOpenAI
+	case strings.HasPrefix(low, "deepseek"):
+		want = ProviderDeepSeek
+	case strings.HasPrefix(low, "gemini"):
+		want = ProviderGemini
+	case strings.HasPrefix(low, "llama"), strings.HasPrefix(low, "mistral"):
+		want = ProviderOllama
+	}
+	if want != "" {
+		for _, p := range g.cfg.Providers {
+			if p.Name == want {
+				return p, true
+			}
+		}
+	}
+	return g.cfg.Providers[0], true
 }
