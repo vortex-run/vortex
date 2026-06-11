@@ -33,6 +33,8 @@ type AIProviderConfig struct {
 	// Optional messaging (Telegram) set up during the wizard.
 	TelegramToken  string `json:"telegram_token,omitempty"`
 	TelegramChatID string `json:"telegram_chat_id,omitempty"`
+	// EditorMode selects the TUI editor: "standard" (default) or "vim" (M20).
+	EditorMode string `json:"editor_mode,omitempty"`
 }
 
 // aiProviderConfigPath returns <user-config>/vortex/ai-provider.json.
@@ -204,7 +206,10 @@ func runSetup(out io.Writer, in io.Reader) error {
 	// Step 5 — optional Telegram.
 	setupTelegram(out, r, &cfg)
 
-	// Step 6 — auto-create a VORTEX API key.
+	// Step 6 — editor mode preference (M20).
+	setupEditorMode(out, r, &cfg)
+
+	// Step 7 — auto-create a VORTEX API key.
 	printAPIKey(out)
 
 	fmt.Fprintln(out, completionFooter)
@@ -285,6 +290,30 @@ func setupTelegram(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	} else {
 		_ = saveProviderConfig(*cfg)
 	}
+}
+
+// setupEditorMode asks which TUI editor to use and persists the choice (M20).
+func setupEditorMode(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
+	fmt.Fprintln(out, "\nEditor mode for the terminal UI:")
+	fmt.Fprintln(out, "  [1] Standard (default, simple input)")
+	fmt.Fprintln(out, "  [2] Vim (normal/insert/visual modes)")
+	fmt.Fprint(out, "Select [1-2] (default 1): ")
+	switch strings.TrimSpace(readLine(r)) {
+	case "2":
+		cfg.EditorMode = "vim"
+	default:
+		cfg.EditorMode = "standard"
+	}
+	// Persist the choice; reuse the "none" provider marker so a messaging-only
+	// or editor-only setup still saves.
+	if cfg.Provider == "" {
+		cfg.Provider = "none"
+		_ = saveProviderConfig(*cfg)
+		cfg.Provider = ""
+	} else {
+		_ = saveProviderConfig(*cfg)
+	}
+	fmt.Fprintf(out, "✓ Editor mode: %s\n", cfg.EditorMode)
 }
 
 // printAPIKey creates and prints a VORTEX API key for the dashboard/CLI.

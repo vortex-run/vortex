@@ -114,12 +114,14 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
 
 	var out bytes.Buffer
-	// Option 10 (skip), then decline Telegram.
-	if err := runSetup(&out, strings.NewReader("10\nN\n")); err != nil {
+	// Option 10 (skip AI), decline Telegram, default editor mode.
+	if err := runSetup(&out, strings.NewReader("10\nN\n1\n")); err != nil {
 		t.Fatalf("runSetup: %v", err)
 	}
-	if _, ok := loadProviderConfig(); ok {
-		t.Error("skip option should not write a provider config")
+	// Skipping AI must not record an AI provider (the editor-mode step may
+	// persist a config with provider "none"/empty, but never a real provider).
+	if cfg, ok := loadProviderConfig(); ok && cfg.Provider != "" && cfg.Provider != "none" {
+		t.Errorf("skip option should not record an AI provider, got %q", cfg.Provider)
 	}
 	if !strings.Contains(out.String(), "Skipping AI setup") {
 		t.Errorf("skip output missing message:\n%s", out.String())
