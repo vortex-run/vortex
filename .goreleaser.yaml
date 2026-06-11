@@ -123,11 +123,16 @@ nfpms:
 
 # Homebrew cask (M20). Published to vortex-run/homebrew-tap on release.
 # (GoReleaser replaced the deprecated `brews:` formula block with casks.)
+# Pushing to the tap needs a cross-repo PAT (HOMEBREW_TAP_TOKEN secret) — the
+# workflow's GITHUB_TOKEN is scoped to this repo only. When the secret is
+# unset the cask is generated but not uploaded, keeping the release green.
 homebrew_casks:
   - name: vortex
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}{{ else }}true{{ end }}'
     repository:
       owner: vortex-run
       name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     description: "One binary. Any server. Fully autonomous."
     homepage: "https://vortex.run"
 

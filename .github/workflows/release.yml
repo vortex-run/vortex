@@ -52,6 +52,10 @@ jobs:
           # the secret is unset the sign wrapper no-ops and the release is
           # integrity-only.
           VORTEX_SIGNING_KEY: ${{ secrets.VORTEX_SIGNING_KEY }}
+          # Cross-repo PAT for pushing the Homebrew cask to
+          # vortex-run/homebrew-tap. When unset the cask upload is skipped
+          # (see homebrew_casks.skip_upload in .goreleaser.yaml).
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       # Whole-repository SBOM (source dependencies, not just the shipped
       # archives) kept as a workflow artifact for audit/compliance trails.
