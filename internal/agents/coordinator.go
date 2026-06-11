@@ -187,6 +187,11 @@ type Coordinator struct {
 	// runs, and skillWriter distils new skills from completed multi-step tasks.
 	skills      *SkillStore
 	skillWriter *SkillWriter
+
+	// episodic, when set, is the tier-2 cross-session memory (upgrade 2):
+	// relevant episodes are recalled into the system prompt for each message,
+	// and each completed exchange is mined for durable facts asynchronously.
+	episodic *EpisodicStore
 }
 
 // SetMemoryStore wires the SQLite conversation store, making it the persistence
@@ -208,6 +213,66 @@ func (c *Coordinator) SetSkillStore(s *SkillStore) {
 		c.skillWriter = nil
 	}
 	c.mu.Unlock()
+}
+
+// SetEpisodicStore wires the cross-session episodic memory. Pass nil to
+// disable.
+func (c *Coordinator) SetEpisodicStore(s *EpisodicStore) {
+	c.mu.Lock()
+	c.episodic = s
+	c.mu.Unlock()
+}
+
+// episodicStore returns the episodic memory under lock (nil when disabled).
+func (c *Coordinator) episodicStore() *EpisodicStore {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.episodic
+}
+
+// recallMemoriesBlock returns a system-prompt addendum with episodes relevant
+// to msg, or "" when episodic memory is disabled or nothing matches.
+func (c *Coordinator) recallMemoriesBlock(msg string) string {
+	store := c.episodicStore()
+	if store == nil {
+		return ""
+	}
+	episodes, err := store.Recall(msg, 5)
+	if err != nil || len(episodes) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nRelevant memories:\n")
+	for _, ep := range episodes {
+		b.WriteString("- ")
+		if ep.Context != "" {
+			b.WriteString("[" + ep.Context + "] ")
+		}
+		b.WriteString(ep.Content + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// rememberExchangeAsync mines a completed exchange for durable facts in the
+// background (best effort — the user-facing reply never waits on it).
+func (c *Coordinator) rememberExchangeAsync(sessionID, userMsg, reply string) {
+	store := c.episodicStore()
+	if store == nil {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("episodic memory goroutine panic recovered", "panic", r)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		exchange := "user: " + userMsg + "\nagent: " + reply
+		if err := store.StoreImportant(ctx, c.cfg.AIGateway, sessionID, exchange); err != nil {
+			slog.Debug("episodic memory extraction skipped", "error", err)
+		}
+	}()
 }
 
 // skillMinSuccessRate is the floor below which a stored skill is not trusted
@@ -790,12 +855,14 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 		if skill != nil {
 			sysPrompt += skillPromptBlock(skill)
 		}
+		sysPrompt += c.recallMemoriesBlock(userMsg)
 		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), sysPrompt)
 		if skill != nil {
 			c.markSkillUsed(skill.ID, err == nil)
 		}
 		if err == nil {
 			c.recordExchange(sessionID, userMsg, reply)
+			c.rememberExchangeAsync(sessionID, userMsg, reply)
 		}
 		return reply, err
 	case IntentBuildApp:

@@ -1053,6 +1053,16 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		coord.SetSkillStore(skills)
 		log.Info("skills store loaded", "db", skillsDB, "skills", skills.Stats().Total)
 	}
+
+	// Episodic memory (upgrade 2 — tier-2 cross-session memory): durable facts
+	// recalled into prompts; new facts mined from each exchange in background.
+	episodesDB := filepath.Join(cacheDir, "vortex", "memory", "episodes.db")
+	if episodes, eerr := agents.NewEpisodicStore(episodesDB); eerr != nil {
+		log.Warn("episodic memory unavailable", "err", eerr)
+	} else {
+		coord.SetEpisodicStore(episodes)
+		log.Info("episodic memory loaded", "db", episodesDB)
+	}
 	rt, err := agents.NewRuntime(agents.RuntimeConfig{
 		Bus: bus, Coordinator: coord, MaxAgents: 8,
 		SandboxBase: sandboxBase, Logger: log,
