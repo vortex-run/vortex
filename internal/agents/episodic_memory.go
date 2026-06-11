@@ -130,8 +130,10 @@ func (s *EpisodicStore) Store(ep Episode) error {
 }
 
 // Recall full-text searches episodes for query and returns up to limit
-// results, ranked by importance damped by age (importance / (1 + age in
-// days)): an important week-old fact outranks a trivial one from today.
+// results, ranked by importance damped by age on a 30-day scale
+// (importance / (1 + age/30d)): recency breaks ties between equally important
+// episodes, but an important week-old fact still outranks a trivial one from
+// today.
 func (s *EpisodicStore) Recall(query string, limit int) ([]Episode, error) {
 	return s.recall(query, "", limit)
 }
@@ -163,7 +165,7 @@ func (s *EpisodicStore) recall(query, contextFilter string, limit int) ([]Episod
 	rows, err := s.db.Query(
 		`SELECT e.id, e.content, e.context, e.importance, e.tags_json, e.timestamp, e.session_id
 		 FROM episodes_fts f JOIN episodes e ON e.id = f.episode_id `+where+`
-		 ORDER BY e.importance / (1.0 + (? - e.timestamp) / 86400000.0) DESC
+		 ORDER BY e.importance / (1.0 + (? - e.timestamp) / 2592000000.0) DESC
 		 LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("agents: recalling episodes: %w", err)
