@@ -114,8 +114,8 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
 
 	var out bytes.Buffer
-	// Option 10 (skip AI), decline Telegram, default editor mode.
-	if err := runSetup(&out, strings.NewReader("10\nN\n1\n")); err != nil {
+	// Enter (welcome), 10 (skip AI), 2 (skip Telegram), 1 (editor), Enter (key).
+	if err := runSetup(&out, strings.NewReader("\n10\n2\n1\n\n")); err != nil {
 		t.Fatalf("runSetup: %v", err)
 	}
 	// Skipping AI must not record an AI provider (the editor-mode step may
@@ -126,9 +126,129 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 	if !strings.Contains(out.String(), "Skipping AI setup") {
 		t.Errorf("skip output missing message:\n%s", out.String())
 	}
-	// The wizard always prints the completion footer + an API key box.
-	if !strings.Contains(out.String(), "Setup Complete") {
+	// The wizard always prints the API key box + the complete screen.
+	if !strings.Contains(out.String(), "Your VORTEX API Key") {
+		t.Error("wizard should print the API key box")
+	}
+	if !strings.Contains(out.String(), "VORTEX is configured and ready") {
 		t.Error("wizard should print the completion banner")
+	}
+}
+
+// setupTestEnv isolates config + key-store paths for a full wizard run.
+func setupTestEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
+	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+		t.Setenv(e, "")
+	}
+}
+
+// TestSetup_FullFlowBranded drives the whole 5-step wizard: DeepSeek primary,
+// Ollama backup slot, Telegram with a stubbed verifier, editor, API key.
+func TestSetup_FullFlowBranded(t *testing.T) {
+	setupTestEnv(t)
+
+	// Stub out the network verifiers (catalog entry + telegram getMe).
+	verifyCalled := false
+	origVerify := providerCatalog[0].Verify
+	providerCatalog[0].Verify = func(string) string { verifyCalled = true; return "✓ API key verified" }
+	origTG := verifyTelegramToken
+	verifyTelegramToken = func(string) string { return "✓ Bot connected: @TestBot" }
+	t.Cleanup(func() {
+		providerCatalog[0].Verify = origVerify
+		verifyTelegramToken = origTG
+	})
+
+	input := "\n" + // welcome: Enter
+		"1\n" + // step 1: DeepSeek
+		"sk-test-1234567890\n" + // API key
+		"3\n" + // step 2: add Ollama fallback
+		"4\n" + // step 2: done
+		"1\n" + // step 3: telegram yes
+		"123456:token\n" + // bot token
+		"987654\n" + // chat id
+		"1\n" + // editor: standard
+		"\n" // step 4: Enter when saved
+	var buf bytes.Buffer
+	if err := runSetup(&buf, strings.NewReader(input)); err != nil {
+		t.Fatalf("runSetup: %v", err)
+	}
+	out := buf.String()
+
+	// Welcome banner names the product.
+	for _, want := range []string{"VORTEX", "One binary. Any server. Fully autonomous.", "Press Enter to start setup"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("welcome missing %q", want)
+		}
+	}
+	// Provider table: all 9 providers + the cost column.
+	for _, want := range []string{
+		"PROVIDER", "COST/TASK", "BEST FOR",
+		"DeepSeek", "Claude", "OpenAI GPT", "Groq", "Gemini",
+		"AWS Bedrock", "Azure OpenAI", "OpenRouter", "Ollama",
+		"~$0.001", "~$0.015", "Recommended",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("provider table missing %q", want)
+		}
+	}
+	// Key entry masked after first 4 chars; plaintext never echoed.
+	if !strings.Contains(out, "sk-t****") {
+		t.Error("key echo not masked")
+	}
+	if strings.Contains(out, "sk-test-1234567890") {
+		t.Error("plaintext key echoed to output")
+	}
+	if !verifyCalled {
+		t.Error("verification step did not call the provider API")
+	}
+	// Multi-key step shows slot numbers.
+	for _, want := range []string{"Slot 1: DeepSeek (primary)", "Slot 2: Ollama (offline fallback)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("backup step missing %q", want)
+		}
+	}
+	// Telegram step shows the BotFather + getUpdates instructions and verifies.
+	for _, want := range []string{"@BotFather", "getUpdates", "Bot connected: @TestBot"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("telegram step missing %q", want)
+		}
+	}
+	// API key box.
+	for _, want := range []string{"Your VORTEX API Key", "it will not be shown again"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("API key step missing %q", want)
+		}
+	}
+	// Complete screen lists everything configured.
+	for _, want := range []string{
+		"VORTEX is configured and ready",
+		"AI: DeepSeek (primary) + Ollama (backup)",
+		"Telegram: connected",
+		"vortex start",
+		"OPENAI_BASE_URL",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("complete screen missing %q", want)
+		}
+	}
+
+	// Persisted config: primary + one backup slot + telegram.
+	cfg, ok := loadProviderConfig()
+	if !ok || cfg.Provider != "deepseek" {
+		t.Fatalf("saved provider = %+v", cfg)
+	}
+	if len(cfg.Backups) != 1 || cfg.Backups[0].Provider != "ollama" {
+		t.Errorf("backups = %+v, want one ollama slot", cfg.Backups)
+	}
+	if cfg.TelegramToken == "" || cfg.TelegramChatID != "987654" {
+		t.Errorf("telegram not persisted: %+v", cfg)
+	}
+	if key, _ := decryptKey(cfg.APIKeyEnc); key != "sk-test-1234567890" {
+		t.Errorf("primary key round-trip = %q", key)
 	}
 }
 
