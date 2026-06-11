@@ -181,6 +181,12 @@ type Coordinator struct {
 	// the per-session JSON memories map for persistence, listing, history, and
 	// context; the JSON path remains for deployments without a DB configured.
 	store *MemoryStore
+
+	// skills, when set, is the learned-skill store (upgrade 1 — self-improving
+	// agent): proven procedures are surfaced in the system prompt before a task
+	// runs, and skillWriter distils new skills from completed multi-step tasks.
+	skills      *SkillStore
+	skillWriter *SkillWriter
 }
 
 // SetMemoryStore wires the SQLite conversation store, making it the persistence
@@ -189,6 +195,92 @@ func (c *Coordinator) SetMemoryStore(s *MemoryStore) {
 	c.mu.Lock()
 	c.store = s
 	c.mu.Unlock()
+}
+
+// SetSkillStore wires the learned-skill store, enabling skill recall before
+// tasks and skill learning after them. Pass nil to disable.
+func (c *Coordinator) SetSkillStore(s *SkillStore) {
+	c.mu.Lock()
+	c.skills = s
+	if s != nil {
+		c.skillWriter = NewSkillWriter(c.cfg.AIGateway, s)
+	} else {
+		c.skillWriter = nil
+	}
+	c.mu.Unlock()
+}
+
+// skillMinSuccessRate is the floor below which a stored skill is not trusted
+// enough to steer the agent — it stays in the store (MaybeLearn won't relearn
+// it) but is left out of the prompt until its record improves.
+const skillMinSuccessRate = 0.8
+
+// findSkill returns the best proven skill for a message, or nil when no skill
+// store is configured or nothing relevant has a good enough track record.
+func (c *Coordinator) findSkill(msg string) *Skill {
+	c.mu.Lock()
+	store := c.skills
+	c.mu.Unlock()
+	if store == nil {
+		return nil
+	}
+	skills, err := store.Find(msg)
+	if err != nil {
+		return nil
+	}
+	for _, sk := range skills {
+		if sk.SuccessRate > skillMinSuccessRate {
+			return sk
+		}
+	}
+	return nil
+}
+
+// skillPromptBlock renders a skill as a system-prompt addendum so the model
+// follows the proven procedure instead of reasoning from scratch.
+func skillPromptBlock(sk *Skill) string {
+	var b strings.Builder
+	b.WriteString("\n\nYou have a proven skill for this type of task:\n")
+	b.WriteString(sk.Name + ": " + sk.Description + "\nSteps:\n")
+	for i, st := range sk.Steps {
+		fmt.Fprintf(&b, "%d. %s", i+1, st.Description)
+		if st.ToolName != "" {
+			b.WriteString(" (tool: " + st.ToolName + ")")
+		}
+		if st.IsOptional {
+			b.WriteString(" [optional]")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Use this procedure unless the user asks for something different.")
+	return b.String()
+}
+
+// markSkillUsed records the outcome of a skill-guided task (best effort).
+func (c *Coordinator) markSkillUsed(id string, success bool) {
+	c.mu.Lock()
+	store := c.skills
+	c.mu.Unlock()
+	if store == nil {
+		return
+	}
+	if err := store.MarkUsed(id, success); err != nil {
+		slog.Warn("recording skill use failed", "skill", id, "error", err)
+	}
+}
+
+// maybeLearn feeds a completed task to the skill writer (best effort — a
+// learning failure never affects the user-facing reply).
+func (c *Coordinator) maybeLearn(ctx context.Context, task string, steps []string, result string, success bool) {
+	c.mu.Lock()
+	w := c.skillWriter
+	c.mu.Unlock()
+	if w == nil {
+		return
+	}
+	if err := w.MaybeLearn(ctx, task, steps, result, success); err != nil {
+		slog.Warn("skill learning failed", "error", err)
+	}
 }
 
 // memory returns (loading if needed) the conversation memory for a session, or
@@ -693,7 +785,15 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 
 	switch intent {
 	case IntentGeneralQuestion:
-		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), c.agentSystemPrompt())
+		sysPrompt := c.agentSystemPrompt()
+		skill := c.findSkill(userMsg)
+		if skill != nil {
+			sysPrompt += skillPromptBlock(skill)
+		}
+		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), sysPrompt)
+		if skill != nil {
+			c.markSkillUsed(skill.ID, err == nil)
+		}
 		if err == nil {
 			c.recordExchange(sessionID, userMsg, reply)
 		}
@@ -1028,7 +1128,31 @@ func (c *Coordinator) handleOrchestrate(ctx context.Context, userMsg string) (st
 	if goal == "" {
 		return "What goal should I orchestrate? Describe the multi-step task.", nil
 	}
-	return c.cfg.Orchestrate(ctx, goal, func(string) {})
+
+	// Surface a proven skill (if any) to the orchestrator, collect progress
+	// steps, and feed the completed run back to the skill writer so the next
+	// similar goal starts from a known-good procedure.
+	var stepsMu sync.Mutex
+	var steps []string
+	progress := func(s string) {
+		stepsMu.Lock()
+		steps = append(steps, s)
+		stepsMu.Unlock()
+	}
+	skill := c.findSkill(goal)
+	runGoal := goal
+	if skill != nil {
+		runGoal = goal + skillPromptBlock(skill)
+	}
+	reply, err := c.cfg.Orchestrate(ctx, runGoal, progress)
+	if skill != nil {
+		c.markSkillUsed(skill.ID, err == nil)
+	}
+	stepsMu.Lock()
+	taken := append([]string(nil), steps...)
+	stepsMu.Unlock()
+	c.maybeLearn(ctx, goal, taken, reply, err == nil)
+	return reply, err
 }
 
 // handleLocalFile dispatches a LOCAL_FILE request to a local tool directly,
@@ -1068,6 +1192,7 @@ func (c *Coordinator) handleLocalFile(ctx context.Context, sessionID, userMsg st
 	if err != nil {
 		return transcript, nil // the transcript already carries the failure line
 	}
+	c.maybeLearn(ctx, userMsg, steps, transcript, true)
 	return transcript, nil
 }
 

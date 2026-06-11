@@ -78,11 +78,17 @@ func (w *SkillWriter) MaybeLearn(ctx context.Context, task string, steps []strin
 		return fmt.Errorf("agents: AI returned incomplete skill document")
 	}
 
+	// The skill was distilled from one successful execution, so it starts with
+	// that run on its record — making it immediately eligible for recall
+	// (findSkill requires a proven success rate) the next time a similar task
+	// arrives.
 	skill := &Skill{
 		Name:        doc.Name,
 		Description: doc.Description,
 		Trigger:     doc.Triggers,
 		CreatedFrom: truncateMemoryTitle(task),
+		UsedCount:   1,
+		SuccessRate: 1.0,
 	}
 	for _, st := range doc.Steps {
 		skill.Steps = append(skill.Steps, SkillStep{
