@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"github.com/vortex-run/vortex/internal/research"
 	"github.com/vortex-run/vortex/internal/secrets"
 	"github.com/vortex-run/vortex/internal/security"
+	"github.com/vortex-run/vortex/internal/startup"
 	"github.com/vortex-run/vortex/internal/studio"
 	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
@@ -76,8 +78,14 @@ func newStartCommand() *cobra.Command {
 	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
+	c.Flags().BoolVar(&startVerbose, "verbose", false, "show raw structured logs instead of the clean startup sequence")
 	return c
 }
+
+// startVerbose selects raw structured logs over the clean startup display
+// (--verbose). Non-interactive runs (systemd, CI, pipes) always use raw logs
+// regardless, so journals never lose records to the cosmetic display.
+var startVerbose bool
 
 // telegramFromFile reads the Telegram token + chat id from the setup config
 // (ai-provider.json), returning ok=false when absent.
@@ -106,16 +114,40 @@ func resolveWorkingDir() string {
 // reports not-ready (production audit I3).
 const readinessQueueDepthLimit = 1000
 
+// routeNames lists the configured route names for the startup display.
+func routeNames(cfg *config.Config) []string {
+	out := make([]string, 0, len(cfg.Routes))
+	for _, r := range cfg.Routes {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
 // runStart performs the start sequence. ctx controls shutdown: cancelling it
 // (or a SIGTERM/SIGINT) triggers a graceful stop. It is separated from the
 // cobra command so tests can drive it with a cancellable context instead of
 // blocking on real signals.
 func runStart(ctx context.Context, pidfile string) error {
+	// Clean human startup display (brand redesign part 2): active only for an
+	// interactive terminal without --verbose. While active, console logging is
+	// silenced (the ring buffer for the TUI log viewer still receives every
+	// record) and each subsystem reports through display.Step instead.
+	display := startup.NewStartupDisplay(startVerbose || !isInteractive())
+	if display.Active() {
+		log = logger.New(logger.Config{
+			Level:  logger.ParseLevel(flags.logLevel),
+			Format: logger.FormatText,
+			Output: io.Discard,
+		})
+	}
+
 	cfgMgr, err := config.NewManager(flags.configPath, log)
 	if err != nil {
+		display.StepFail("Configuration", err.Error())
 		return fmt.Errorf("config invalid, refusing to start: %w", err)
 	}
 	cfg := cfgMgr.Current()
+	display.Banner()
 
 	if err := writePIDFile(pidfile); err != nil {
 		return err
@@ -134,7 +166,13 @@ func runStart(ctx context.Context, pidfile string) error {
 	// chain (both derive "audit" from the shared master key).
 	auditLog, err := openRuntimeAuditLog(log)
 	if err != nil {
+		display.StepFail("Audit log", err.Error())
 		return fmt.Errorf("initialising audit log: %w", err)
+	}
+	if auditLog != nil {
+		display.Step("Audit log", "enabled, tamper-proof chain")
+	} else {
+		display.Step("Audit log", "disabled")
 	}
 	if auditLog != nil {
 		_ = auditLog.Append(ctx, "system", "vortex.start", "server", map[string]any{
@@ -160,6 +198,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	rbac := auth.NewRBAC()
 	apiSrv.SetAuth(auth.NewAuthMiddleware(keyStore, nil, rbac), keyStore, rbac)
 	log.Info("auth middleware enabled", "key_store", keyStorePath, "roles", len(rbac.Roles()))
+	display.Step("Authentication", fmt.Sprintf("enabled, %d keys", len(keyStore.List("default"))))
 	mgr.OnShutdown("apikeys", func(context.Context) error {
 		if err := keyStore.Save(keyStorePath); err != nil {
 			log.Warn("saving API key store failed", "err", err)
@@ -194,9 +233,16 @@ func runStart(ctx context.Context, pidfile string) error {
 	if flags.jsonLog {
 		format = logger.FormatJSON
 	}
+	// While the clean display is active the console output is discarded — the
+	// ring buffer (TUI/API log viewer) still receives every record.
+	var consoleOut io.Writer
+	if display.Active() && cfg.Observability.LogFile == "" {
+		consoleOut = io.Discard
+	}
 	log = logger.New(logger.Config{
 		Level:    logger.ParseLevel(cfg.Observability.LogLevel),
 		Format:   format,
+		Output:   consoleOut,
 		Sink:     logger.Sink(cfg.Observability.LogSink),
 		Path:     cfg.Observability.LogFile,
 		Sampling: cfg.Observability.LogSampling,
@@ -204,14 +250,23 @@ func runStart(ctx context.Context, pidfile string) error {
 	})
 
 	// --- secrets: validate declared keys, open store, load injectable env ---
-	if _, err := loadSecrets(ctx, cfg, log); err != nil {
+	secretEnv, err := loadSecrets(ctx, cfg, log)
+	if err != nil {
+		display.StepFail("Secrets", err.Error())
 		return fmt.Errorf("initialising secrets: %w", err)
 	}
+	display.Step("Secrets", fmt.Sprintf("%d/%d loaded", len(secretEnv), len(cfg.Secrets.Keys)))
 
 	// --- policy: OPA authorization engine (opt-in via VORTEX_POLICY_DIR) -----
 	policyEngine, err := buildPolicyEngine(log)
 	if err != nil {
+		display.StepFail("Policy engine", err.Error())
 		return fmt.Errorf("initialising policy engine: %w", err)
+	}
+	if os.Getenv("VORTEX_POLICY_DIR") != "" {
+		display.Step("Policy engine", "custom policies loaded")
+	} else {
+		display.Step("Policy engine", "default allow")
 	}
 	// Hot-reload policy on SIGHUP / POST /internal/reload alongside the config.
 	mgr.OnReload("policy", func(context.Context) error {
@@ -224,8 +279,10 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- security edge: IP blocking + rate limiting at the L7 edge ----------
 	edge, err := buildSecurityEdge(ctx, cfg, log)
 	if err != nil {
+		display.StepFail("Security edge", err.Error())
 		return fmt.Errorf("initialising security edge: %w", err)
 	}
+	display.Step("Security edge", "active")
 
 	// --- observability: metrics, tracing, profiling ------------------------
 	metrics := observability.NewMetrics("vortex")
@@ -258,6 +315,11 @@ func runStart(ctx context.Context, pidfile string) error {
 		"profiling", os.Getenv("VORTEX_PPROF") == "true",
 		"metrics_path", "/metrics",
 	)
+	if cfg.Observability.Tracing && cfg.Observability.TraceEndpoint != "" {
+		display.Step("Observability", "tracing + metrics")
+	} else {
+		display.Step("Observability", "metrics")
+	}
 
 	// --- plugins: sandboxed WASM runtime + registry -------------------------
 	pluginRuntime, pluginRegistry, err := buildPlugins(ctx, log)
@@ -278,7 +340,13 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- cluster: gossip + raft when multi-node, else single-node mode ------
 	clusterMgr, err := buildCluster(ctx, cfg, log)
 	if err != nil {
+		display.StepFail("Cluster", err.Error())
 		return fmt.Errorf("initialising cluster: %w", err)
+	}
+	if len(cfg.Cluster.Nodes) > 1 {
+		display.Step("Cluster", fmt.Sprintf("%s, %d members", cfg.Cluster.Name, len(cfg.Cluster.Nodes)))
+	} else {
+		display.Step("Cluster", cfg.Cluster.Name+", single node")
 	}
 	if clusterMgr != nil {
 		mgr.OnShutdown("cluster", func(context.Context) error { return clusterMgr.Shutdown() })
@@ -319,7 +387,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		tenantReg: tenantRegistry, tenantEnf: tenantEnforcer, log: log,
 	}
 	if err := dp.rebuild(cfgMgr.Holder()); err != nil {
+		display.StepFail("Routes", err.Error())
 		return fmt.Errorf("initialising proxy manager: %w", err)
+	}
+	if names := routeNames(cfg); len(names) > 0 {
+		display.Step("Routes", strings.Join(names, ", "))
+	} else {
+		display.Step("Routes", "none configured")
 	}
 	mgr.OnShutdown("proxy", func(c context.Context) error { return dp.stop(c) })
 
@@ -349,6 +423,16 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// --- messaging (M11): AI gateway + notification router + approval -------
 	msg := buildMessaging(log)
+	if msg.gateway != nil {
+		display.Step("AI gateway", "provider="+strings.Join(msg.gateway.ProviderNames(), ","))
+	} else {
+		display.Step("AI gateway", "not configured — run: vortex setup")
+	}
+	if msg.telegram != nil {
+		display.Step("Messaging", "telegram")
+	} else {
+		display.Step("Messaging", "disabled")
+	}
 
 	// Burst-protection bans (M19) alert through the notification router
 	// (Telegram et al) when messaging is configured.
@@ -393,6 +477,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	forgeJobs := buildForge(gateway, msg, log)
 	if forgeJobs != nil {
 		apiSrv.SetForgeRuntime(&forgeRuntimeAdapter{jm: forgeJobs})
+		display.Step("Forge", "ready")
 	}
 
 	var clarifying, pending func(string) bool
@@ -424,6 +509,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
 		apiSrv.SetAgentRuntime(adapter)
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
+		display.Step("Agent runtime", "8 slots ready")
 		resumeInterruptedWorkflows(ctx, workflowStore, agentRuntime, msg.router, log)
 
 		// Aggregate agent-plane health into /ready (production audit I3): report
@@ -453,6 +539,7 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	// --- self-healing (M14): health monitor + recovery + SLO tracking -------
 	buildHealing(ctx, cfg, apiSrv, mgr, msg, auditLog, metrics, log)
+	display.Step("Self-healing", "enabled")
 
 	log.Info("VORTEX started",
 		"version", version,
@@ -460,6 +547,20 @@ func runStart(ctx context.Context, pidfile string) error {
 		"api_addr", apiSrv.Addr(),
 		"routes", len(cfg.Routes),
 	)
+	provider := ""
+	if msg.gateway != nil {
+		if names := msg.gateway.ProviderNames(); len(names) > 0 {
+			provider = names[0]
+		}
+	}
+	display.Ready(startup.ReadyConfig{
+		Version:    version,
+		Cluster:    cfg.Cluster.Name,
+		APIAddr:    apiSrv.Addr(),
+		Routes:     routeNames(cfg),
+		AIProvider: provider,
+		Telegram:   msg.telegram != nil,
+	})
 
 	mgr.Run(ctx)
 	log.Info("VORTEX stopped cleanly")
