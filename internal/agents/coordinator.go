@@ -173,9 +173,22 @@ type Coordinator struct {
 	active        map[string]Agent
 	pending       map[string]*pendingApproval // session → action awaiting approval
 	sessions      map[string]*SessionState    // session → conversation state
-	memories      map[string]*Memory          // session → conversation memory
+	memories      map[string]*Memory          // session → conversation memory (JSON fallback)
 	projectCtx    string                      // cached project description
 	projectCtxSet bool
+
+	// store, when set, is the SQLite conversation backend (M20). It supersedes
+	// the per-session JSON memories map for persistence, listing, history, and
+	// context; the JSON path remains for deployments without a DB configured.
+	store *MemoryStore
+}
+
+// SetMemoryStore wires the SQLite conversation store, making it the persistence
+// backend for this coordinator. Pass nil to use the legacy JSON store.
+func (c *Coordinator) SetMemoryStore(s *MemoryStore) {
+	c.mu.Lock()
+	c.store = s
+	c.mu.Unlock()
 }
 
 // memory returns (loading if needed) the conversation memory for a session, or
@@ -198,8 +211,15 @@ func (c *Coordinator) memory(sessionID string) *Memory {
 }
 
 // ListSessions returns stored conversation sessions (newest first), or nil when
-// no MemoryStore is configured.
+// no memory backend is configured.
 func (c *Coordinator) ListSessions() []SessionInfo {
+	if s := c.memoryStore(); s != nil {
+		out, err := s.ListSessions()
+		if err != nil {
+			return nil
+		}
+		return out
+	}
 	if c.cfg.MemoryStore == "" {
 		return nil
 	}
@@ -208,6 +228,13 @@ func (c *Coordinator) ListSessions() []SessionInfo {
 
 // SessionHistory returns the persisted messages for a session.
 func (c *Coordinator) SessionHistory(sessionID string) []MemoryMessage {
+	if s := c.memoryStore(); s != nil {
+		out, err := s.Recent(sessionID, 0)
+		if err != nil {
+			return nil
+		}
+		return out
+	}
 	m := c.memory(sessionID)
 	if m == nil {
 		return nil
@@ -217,6 +244,11 @@ func (c *Coordinator) SessionHistory(sessionID string) []MemoryMessage {
 
 // recordExchange appends the user message + agent reply to memory and persists.
 func (c *Coordinator) recordExchange(sessionID, userMsg, reply string) {
+	if s := c.memoryStore(); s != nil {
+		_ = s.AppendMessage(sessionID, "user", userMsg, nil)
+		_ = s.AppendMessage(sessionID, "agent", reply, nil)
+		return
+	}
 	m := c.memory(sessionID)
 	if m == nil {
 		return
@@ -226,14 +258,30 @@ func (c *Coordinator) recordExchange(sessionID, userMsg, reply string) {
 	_ = m.Save()
 }
 
+// memoryStore returns the SQLite store under lock (nil when JSON-backed).
+func (c *Coordinator) memoryStore() *MemoryStore {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store
+}
+
 // contextPrompt builds an AI prompt that includes the last few turns of history
 // for continuity, followed by the current message.
 func (c *Coordinator) contextPrompt(sessionID, userMsg string) string {
-	m := c.memory(sessionID)
-	if m == nil {
-		return userMsg
+	var recent []MemoryMessage
+	if s := c.memoryStore(); s != nil {
+		msgs, err := s.Recent(sessionID, 10)
+		if err != nil {
+			return userMsg
+		}
+		recent = msgs
+	} else {
+		m := c.memory(sessionID)
+		if m == nil {
+			return userMsg
+		}
+		recent = m.Recent(10)
 	}
-	recent := m.Recent(10)
 	if len(recent) == 0 {
 		return userMsg
 	}

@@ -1027,6 +1027,22 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		log.Warn("agent runtime disabled: coordinator init failed", "err", err)
 		return nil
 	}
+
+	// SQLite conversation store (M20): supersedes the JSON memory directory for
+	// persistence, listing, history, and full-text search. On first run, legacy
+	// per-session JSON files are migrated into the database (idempotent).
+	memoryDir := filepath.Join(cacheDir, "vortex", "memory")
+	if store, serr := agents.NewMemoryStore(filepath.Join(memoryDir, "conversations.db")); serr != nil {
+		log.Warn("SQLite conversation store unavailable, using JSON memory", "err", serr)
+	} else {
+		if n, merr := store.MigrateJSONDir(memoryDir); merr != nil {
+			log.Warn("conversation JSON→SQLite migration failed", "err", merr)
+		} else if n > 0 {
+			log.Info("migrated sessions from JSON to SQLite", "count", n)
+		}
+		coord.SetMemoryStore(store)
+		log.Info("SQLite conversation store enabled", "db", filepath.Join(memoryDir, "conversations.db"))
+	}
 	rt, err := agents.NewRuntime(agents.RuntimeConfig{
 		Bus: bus, Coordinator: coord, MaxAgents: 8,
 		SandboxBase: sandboxBase, Logger: log,
