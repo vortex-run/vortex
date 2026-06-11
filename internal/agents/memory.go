@@ -67,9 +67,12 @@ func (m *Memory) Append(role, content string) {
 	m.UpdatedAt = time.Now()
 }
 
-// path returns the on-disk file for this memory's session.
+// path returns the on-disk file for this memory's session. filepath.Base
+// strips any directory components from the session ID as defense-in-depth
+// against path traversal (production audit H1) — the API layer already
+// validates the ID, but the store must not trust it.
 func (m *Memory) path() string {
-	return filepath.Join(m.storePath, m.SessionID+".json")
+	return filepath.Join(m.storePath, filepath.Base(m.SessionID)+".json")
 }
 
 // Save writes the conversation to storePath/<sessionID>.json.

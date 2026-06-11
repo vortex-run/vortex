@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -75,6 +76,24 @@ type agentSubmitResponse struct {
 	SessionID string `json:"session_id"`
 }
 
+// sessionIDPattern allows only characters that are safe as a single path
+// element: letters, digits, '-', '_', and '.', 1–64 chars. It deliberately
+// excludes '/' and '\\' (path separators) and rejects "." / ".." traversal.
+var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// validSessionID reports whether id is a safe session identifier (no path
+// traversal). "." and ".." are rejected even though they match the charset.
+func validSessionID(id string) bool {
+	if id == "." || id == ".." {
+		return false
+	}
+	return sessionIDPattern.MatchString(id)
+}
+
+// maxAgentResponseBytes caps the buffered non-SSE agent response so a runaway
+// generation cannot exhaust server memory (production audit L1).
+const maxAgentResponseBytes = 8 << 20 // 8MB
+
 // handleAgentSubmit submits a user message to the coordinator and returns its
 // response. If the client sends Accept: text/event-stream, response chunks are
 // streamed as Server-Sent Events; otherwise a single JSON object is returned.
@@ -90,6 +109,14 @@ func (s *Server) handleAgentSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Message == "" {
 		http.Error(w, "message is required", http.StatusBadRequest)
+		return
+	}
+	// A client-supplied session_id flows into a filesystem path in the memory
+	// store; reject anything that is not a plain id so it cannot traverse out
+	// of the session directory (production audit H1). An empty id is allowed —
+	// the runtime generates one server-side.
+	if req.SessionID != "" && !validSessionID(req.SessionID) {
+		http.Error(w, "invalid session_id (allowed: letters, digits, '-', '_', '.', max 64)", http.StatusBadRequest)
 		return
 	}
 
@@ -109,13 +136,27 @@ func (s *Server) handleAgentSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Non-streaming: collect the (single) response.
-	var resp string
+	// Non-streaming: collect the response with a Builder (no O(n²) concat) and
+	// a hard size cap so a runaway generation can't exhaust memory (L1).
+	var b strings.Builder
+	truncated := false
 	for chunk := range ch {
-		resp += chunk
+		if b.Len()+len(chunk) > maxAgentResponseBytes {
+			b.WriteString(chunk[:maxAgentResponseBytes-b.Len()])
+			truncated = true
+			// Drain the rest so the producer goroutine isn't blocked.
+			//nolint:revive // intentional drain of remaining chunks
+			for range ch {
+			}
+			break
+		}
+		b.WriteString(chunk)
+	}
+	if truncated {
+		s.log.Warn("agent response truncated at cap", "cap_bytes", maxAgentResponseBytes, "session", req.SessionID)
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(agentSubmitResponse{Response: resp, SessionID: req.SessionID}); err != nil {
+	if err := json.NewEncoder(w).Encode(agentSubmitResponse{Response: b.String(), SessionID: req.SessionID}); err != nil {
 		s.log.Error("encoding agent submit response", "err", err)
 	}
 }
@@ -203,6 +244,10 @@ func (s *Server) handleAgentSessionHistory(w http.ResponseWriter, r *http.Reques
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+	if !validSessionID(id) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
 		return
 	}
 	msgs := s.agentRuntime.SessionHistory(id)

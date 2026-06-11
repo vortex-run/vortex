@@ -336,3 +336,31 @@ func TestAgentSessionHistory_ReturnsMessages(t *testing.T) {
 		t.Errorf("session history should include messages: %s", rec.Body)
 	}
 }
+
+func TestAgentSubmit_RejectsTraversalSessionID(t *testing.T) {
+	addr := newAgentTestServer(t, stubRuntime{response: "x"})
+	for _, bad := range []string{"../../etc/passwd", "a/b", ".."} {
+		body := `{"message":"hi","session_id":"` + bad + `"}`
+		resp, err := http.Post("http://"+addr+"/api/agents/submit", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST %q: %v", bad, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("session_id %q: status = %d, want 400", bad, resp.StatusCode)
+		}
+	}
+}
+
+func TestAgentSubmit_AllowsEmptySessionID(t *testing.T) {
+	addr := newAgentTestServer(t, stubRuntime{response: "x"})
+	resp, err := http.Post("http://"+addr+"/api/agents/submit", "application/json",
+		strings.NewReader(`{"message":"hi"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("empty session_id should be allowed (server generates one), got %d", resp.StatusCode)
+	}
+}
