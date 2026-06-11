@@ -101,6 +101,9 @@ type Server struct {
 	// logBuffer backs GET /api/logs (recent structured log lines). Optional.
 	logBuffer *LogBuffer
 
+	// readinessFunc, when set, aggregates subsystem readiness for /ready.
+	readinessFunc func() error
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -375,12 +378,23 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	handler = s.correlationMiddleware(handler)
 	handler = proxyhttp.NewSecurityHeaders(proxyhttp.SecurityHeadersConfig{Version: version})(handler)
 	s.srv = &http.Server{
-		Addr:              addr,
-		Handler:           handler,
+		Addr:    addr,
+		Handler: handler,
+		// Bound every phase of a request so slowloris-style and idle
+		// connections cannot pin resources indefinitely (production audit I4).
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	return s
 }
+
+// SetReadinessFunc registers a callback that reports whether the server's
+// subsystems are ready. When set, /ready returns 503 if it returns a non-nil
+// error, instead of always reporting ready (production audit I3). The error
+// message is surfaced in the response body.
+func (s *Server) SetReadinessFunc(fn func() error) { s.readinessFunc = fn }
 
 // SetBurstNotifier wires the out-of-band alert (e.g. Telegram via the
 // notification router) sent when burst protection bans an IP.
@@ -550,12 +564,19 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	s.metricsHandler.ServeHTTP(w, r)
 }
 
-// handleReady is a readiness probe. The management server only begins serving
-// once boot has completed, so reaching this handler means VORTEX is ready; it
-// returns 200 with a small JSON body. (As subsystems gain their own readiness
-// gates in later milestones, this will aggregate them.)
+// handleReady is a readiness probe. When a readiness func is registered
+// (SetReadinessFunc) it aggregates subsystem health and returns 503 with the
+// reason if anything is not ready (production audit I3); otherwise it reports
+// ready, since reaching this handler means boot completed.
 func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if s.readinessFunc != nil {
+		if err := s.readinessFunc(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ready": false, "reason": err.Error()})
+			return
+		}
+	}
 	if err := json.NewEncoder(w).Encode(map[string]bool{"ready": true}); err != nil {
 		s.log.Error("encoding ready response", "err", err)
 	}

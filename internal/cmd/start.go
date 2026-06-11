@@ -102,6 +102,10 @@ func resolveWorkingDir() string {
 	return wd
 }
 
+// readinessQueueDepthLimit is the agent submit-queue depth above which /ready
+// reports not-ready (production audit I3).
+const readinessQueueDepthLimit = 1000
+
 // runStart performs the start sequence. ctx controls shutdown: cancelling it
 // (or a SIGTERM/SIGINT) triggers a graceful stop. It is separated from the
 // cobra command so tests can drive it with a cancellable context instead of
@@ -400,8 +404,19 @@ func runStart(ctx context.Context, pidfile string) error {
 	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn)
 	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
-		apiSrv.SetAgentRuntime(&agentRuntimeAdapter{rt: agentRuntime})
+		adapter := &agentRuntimeAdapter{rt: agentRuntime}
+		apiSrv.SetAgentRuntime(adapter)
 		mgr.OnShutdown("agents", func(c context.Context) error { return agentRuntime.Stop(c) })
+
+		// Aggregate agent-plane health into /ready (production audit I3): report
+		// not-ready when the submit queue is deeply backed up, so an orchestration
+		// stall or executor hang fails readiness instead of silently degrading.
+		apiSrv.SetReadinessFunc(func() error {
+			if d := adapter.Stats().QueueDepth; d > readinessQueueDepthLimit {
+				return fmt.Errorf("agent queue saturated (%d pending)", d)
+			}
+			return nil
+		})
 
 		// Register messaging webhooks (each with its own per-IP rate limit) now
 		// that the runtime exists to receive their messages.

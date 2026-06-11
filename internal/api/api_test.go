@@ -3,12 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,4 +155,42 @@ func newGetReq(path, key string) *http.Request {
 		req.Header.Set("X-API-Key", key)
 	}
 	return req
+}
+
+func TestReady_AggregatesReadinessFunc(t *testing.T) {
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+
+	// Default: no readiness func → ready.
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := serve(s, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("default /ready = %d, want 200", rec.Code)
+	}
+
+	// Not-ready func → 503 with reason.
+	s.SetReadinessFunc(func() error { return errors.New("queue saturated") })
+	rec = serve(s, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("not-ready /ready = %d, want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "queue saturated") {
+		t.Errorf("body should include reason: %s", rec.Body.String())
+	}
+
+	// Ready func → 200 again.
+	s.SetReadinessFunc(func() error { return nil })
+	rec = serve(s, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("ready /ready = %d, want 200", rec.Code)
+	}
+}
+
+func TestManagementServerHasTimeouts(t *testing.T) {
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	if s.srv.ReadTimeout == 0 || s.srv.WriteTimeout == 0 || s.srv.IdleTimeout == 0 {
+		t.Errorf("management server missing timeouts: read=%v write=%v idle=%v",
+			s.srv.ReadTimeout, s.srv.WriteTimeout, s.srv.IdleTimeout)
+	}
 }
