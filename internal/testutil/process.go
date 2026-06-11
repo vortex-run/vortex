@@ -184,11 +184,13 @@ func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 
 	// Readiness is tied to THIS child's own log output, not just a /health 200
 	// (a stale predecessor still holding :9090 would also answer 200, yielding
-	// the wrong server). We wait until this process logs that its management API
-	// is listening, then confirm /health.
+	// the wrong server). The management API starts serving before the later
+	// subsystems (studio, agents, webhooks) are wired onto it, so waiting for
+	// "management API listening" alone races tests that hit those endpoints
+	// immediately. "VORTEX started" is logged only after all wiring completes.
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(p.logBuf.String(), "management API listening") {
+		if strings.Contains(p.logBuf.String(), "VORTEX started") {
 			resp, err := http.Get(apiBase + "/health")
 			if err == nil {
 				_ = resp.Body.Close()
