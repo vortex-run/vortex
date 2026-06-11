@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1061,3 +1062,171 @@ func TestEvictOldest_NoOpUnderCap(t *testing.T) {
 }
 
 func fmtID(i int) string { return fmt.Sprintf("s%d", i) }
+
+// skillCapturingGateway records every system prompt it receives and answers
+// intent, skill-extraction, and direct-answer prompts appropriately.
+type skillCapturingGateway struct {
+	mu         sync.Mutex
+	sysPrompts []string
+}
+
+func (g *skillCapturingGateway) Complete(_ context.Context, _, systemPrompt string) (string, error) {
+	g.mu.Lock()
+	g.sysPrompts = append(g.sysPrompts, systemPrompt)
+	g.mu.Unlock()
+	low := strings.ToLower(systemPrompt)
+	if strings.Contains(low, "classify") {
+		return string(IntentGeneralQuestion), nil
+	}
+	if strings.Contains(low, "reusable skill") {
+		return skillDocJSON, nil
+	}
+	return "done", nil
+}
+
+func (g *skillCapturingGateway) prompts() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.sysPrompts...)
+}
+
+func saveSkillWithRecord(t *testing.T, store *SkillStore, name string, trigger []string, rate float64, used int) *Skill {
+	t.Helper()
+	sk := &Skill{
+		Name: name, Description: "proven procedure for " + name,
+		Trigger:     trigger,
+		Steps:       []SkillStep{{Description: "step one"}, {Description: "step two"}},
+		SuccessRate: rate, UsedCount: used,
+	}
+	if err := store.Save(sk); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return sk
+}
+
+func TestHandleMessage_SkillIncludedInPrompt(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+	sk := saveSkillWithRecord(t, store, "Create FastAPI app", []string{"fastapi"}, 1.0, 5)
+
+	if _, err := c.HandleMessage(context.Background(), "how do I set up a fastapi project?", "s1"); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	var found bool
+	for _, p := range gw.prompts() {
+		if strings.Contains(p, "proven skill") && strings.Contains(p, sk.Name) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("skill block not included in any system prompt")
+	}
+	// The skill-guided answer succeeded, so its record was updated.
+	skills, _ := store.List()
+	if skills[0].UsedCount != 6 {
+		t.Errorf("UsedCount = %d, want 6 (MarkUsed after answer)", skills[0].UsedCount)
+	}
+}
+
+func TestHandleMessage_LowSuccessRateSkillIgnored(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+	saveSkillWithRecord(t, store, "Flaky FastAPI procedure", []string{"fastapi"}, 0.3, 10)
+
+	if _, err := c.HandleMessage(context.Background(), "how do I set up a fastapi project?", "s1"); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	for _, p := range gw.prompts() {
+		if strings.Contains(p, "proven skill") {
+			t.Error("low success rate skill was included in prompt")
+		}
+	}
+	skills, _ := store.List()
+	if skills[0].UsedCount != 10 {
+		t.Errorf("UsedCount = %d, want 10 (unused skill must not be marked)", skills[0].UsedCount)
+	}
+}
+
+func TestHandleMessage_HighSuccessRateSkillPreferred(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+	good := saveSkillWithRecord(t, store, "Reliable FastAPI procedure", []string{"fastapi"}, 0.9, 10)
+	bad := saveSkillWithRecord(t, store, "Flaky FastAPI procedure", []string{"fastapi"}, 0.4, 10)
+
+	if _, err := c.HandleMessage(context.Background(), "how do I set up a fastapi project?", "s1"); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	var sawGood, sawBad bool
+	for _, p := range gw.prompts() {
+		if strings.Contains(p, good.Name) {
+			sawGood = true
+		}
+		if strings.Contains(p, bad.Name) {
+			sawBad = true
+		}
+	}
+	if !sawGood || sawBad {
+		t.Errorf("prompt skill selection: good=%v bad=%v, want good only", sawGood, sawBad)
+	}
+}
+
+func TestHandleMessage_OrchestrateTriggersMaybeLearn(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+
+	c.cfg.Orchestrate = func(_ context.Context, _ string, progressFn func(string)) (string, error) {
+		progressFn("planned tasks")
+		progressFn("built backend")
+		progressFn("ran tests")
+		return "all tasks complete", nil
+	}
+
+	if _, err := c.HandleMessage(context.Background(), "/orchestrate build a fastapi app with tests", "s1"); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	skills, err := store.List()
+	if err != nil || len(skills) != 1 {
+		t.Fatalf("List = %d skills (%v), want 1 learned from orchestration", len(skills), err)
+	}
+	if skills[0].Name != "Create FastAPI app" {
+		t.Errorf("learned skill = %q", skills[0].Name)
+	}
+}
+
+func TestHandleMessage_FailedOrchestrationNotLearned(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+
+	c.cfg.Orchestrate = func(_ context.Context, _ string, progressFn func(string)) (string, error) {
+		progressFn("planned tasks")
+		progressFn("built backend")
+		progressFn("tests failed")
+		return "", fmt.Errorf("orchestration failed")
+	}
+
+	_, _ = c.HandleMessage(context.Background(), "/orchestrate build a fastapi app with tests", "s1")
+	if skills, _ := store.List(); len(skills) != 0 {
+		t.Errorf("failed orchestration learned %d skills, want 0", len(skills))
+	}
+}
+
+func TestSetSkillStoreNilDisables(t *testing.T) {
+	c := newTestCoordinator(t, StubAIGateway{})
+	store := newTestSkillStore(t)
+	c.SetSkillStore(store)
+	c.SetSkillStore(nil)
+	if sk := c.findSkill("anything"); sk != nil {
+		t.Errorf("findSkill after disable = %v, want nil", sk)
+	}
+	c.maybeLearn(context.Background(), "task", []string{"a", "b", "c"}, "done", true) // must not panic
+}
