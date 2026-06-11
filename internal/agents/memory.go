@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/atomicfile"
 )
 
 // MemoryMessage is one persisted turn in a conversation.
@@ -89,7 +91,7 @@ func (m *Memory) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.path(), data, 0o600)
+	return atomicfile.Write(m.path(), data, 0o600)
 }
 
 // Load reads a session's conversation from disk into this Memory.

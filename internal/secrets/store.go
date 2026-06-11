@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/chacha20poly1305"
+
+	"github.com/vortex-run/vortex/pkg/atomicfile"
 )
 
 // secretExt is the file extension for stored secrets.
@@ -72,7 +74,7 @@ func (s *SecretStore) Set(name, value string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.fileFor(name), enc, 0o600); err != nil {
+	if err := atomicfile.Write(s.fileFor(name), enc, 0o600); err != nil {
 		return fmt.Errorf("secrets: writing secret %q: %w", name, err)
 	}
 	return nil

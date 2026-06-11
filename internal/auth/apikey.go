@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/vortex-run/vortex/pkg/atomicfile"
 )
 
 // bcryptCost is the work factor used when hashing API-key secrets.
@@ -39,15 +41,26 @@ type APIKey struct {
 }
 
 // APIKeyStore holds issued API keys in memory, with optional JSON persistence.
-// It is safe for concurrent use.
+// It is safe for concurrent use. When a persistence path has been set
+// (SetPath), Issue and Revoke flush to disk immediately so an unclean exit
+// does not lose keys issued since boot (production audit M3).
 type APIKeyStore struct {
 	mu   sync.RWMutex
 	keys map[string]APIKey // keyed by APIKey.ID
+	path string            // persistence path; empty disables auto-save
 }
 
 // NewAPIKeyStore returns an empty store.
 func NewAPIKeyStore() *APIKeyStore {
 	return &APIKeyStore{keys: make(map[string]APIKey)}
+}
+
+// SetPath enables immediate persistence to path: subsequent Issue/Revoke
+// calls flush the whole store atomically. It does not itself write the file.
+func (s *APIKeyStore) SetPath(path string) {
+	s.mu.Lock()
+	s.path = path
+	s.mu.Unlock()
 }
 
 // Issue creates a new API key for userID/orgID with the given roles. It returns
@@ -89,7 +102,15 @@ func (s *APIKeyStore) Issue(userID, orgID string, roles []Role, desc string, ttl
 
 	s.mu.Lock()
 	s.keys[id] = key
+	path := s.path
 	s.mu.Unlock()
+
+	// Persist immediately so a crash before shutdown does not lose the key.
+	if path != "" {
+		if err := s.Save(path); err != nil {
+			return key, secret, fmt.Errorf("auth: persisting issued key: %w", err)
+		}
+	}
 	return key, secret, nil
 }
 
@@ -119,11 +140,16 @@ func (s *APIKeyStore) Verify(secret string) (APIKey, error) {
 	return key, nil
 }
 
-// Revoke removes the key with the given ID. It is idempotent.
+// Revoke removes the key with the given ID. It is idempotent. When a
+// persistence path is set the change is flushed to disk immediately.
 func (s *APIKeyStore) Revoke(id string) error {
 	s.mu.Lock()
 	delete(s.keys, id)
+	path := s.path
 	s.mu.Unlock()
+	if path != "" {
+		return s.Save(path)
+	}
 	return nil
 }
 
@@ -155,7 +181,7 @@ func (s *APIKeyStore) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("auth: encoding key store: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := atomicfile.Write(path, data, 0o600); err != nil {
 		return fmt.Errorf("auth: writing key store %s: %w", path, err)
 	}
 	return nil

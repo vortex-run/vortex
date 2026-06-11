@@ -149,6 +149,10 @@ func runStart(ctx context.Context, pidfile string) error {
 	// then protect the management API. /internal/* stays reachable from localhost
 	// without a key (control plane); /api/keys requires an admin key.
 	keyStore, keyStorePath := openAPIKeyStore(log)
+	// Persist on every Issue/Revoke (atomic write) so an unclean exit does not
+	// lose keys issued since boot (production audit M3); the shutdown hook
+	// below is now a final flush rather than the only save.
+	keyStore.SetPath(keyStorePath)
 	rbac := auth.NewRBAC()
 	apiSrv.SetAuth(auth.NewAuthMiddleware(keyStore, nil, rbac), keyStore, rbac)
 	log.Info("auth middleware enabled", "key_store", keyStorePath, "roles", len(rbac.Roles()))

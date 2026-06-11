@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/atomicfile"
 )
 
 // metaExt is the file extension for secret metadata, stored beside the
@@ -63,7 +65,7 @@ func (s *SecretStore) SetWithMetadata(name, value string, meta SecretMetadata) e
 	if err != nil {
 		return fmt.Errorf("secrets: encoding metadata for %q: %w", name, err)
 	}
-	if err := os.WriteFile(s.metaFileFor(name), b, 0o600); err != nil {
+	if err := atomicfile.Write(s.metaFileFor(name), b, 0o600); err != nil {
 		return fmt.Errorf("secrets: writing metadata for %q: %w", name, err)
 	}
 	return nil
@@ -220,7 +222,7 @@ func (s *SecretStore) Rekey(newKey []byte) error {
 		if err != nil {
 			return fmt.Errorf("secrets: rekey encrypting %q: %w", name, err)
 		}
-		if err := os.WriteFile(s.fileFor(name), enc, 0o600); err != nil {
+		if err := atomicfile.Write(s.fileFor(name), enc, 0o600); err != nil {
 			return fmt.Errorf("secrets: rekey writing %q: %w", name, err)
 		}
 	}
