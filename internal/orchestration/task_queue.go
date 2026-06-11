@@ -116,7 +116,11 @@ func (q *TaskQueue) depStatus(t *Task) depResult {
 	for _, dep := range t.DependsOn {
 		d, ok := q.tasks[dep]
 		if !ok {
-			return depWaiting // unknown dep — wait (may be added later)
+			// Unknown dependency: treat as failed rather than waiting forever.
+			// Run() calls Validate() up front so this should be unreachable in
+			// the normal path, but if a task is added after validation this
+			// prevents a silent strand (production audit M6).
+			return depFailed
 		}
 		switch d.State {
 		case StateFailed:
@@ -199,6 +203,31 @@ func (q *TaskQueue) Stats() map[TaskState]int {
 		counts[t.State]++
 	}
 	return counts
+}
+
+// Validate checks the task graph is runnable before execution: every
+// DependsOn ID must reference a task that exists, and the graph must be
+// acyclic. An unknown dependency would otherwise leave the dependent task
+// stranded in "pending" forever — the run loop would exit and report it as
+// neither complete nor failed, silently skipping work (production audit M6).
+// Returns a descriptive error naming the first problem, or nil when runnable.
+func (q *TaskQueue) Validate() error {
+	q.mu.Lock()
+	for _, id := range q.order {
+		t := q.tasks[id]
+		for _, dep := range t.DependsOn {
+			if _, ok := q.tasks[dep]; !ok {
+				q.mu.Unlock()
+				return fmt.Errorf("orchestration: task %q depends on unknown task %q", t.ID, dep)
+			}
+		}
+	}
+	q.mu.Unlock()
+
+	if q.HasCycle() {
+		return fmt.Errorf("orchestration: task graph has a cycle")
+	}
+	return nil
 }
 
 // HasCycle reports whether the dependency graph contains a cycle (which would

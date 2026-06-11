@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -188,5 +189,52 @@ func TestQueue_ConcurrentClaim(t *testing.T) {
 	}
 	if len(seen) != 50 {
 		t.Errorf("claimed %d unique tasks, want 50", len(seen))
+	}
+}
+
+func TestValidate_RejectsUnknownDependency(t *testing.T) {
+	q := NewTaskQueue()
+	if err := q.Add(&Task{ID: "a", DependsOn: []string{"ghost"}}); err != nil {
+		t.Fatal(err)
+	}
+	err := q.Validate()
+	if err == nil {
+		t.Fatal("Validate should reject an unknown dependency")
+	}
+	if !strings.Contains(err.Error(), "ghost") {
+		t.Errorf("error should name the missing dep: %v", err)
+	}
+}
+
+func TestValidate_AcceptsResolvableGraph(t *testing.T) {
+	q := NewTaskQueue()
+	_ = q.Add(&Task{ID: "a"})
+	_ = q.Add(&Task{ID: "b", DependsOn: []string{"a"}})
+	_ = q.Add(&Task{ID: "c", DependsOn: []string{"a", "b"}})
+	if err := q.Validate(); err != nil {
+		t.Errorf("valid graph should pass Validate: %v", err)
+	}
+}
+
+func TestValidate_RejectsCycle(t *testing.T) {
+	q := NewTaskQueue()
+	_ = q.Add(&Task{ID: "a", DependsOn: []string{"b"}})
+	_ = q.Add(&Task{ID: "b", DependsOn: []string{"a"}})
+	if err := q.Validate(); err == nil {
+		t.Error("Validate should reject a cycle")
+	}
+}
+
+func TestClaim_FailsTaskWithUnknownDependency(t *testing.T) {
+	// Defense-in-depth: even if a task with an unknown dep slips past Validate
+	// (e.g. added later), Claim must not strand it — it is marked failed.
+	q := NewTaskQueue()
+	_ = q.Add(&Task{ID: "a", DependsOn: []string{"ghost"}})
+	if claimed := q.Claim(); claimed != nil {
+		t.Errorf("task with unknown dep should not be claimable, got %+v", claimed)
+	}
+	got, _ := q.Get("a")
+	if got.State != StateFailed {
+		t.Errorf("task with unknown dep should be marked failed, got %s", got.State)
 	}
 }

@@ -75,8 +75,10 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 			return nil, err
 		}
 	}
-	if q.HasCycle() {
-		return nil, fmt.Errorf("orchestration: task graph has a cycle")
+	// Validate up front: unknown dependency IDs and cycles both fail fast here
+	// rather than silently stranding tasks mid-run (production audit M6).
+	if err := q.Validate(); err != nil {
+		return nil, err
 	}
 
 	start := time.Now()
