@@ -45,6 +45,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ed25519 signing key for checksums.txt (production audit H4). When
+          # the secret is unset the sign wrapper no-ops and the release is
+          # integrity-only.
+          VORTEX_SIGNING_KEY: ${{ secrets.VORTEX_SIGNING_KEY }}
 
       # Whole-repository SBOM (source dependencies, not just the shipped
       # archives) kept as a workflow artifact for audit/compliance trails.

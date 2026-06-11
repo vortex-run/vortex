@@ -82,6 +82,17 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 		}
 	}
 
+	// Authenticity: when a signing key is pinned into this binary, verify the
+	// Ed25519 signature over checksums.txt before trusting any checksum — this
+	// is what defeats a release that swaps both the binary and its checksum
+	// (production audit H4). In integrity-only mode (no pinned key) this is a
+	// no-op and only the SHA-256 check applies.
+	if verr := update.VerifyChecksumsSignature(ctx, rel); verr != nil {
+		fmt.Fprintf(cmd.OutOrStderr(), "error: release signature check failed: %v\n", verr)
+		fmt.Fprintln(cmd.OutOrStderr(), "refusing to install an unverified release")
+		return errSelfUpdate
+	}
+
 	// Fetch and parse checksums.txt for this asset.
 	sums, err := update.FetchChecksums(ctx, rel)
 	if err != nil {
