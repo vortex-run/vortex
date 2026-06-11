@@ -37,12 +37,15 @@ jobs:
       - name: Install syft
         run: go install github.com/anchore/syft/cmd/syft@latest
 
+      # When VORTEX_SIGNING_KEY is unset the sign wrapper creates no .sig, but
+      # GoReleaser would still try to upload checksums.txt.sig and fail — so
+      # skip the sign step entirely and ship an integrity-only release.
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean ${{ secrets.VORTEX_SIGNING_KEY == '' && '--skip=sign' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Ed25519 signing key for checksums.txt (production audit H4). When
