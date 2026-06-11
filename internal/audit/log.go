@@ -116,13 +116,22 @@ func (l *Log) Append(_ context.Context, actor, action, resource string, detail m
 	if err != nil {
 		return fmt.Errorf("audit: opening log for append: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("audit: writing entry: %w", err)
+	_, werr := f.Write(append(line, '\n'))
+	info, serr := f.Stat()
+	_ = f.Close()
+	if werr != nil {
+		return fmt.Errorf("audit: writing entry: %w", werr)
 	}
 
 	l.lastSeq = seq
 	l.lastHash = hash
+
+	// Size-based archival (M19): once the live log crosses the threshold it is
+	// rotated into a gzipped monthly archive. Best-effort — an archival failure
+	// must never fail the append that triggered it.
+	if serr == nil && info.Size() > ArchiveThreshold {
+		_, _ = l.archiveLocked()
+	}
 	return nil
 }
 

@@ -62,7 +62,132 @@ func newAuditCommand() *cobra.Command {
 	}
 	c.AddCommand(newAuditVerifyCommand())
 	c.AddCommand(newAuditExportCommand())
+	c.AddCommand(newAuditReportCommand())
+	c.AddCommand(newAuditArchiveCommand())
 	return c
+}
+
+// newAuditReportCommand builds `vortex audit report` (M19): a compliance
+// summary of the audit log over a period, in markdown, JSON, or CSV.
+func newAuditReportCommand() *cobra.Command {
+	var (
+		since  string
+		until  string
+		format string
+		output string
+	)
+	c := &cobra.Command{
+		Use:   "report",
+		Short: "Generate a compliance report (markdown|json|csv)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			errOut := cmd.OutOrStderr()
+			var sinceT, untilT time.Time
+			var err error
+			if since != "" {
+				if sinceT, err = parseAuditTime(since); err != nil {
+					fmt.Fprintf(errOut, "error: invalid --since: %v\n", err)
+					return errAudit
+				}
+			}
+			if until != "" {
+				if untilT, err = parseAuditTime(until); err != nil {
+					fmt.Fprintf(errOut, "error: invalid --until: %v\n", err)
+					return errAudit
+				}
+			}
+
+			log, err := openAuditLog()
+			if err != nil {
+				fmt.Fprintf(errOut, "error: %v\n", err)
+				return errAudit
+			}
+			report, err := audit.GenerateComplianceReport(log, sinceT, untilT)
+			if err != nil {
+				fmt.Fprintf(errOut, "error: %v\n", err)
+				return errAudit
+			}
+
+			w := cmd.OutOrStdout()
+			if output != "" {
+				f, ferr := os.Create(output) //nolint:gosec // operator-supplied output path
+				if ferr != nil {
+					fmt.Fprintf(errOut, "error: %v\n", ferr)
+					return errAudit
+				}
+				defer func() { _ = f.Close() }()
+				w = f
+			}
+
+			switch format {
+			case "markdown":
+				err = report.WriteMarkdown(w)
+			case "json":
+				err = report.WriteJSON(w)
+			case "csv":
+				err = report.WriteCSV(w)
+			default:
+				fmt.Fprintf(errOut, "error: unknown format %q (want markdown|json|csv)\n", format)
+				return errAudit
+			}
+			if err != nil {
+				fmt.Fprintf(errOut, "error: %v\n", err)
+				return errAudit
+			}
+			if output != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Compliance report written to %s\n", output)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&since, "since", "", "start of the report period (2006-01-02 or RFC3339)")
+	c.Flags().StringVar(&until, "until", "", "end of the report period (2006-01-02 or RFC3339)")
+	c.Flags().StringVar(&format, "format", "markdown", "report format: markdown|json|csv")
+	c.Flags().StringVar(&output, "output", "", "output file path (default: stdout)")
+	return c
+}
+
+// newAuditArchiveCommand builds `vortex audit archive` (M19): manually rotate
+// the live audit log into a gzipped monthly archive.
+func newAuditArchiveCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "archive",
+		Short: "Archive the live audit log to audit-<year>-<month>.log.gz",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log, err := openAuditLog()
+			if err != nil {
+				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+				return errAudit
+			}
+			dest, err := log.Archive()
+			if err != nil {
+				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+				return errAudit
+			}
+			out := cmd.OutOrStdout()
+			if dest == "" {
+				fmt.Fprintln(out, "Audit log is empty — nothing to archive.")
+				return nil
+			}
+			fmt.Fprintf(out, "Audit log archived to %s\n", dest)
+			fmt.Fprintln(out, "A fresh audit log has been started.")
+			return nil
+		},
+	}
+}
+
+// parseAuditTime parses a report period bound: a bare date (2006-01-02) or a
+// full RFC3339 timestamp.
+func parseAuditTime(s string) (time.Time, error) {
+	if ts, err := time.Parse("2006-01-02", s); err == nil {
+		return ts, nil
+	}
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%q is not a date (2006-01-02) or RFC3339 timestamp", s)
+	}
+	return ts, nil
 }
 
 func newAuditVerifyCommand() *cobra.Command {
