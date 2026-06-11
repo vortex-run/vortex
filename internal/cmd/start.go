@@ -1043,6 +1043,16 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		coord.SetMemoryStore(store)
 		log.Info("SQLite conversation store enabled", "db", filepath.Join(memoryDir, "conversations.db"))
 	}
+
+	// Learned-skill store (upgrade 1 — self-improving agent): proven procedures
+	// are recalled into prompts and new ones distilled from completed tasks.
+	skillsDB := filepath.Join(cacheDir, "vortex", "memory", "skills.db")
+	if skills, serr := agents.NewSkillStore(skillsDB); serr != nil {
+		log.Warn("skill store unavailable, agent will not learn skills", "err", serr)
+	} else {
+		coord.SetSkillStore(skills)
+		log.Info("skills store loaded", "db", skillsDB, "skills", skills.Stats().Total)
+	}
 	rt, err := agents.NewRuntime(agents.RuntimeConfig{
 		Bus: bus, Coordinator: coord, MaxAgents: 8,
 		SandboxBase: sandboxBase, Logger: log,
