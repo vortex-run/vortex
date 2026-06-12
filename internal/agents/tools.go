@@ -388,6 +388,66 @@ type ApprovalRequest struct {
 	Description string         // one-line human summary
 	Preview     string         // diff / content / command preview to show
 	Params      map[string]any // the parameters to re-run with on approval
+	RiskLevel   string         // brand risk level (see RiskFor); "" → derive from Tool
+}
+
+// Risk levels for tool approvals (brand redesign part 6). They mirror
+// brand.Risk* without importing the TUI brand package into the agents core.
+const (
+	RiskLow      = "LOW RISK"
+	RiskMedium   = "MEDIUM RISK"
+	RiskHigh     = "HIGH RISK"
+	RiskCritical = "CRITICAL — review carefully"
+)
+
+// toolRisk maps a tool name to its approval risk level. Read-only inspection
+// is low; file mutation is medium; command/commit/delete/docker execution is
+// high; remote (SSH) execution is critical (it touches another machine and is
+// hard to undo).
+var toolRisk = map[string]string{
+	"list_directory": RiskLow,
+	"read_file":      RiskLow,
+	"read_local":     RiskLow,
+	"search_files":   RiskLow,
+	"find_files":     RiskLow,
+	"git_status":     RiskLow,
+	"git_diff":       RiskLow,
+
+	"write_file":  RiskMedium,
+	"write_local": RiskMedium,
+	"edit_file":   RiskMedium,
+	"git_add":     RiskMedium,
+
+	"run_command":    RiskHigh,
+	"run_terminal":   RiskHigh,
+	"git_commit":     RiskHigh,
+	"delete_file":    RiskHigh,
+	"docker_run":     RiskHigh,
+	"create_project": RiskHigh,
+
+	"ssh_command": RiskCritical,
+}
+
+// RiskFor returns the approval risk level for a tool name, defaulting to
+// medium for any unrecognised mutating tool (fail toward caution).
+func RiskFor(toolName string) string {
+	if r, ok := toolRisk[toolName]; ok {
+		return r
+	}
+	return RiskMedium
+}
+
+// Risk returns the request's risk level, deriving it from the Tool name when
+// not explicitly set.
+func (r ApprovalRequest) Risk() string {
+	if r.RiskLevel != "" {
+		return r.RiskLevel
+	}
+	tool := r.Tool
+	if tool == "" && r.Command != "" {
+		tool = "run_command"
+	}
+	return RiskFor(tool)
 }
 
 // ApprovalError wraps ErrApprovalRequired with the command details.

@@ -100,6 +100,37 @@ type forgeProgress struct {
 // jobIDPattern extracts a forge job id from a reply line like "Job ID: job-abc".
 var jobIDPattern = regexp.MustCompile(`Job ID:\s*(job-[A-Za-z0-9_-]+|[A-Za-z0-9]{8,})`)
 
+// approvalMarker matches the coordinator's approval line, optionally carrying
+// "|<risk>|<tool>" metadata: "[APPROVAL_REQUIRED|HIGH RISK|run_terminal] ...".
+var approvalMarker = regexp.MustCompile(`\[APPROVAL_REQUIRED(?:\|([^|]*)\|([^\]]*))?\]`)
+
+// riskHeaders maps a risk level to its approval-box header (escalating warnings).
+var riskHeaders = map[string]string{
+	brand.RiskLow:      "VORTEX wants to make a change",
+	brand.RiskMedium:   brand.IconWarn + " VORTEX wants to run a command",
+	brand.RiskHigh:     brand.IconWarn + brand.IconWarn + " Review carefully before approving",
+	brand.RiskCritical: brand.IconWarn + brand.IconWarn + brand.IconWarn + " This action cannot be undone",
+}
+
+// formatApproval rewrites the coordinator's approval marker line into a
+// human header plus a risk badge, keying the header severity off the risk
+// level the coordinator encoded.
+func formatApproval(content string) string {
+	risk := brand.RiskMedium
+	if m := approvalMarker.FindStringSubmatch(content); m != nil && m[1] != "" {
+		risk = m[1]
+	}
+	header := riskHeaders[risk]
+	if header == "" {
+		header = brand.IconWarn + " Agent wants approval"
+	}
+	// Replace the marker with "Agent wants approval — <header>  [BADGE]". The
+	// "Agent wants approval" phrase keeps renderMessages routing this into the
+	// amber Approval-Required frame.
+	replacement := "Agent wants approval — " + header + "  " + brand.RiskBadge(risk)
+	return approvalMarker.ReplaceAllString(content, replacement)
+}
+
 // extractJobID returns the forge job id mentioned in s, or "".
 func extractJobID(s string) string {
 	if m := jobIDPattern.FindStringSubmatch(s); len(m) == 2 {
@@ -200,13 +231,13 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// keys, invalid key → run setup, etc.) instead of the raw error.
 			content = vortexerrors.NewFriendly(msg.err).Short()
 		}
-		// An [APPROVAL_REQUIRED] line means the agent is waiting on a decision.
-		if strings.Contains(content, "[APPROVAL_REQUIRED]") {
+		// An [APPROVAL_REQUIRED...] line means the agent is waiting on a decision.
+		if approvalMarker.MatchString(content) {
 			m.awaiting = true
 			m.approvalReady = false // ignore keys until the box has rendered a frame
 			m.approvalChoice = ""
 			m.approvalID = m.sessionID
-			content = strings.ReplaceAll(content, "[APPROVAL_REQUIRED]", "⚠ Agent wants approval —")
+			content = formatApproval(content)
 			content += "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
 			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
 			m.viewport.SetContent(m.renderMessages())

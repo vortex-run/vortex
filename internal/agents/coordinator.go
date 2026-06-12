@@ -603,7 +603,9 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	// not block, because the TUI can only render the approval box after Submit
 	// returns. ApproveAction then executes the action when the user's
 	// approve/reject POST arrives.
-	emit("[APPROVAL_REQUIRED] " + ae.Request.Description)
+	// Encode the risk level + tool so the TUI can render a risk badge and the
+	// matching header severity (brand redesign part 6).
+	emit("[APPROVAL_REQUIRED|" + ae.Request.Risk() + "|" + ae.Request.Tool + "] " + ae.Request.Description)
 	if ae.Request.Preview != "" {
 		emit(ae.Request.Preview)
 	}
