@@ -85,6 +85,10 @@ type AgentsData struct {
 	ActiveAgents  int   `json:"active_agents"`
 	TotalMessages int64 `json:"total_messages"`
 	QueueDepth    int   `json:"queue_depth"`
+	// Memory-tier counts (the code view's MEMORY panel).
+	Skills   int `json:"skills"`
+	Episodes int `json:"episodes"`
+	Sessions int `json:"sessions"`
 }
 
 // AuditEntryData is one audit entry.
@@ -420,6 +424,28 @@ func (c *Client) Approve(sessionID string, approved bool) (string, error) {
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return out.Result, nil
+}
+
+// Notify sends a {title, body} message through the server's messaging router
+// (POST /api/notify) — the code view's [T] Telegram forward.
+func (c *Client) Notify(title, body string) error {
+	payload, _ := json.Marshal(map[string]string{"title": title, "body": body})
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := c.newReq(ctx, http.MethodPost, "/api/notify", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("tui: notify returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // Reload triggers a config reload via the control plane.

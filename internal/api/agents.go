@@ -54,6 +54,10 @@ type AgentRuntimeStats struct {
 	ActiveAgents  int   `json:"active_agents"`
 	TotalMessages int64 `json:"total_messages"`
 	QueueDepth    int   `json:"queue_depth"`
+	// Memory-tier counts (the TUI code view's MEMORY panel).
+	Skills   int `json:"skills"`
+	Episodes int `json:"episodes"`
+	Sessions int `json:"sessions"`
 }
 
 // SetAgentRuntime wires the agent runtime backing the /api/agents endpoints.

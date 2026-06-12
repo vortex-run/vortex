@@ -209,6 +209,10 @@ type RuntimeStats struct {
 	ActiveAgents  int
 	TotalMessages int64
 	QueueDepth    int
+	// Memory-tier counts (upgrade brand part 5: the code view's MEMORY panel).
+	Skills   int
+	Episodes int
+	Sessions int
 }
 
 // Approve resolves a pending tool-action approval for a session, delegating to
@@ -238,9 +242,13 @@ func (r *Runtime) Stats() RuntimeStats {
 	if started {
 		active = len(r.cfg.Coordinator.ActiveAgents())
 	}
+	mem := r.cfg.Coordinator.MemoryStats()
 	return RuntimeStats{
 		ActiveAgents:  active,
 		TotalMessages: r.messages.Load(),
 		QueueDepth:    int(r.queue.Load()),
+		Skills:        mem.Skills,
+		Episodes:      mem.Episodes,
+		Sessions:      mem.Sessions,
 	}
 }

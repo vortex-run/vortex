@@ -227,6 +227,13 @@ func (s *EpisodicStore) StoreImportant(ctx context.Context, gateway AIGateway, s
 	return nil
 }
 
+// Count returns the number of stored episodes.
+func (s *EpisodicStore) Count() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM episodes`).Scan(&n)
+	return n
+}
+
 // ProjectMemory is an EpisodicStore view scoped to one project: stores tag
 // episodes with the project path as context, and recalls only consider that
 // project's episodes.

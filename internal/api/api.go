@@ -110,6 +110,10 @@ type Server struct {
 	openaiModels   func() []string
 	openaiComplete OpenAICompleteFunc
 
+	// notifier sends a message through the messaging router (POST /api/notify,
+	// used by the TUI code view's Telegram forward). Nil yields 503.
+	notifier func(title, body string) error
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -363,6 +367,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// Recent structured logs (for the TUI log viewer), auth-gated.
 	mux.Handle("GET /api/logs", s.requireAPIKey(http.HandlerFunc(s.handleLogs)))
 
+	// Outbound notification (the TUI code view's [T] Telegram forward).
+	mux.Handle("POST /api/notify", s.requireAPIKey(http.HandlerFunc(s.handleNotify)))
+
 	// OpenAI-compatible surface (upgrade 3): lets any OpenAI-speaking tool
 	// (Claude Code, Aider, Cline, Cursor) use VORTEX as its AI backend. Data
 	// plane — requires a key (Bearer or X-API-Key) even from localhost.
@@ -401,6 +408,31 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		IdleTimeout:       120 * time.Second,
 	}
 	return s
+}
+
+// SetNotifier wires the messaging router behind POST /api/notify. Nil = 503.
+func (s *Server) SetNotifier(fn func(title, body string) error) { s.notifier = fn }
+
+// handleNotify sends a {title, body} message through the messaging router.
+func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
+	if s.notifier == nil {
+		http.Error(w, "messaging not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Body) == "" {
+		http.Error(w, "title/body required", http.StatusBadRequest)
+		return
+	}
+	if err := s.notifier(req.Title, req.Body); err != nil {
+		http.Error(w, "send failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 // SetReadinessFunc registers a callback that reports whether the server's

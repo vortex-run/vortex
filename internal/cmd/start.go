@@ -456,6 +456,10 @@ func runStart(ctx context.Context, pidfile string) error {
 		apiSrv.SetBurstNotifier(func(title, body string) {
 			_ = router.Send(context.Background(), messaging.SeverityWarn, title, body)
 		})
+		// POST /api/notify (the TUI code view's [T] Telegram forward).
+		apiSrv.SetNotifier(func(title, body string) error {
+			return router.Send(context.Background(), messaging.SeverityInfo, title, body)
+		})
 	}
 
 	// Secret expiry / rotation startup check (M19): warn + alert for any
@@ -1288,6 +1292,9 @@ func (a *agentRuntimeAdapter) Stats() api.AgentRuntimeStats {
 		ActiveAgents:  s.ActiveAgents,
 		TotalMessages: s.TotalMessages,
 		QueueDepth:    s.QueueDepth,
+		Skills:        s.Skills,
+		Episodes:      s.Episodes,
+		Sessions:      s.Sessions,
 	}
 }
 

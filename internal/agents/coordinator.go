@@ -280,6 +280,32 @@ func (c *Coordinator) rememberExchangeAsync(sessionID, userMsg, reply string) {
 	}()
 }
 
+// MemoryStatsSnapshot summarises the three memory tiers for status surfaces
+// (the TUI code view's MEMORY panel, /api/agents/status).
+type MemoryStatsSnapshot struct {
+	Skills   int `json:"skills"`
+	Episodes int `json:"episodes"`
+	Sessions int `json:"sessions"`
+}
+
+// MemoryStats reports learned skills, stored episodes, and recorded sessions.
+func (c *Coordinator) MemoryStats() MemoryStatsSnapshot {
+	c.mu.Lock()
+	skills, episodic, store := c.skills, c.episodic, c.store
+	c.mu.Unlock()
+	var out MemoryStatsSnapshot
+	if skills != nil {
+		out.Skills = skills.Stats().Total
+	}
+	if episodic != nil {
+		out.Episodes = episodic.Count()
+	}
+	if store != nil {
+		out.Sessions = store.Stats().TotalSessions
+	}
+	return out
+}
+
 // SetWorkflowStore wires the durable workflow store. Pass nil to disable.
 func (c *Coordinator) SetWorkflowStore(s *WorkflowStore) {
 	c.mu.Lock()
