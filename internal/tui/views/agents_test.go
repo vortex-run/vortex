@@ -601,3 +601,50 @@ func TestAgents_OptionPromptShown(t *testing.T) {
 		t.Errorf("option-selection view should show the numbered-entry prompt:\n%s", m.View())
 	}
 }
+
+func TestAgents_ApprovalRiskBadgeAndHeader(t *testing.T) {
+	cases := []struct {
+		marker     string
+		wantBadge  string
+		wantHeader string
+	}{
+		{"[APPROVAL_REQUIRED|LOW RISK|write_file] write calc.py", "[LOW RISK]", "VORTEX wants to make a change"},
+		{"[APPROVAL_REQUIRED|HIGH RISK|run_terminal] run rm -rf old", "[HIGH RISK]", "Review carefully"},
+		{"[APPROVAL_REQUIRED|CRITICAL — review carefully|ssh_command] ssh deploy", "[CRITICAL", "cannot be undone"},
+	}
+	for _, tc := range cases {
+		got := formatApproval(tc.marker)
+		if !strings.Contains(got, tc.wantBadge) {
+			t.Errorf("formatApproval(%q) missing badge %q:\n%s", tc.marker, tc.wantBadge, got)
+		}
+		if !strings.Contains(got, tc.wantHeader) {
+			t.Errorf("formatApproval(%q) missing header %q:\n%s", tc.marker, tc.wantHeader, got)
+		}
+		// The marker is fully replaced (no leftover bracket token).
+		if strings.Contains(got, "APPROVAL_REQUIRED") {
+			t.Errorf("formatApproval left the raw marker in:\n%s", got)
+		}
+	}
+}
+
+func TestAgents_ApprovalLegacyMarkerNoMeta(t *testing.T) {
+	// An old-style marker without risk metadata still formats (medium default).
+	got := formatApproval("[APPROVAL_REQUIRED] do the thing")
+	if !strings.Contains(got, "Agent wants approval") {
+		t.Errorf("legacy marker not formatted:\n%s", got)
+	}
+	if !strings.Contains(got, "[MEDIUM RISK]") {
+		t.Errorf("legacy marker should default to medium risk:\n%s", got)
+	}
+}
+
+func TestAgents_ApprovalRendersInWarningFrame(t *testing.T) {
+	m := NewAgents(nil)
+	m.messages = append(m.messages, ChatMessage{
+		Role:    "agent",
+		Content: formatApproval("[APPROVAL_REQUIRED|HIGH RISK|run_terminal] run a command"),
+	})
+	if out := m.renderMessages(); !strings.Contains(out, "┌─ Approval Required ") {
+		t.Errorf("approval should render in the Approval Required frame:\n%s", out)
+	}
+}
