@@ -78,7 +78,9 @@ func (m SecurityModel) View() string {
 
 	score, breakdown := m.score()
 	var b strings.Builder
-	b.WriteString(tui.TitleStyle.Render("SECURITY") + "  " + scoreStyle(score).Render(fmt.Sprintf("Score: %d/100", score)) + "\n\n")
+	b.WriteString(tui.TitleStyle.Render("SECURITY") + "  " +
+		scoreStyle(score).Render(fmt.Sprintf("Score: %d/100", score)) + "\n")
+	b.WriteString(scoreBar(score, 30) + "\n\n")
 
 	mtls := m.status.TrustDomain != ""
 	b.WriteString(tui.StatusDot(mtls) + " mTLS: " + boolStr(mtls, "enabled", "off") + "\n")
@@ -157,6 +159,20 @@ func scoreStyle(score int) lipgloss.Style {
 	default:
 		return tui.StatusErrorStyle
 	}
+}
+
+// scoreBar renders the 0-100 score as a bar filled by score and colored like
+// the score text (green high, amber mid, red low).
+func scoreBar(score, width int) string {
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+	filled := score * width / 100
+	return scoreStyle(score).Render(strings.Repeat("█", filled)) +
+		tui.SubtitleStyle.Render(strings.Repeat("░", width-filled))
 }
 
 // Score exposes the computed score (for tests).

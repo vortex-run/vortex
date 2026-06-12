@@ -105,9 +105,9 @@ func (m LogsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the logs screen.
 func (m LogsModel) View() string {
-	live := tui.StatusDot(true) + " Live"
+	live := tui.StatusDot(true) + " LIVE"
 	if !m.follow {
-		live = tui.SubtitleStyle.Render("○ Paused")
+		live = tui.SubtitleStyle.Render("○ PAUSED")
 	}
 	header := tui.TitleStyle.Render("LOGS") + "  " + live + "  " +
 		tui.HelpStyle.Render("[f]Filter [F]Follow [c]Clear")
@@ -159,17 +159,16 @@ func (m LogsModel) renderLines() string {
 	return b.String()
 }
 
-// levelStyle colors a level: INFO=blue, WARN=amber, ERROR=red, DEBUG=dim.
+// levelStyle colors a level: WARN=amber, ERROR=red, DEBUG/INFO=dim — INFO is
+// the noise floor, so coloring it would drown out the levels that matter.
 func levelStyle(level string) lipgloss.Style {
 	switch strings.ToUpper(level) {
 	case "WARN", "WARNING":
 		return tui.StatusWarnStyle
 	case "ERROR":
 		return tui.StatusErrorStyle
-	case "DEBUG":
-		return tui.SubtitleStyle
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(tui.ColorPrimary))
+		return tui.SubtitleStyle
 	}
 }
 

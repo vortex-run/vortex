@@ -11,8 +11,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/vortex-run/vortex/internal/tui/brand"
 )
 
 // ChatMessage is one line in the agent conversation.
@@ -20,7 +22,8 @@ type ChatMessage struct {
 	Role      string // "user" | "agent" | "system"
 	Content   string
 	Timestamp time.Time
-	JobID     string // set when a forge build job started
+	JobID     string        // set when a forge build job started
+	Took      time.Duration // agent replies: time from submit to response
 }
 
 // AgentsModel is the interactive chat with the VORTEX coordinator.
@@ -39,6 +42,7 @@ type AgentsModel struct {
 	forgeJob       string              // active forge job id being polled ("" = none)
 	forgeSeen      int                 // count of progress-history lines already shown
 	pendingQs      []tui.ForgeQuestion // clarifying questions awaiting an answer
+	thinkingSince  time.Time           // when the in-flight submit started
 	width          int
 	height         int
 }
@@ -184,6 +188,11 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentResponse:
 		m.thinking = false
+		took := time.Duration(0)
+		if !m.thinkingSince.IsZero() {
+			took = time.Since(m.thinkingSince)
+			m.thinkingSince = time.Time{}
+		}
 		content := msg.content
 		if msg.err != nil {
 			content = "⚠ " + msg.err.Error()
@@ -204,7 +213,7 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// cannot resolve the approval before the user sees the box.
 			return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return approvalReadyMsg{} })
 		}
-		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
+		m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now(), Took: took})
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		m.input.Focus()
@@ -325,6 +334,7 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, ChatMessage{Role: "user", Content: text, Timestamp: time.Now()})
 			m.input.Reset()
 			m.thinking = true
+			m.thinkingSince = time.Now()
 			m.viewport.SetContent(m.renderMessages())
 			m.viewport.GotoBottom()
 			return m, tea.Batch(m.submit(submitText), m.spinner.Tick)
@@ -377,21 +387,36 @@ func (m AgentsModel) View() string {
 	return strings.Join([]string{header, "", body, "", footer}, "\n")
 }
 
-// renderMessages renders the full conversation with role-based styling.
+// renderMessages renders the full conversation as brand message bubbles:
+// user messages right-aligned, agent replies left-aligned with a VORTEX (or
+// Approval Required) frame, system notices as centered separators.
 func (m AgentsModel) renderMessages() string {
+	w := m.width
+	if w < 30 {
+		w = 60
+	}
 	var b strings.Builder
 	for _, msg := range m.messages {
 		switch msg.Role {
 		case "user":
-			b.WriteString(tui.ChatUserStyle.Render("[user] "+msg.Content) + "\n\n")
+			box := titledBox("You", msg.Content, brand.ColorPrimary, minInt(w-2, 70))
+			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Right, box) + "\n\n")
 		case "agent":
-			b.WriteString(tui.ChatAgentStyle.Render("[agent] "+msg.Content) + "\n\n")
+			title, color := "VORTEX", brand.ColorBorder
+			if strings.Contains(msg.Content, "Agent wants approval") {
+				title, color = "Approval Required", brand.ColorWarning
+			}
+			b.WriteString(titledBox(title, msg.Content, color, minInt(w-2, 90)) + "\n")
+			if msg.Took > 0 {
+				b.WriteString(brand.StyleSubtitle.Render(fmt.Sprintf("─ %.1fs ─", msg.Took.Seconds())) + "\n")
+			}
+			b.WriteString("\n")
 		default:
-			b.WriteString(tui.ChatSystemStyle.Render("[system] "+msg.Content) + "\n\n")
+			b.WriteString(brand.StyleSystemMsg.Render("─── "+msg.Content+" ───") + "\n\n")
 		}
 	}
 	if m.thinking {
-		b.WriteString(tui.ChatAgentStyle.Render("[agent] " + m.spinner.View() + " Thinking…"))
+		b.WriteString(titledBox("VORTEX", m.spinner.View()+" Thinking…", brand.ColorBorder, minInt(w-2, 90)))
 	}
 	// Show the staged approval choice so the user sees it before confirming.
 	if m.awaiting && m.approvalChoice != "" {
@@ -399,9 +424,50 @@ func (m AgentsModel) renderMessages() string {
 		if m.approvalChoice == "reject" {
 			label = "▶ Reject selected — press Enter to confirm"
 		}
-		b.WriteString(tui.ChatSystemStyle.Render("[system] " + label))
+		b.WriteString(brand.StyleWarn.Render(label))
 	}
 	return b.String()
+}
+
+// titledBox draws a "┌─ Title ────┐" frame around content in the given border
+// color, wrapping the body to maxWidth. Measurements are ANSI-aware.
+func titledBox(title, content string, borderColor string, maxWidth int) string {
+	if maxWidth < 12 {
+		maxWidth = 12
+	}
+	cs := lipgloss.NewStyle().Foreground(lipgloss.Color(borderColor))
+	body := lipgloss.NewStyle().Width(maxWidth - 4).Render(content)
+	lines := strings.Split(body, "\n")
+	w := lipgloss.Width(title) + 4
+	for _, l := range lines {
+		if lw := lipgloss.Width(l); lw > w {
+			w = lw
+		}
+	}
+	var b strings.Builder
+	b.WriteString(cs.Render("┌─ "+title+" "+strings.Repeat("─", maxInt0(w-lipgloss.Width(title)-1))+"┐") + "\n")
+	for _, l := range lines {
+		b.WriteString(cs.Render("│") + " " + l +
+			strings.Repeat(" ", maxInt0(w+1-lipgloss.Width(l))) + cs.Render("│") + "\n")
+	}
+	b.WriteString(cs.Render("└" + strings.Repeat("─", w+2) + "┘"))
+	return b.String()
+}
+
+// maxInt0 clamps n to >= 0 (repeat counts must not be negative).
+func maxInt0(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// minInt returns the smaller of a and b.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // handleForgeProgress appends any new progress lines and keeps polling until the

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vortex-run/vortex/internal/tui"
 )
@@ -101,7 +102,8 @@ func kvBlock(m map[string]float64) string {
 	return b.String()
 }
 
-// barBlock renders a route→value map as Unicode bar charts.
+// barBlock renders a route→value map as brand progress bars, colored by how
+// close each value is to the worst (green <50%, amber 50-80%, red >80%).
 func barBlock(m map[string]float64) string {
 	if len(m) == 0 {
 		return ""
@@ -117,22 +119,40 @@ func barBlock(m map[string]float64) string {
 	}
 	var b strings.Builder
 	for _, k := range sortedKeys(m) {
-		b.WriteString(tui.TableRowStyle.Render(fmt.Sprintf("  %-12s %s %6.0fms\n",
-			truncateStr(k, 12), bar(m[k]/maxV, 20), m[k])))
+		pct := m[k] / maxV * 100
+		b.WriteString(fmt.Sprintf("  %-12s %s %s\n",
+			truncateStr(k, 12), thresholdBar(pct, 20),
+			thresholdStyle(pct).Render(fmt.Sprintf("%6.0fms", m[k]))))
 	}
 	return b.String()
 }
 
-// bar renders a fraction (0..1) as a 20-cell Unicode block bar.
-func bar(frac float64, width int) string {
-	if frac < 0 {
-		frac = 0
+// thresholdBar renders a brand progress bar with the fill colored by load.
+func thresholdBar(pct float64, width int) string {
+	if pct < 0 {
+		pct = 0
 	}
-	if frac > 1 {
-		frac = 1
+	if pct > 100 {
+		pct = 100
 	}
-	filled := int(frac * float64(width))
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	filled := int(pct/100*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	return thresholdStyle(pct).Render(strings.Repeat("█", filled)) +
+		tui.SubtitleStyle.Render(strings.Repeat("░", width-filled))
+}
+
+// thresholdStyle maps a capacity percentage to green/amber/red.
+func thresholdStyle(pct float64) lipgloss.Style {
+	switch {
+	case pct > 80:
+		return tui.StatusErrorStyle
+	case pct >= 50:
+		return tui.StatusWarnStyle
+	default:
+		return tui.StatusOKStyle
+	}
 }
 
 // sortedKeys returns the map keys sorted.

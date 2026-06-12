@@ -51,14 +51,25 @@ func TestMetrics_RendersData(t *testing.T) {
 }
 
 func TestMetrics_BarChart(t *testing.T) {
-	// A full bar (frac=1) is all filled blocks; empty is all light blocks.
-	full := bar(1.0, 10)
-	empty := bar(0.0, 10)
+	// A full bar (100%) is all filled blocks; empty is all light blocks.
+	full := thresholdBar(100, 10)
+	empty := thresholdBar(0, 10)
 	if !strings.Contains(full, "█") || strings.Contains(full, "░") {
 		t.Errorf("full bar = %q, want all filled", full)
 	}
 	if strings.Contains(empty, "█") {
 		t.Errorf("empty bar = %q, want no filled", empty)
+	}
+}
+
+func TestMetrics_ThresholdColors(t *testing.T) {
+	// Threshold styles must differ across the three bands.
+	low, mid, high := thresholdStyle(30), thresholdStyle(65), thresholdStyle(95)
+	if low.GetForeground() == high.GetForeground() {
+		t.Error("low and high load must use different colors")
+	}
+	if mid.GetForeground() == low.GetForeground() || mid.GetForeground() == high.GetForeground() {
+		t.Error("mid band must have its own color")
 	}
 }
 

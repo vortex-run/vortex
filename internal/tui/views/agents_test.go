@@ -3,6 +3,7 @@ package views
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -71,11 +72,36 @@ func TestAgents_RoleStyling(t *testing.T) {
 		ChatMessage{Role: "agent", Content: "hello"},
 	)
 	out := m.renderMessages()
-	if !strings.Contains(out, "[user] hi") || !strings.Contains(out, "[agent] hello") {
-		t.Errorf("messages should be role-tagged, got:\n%s", out)
+	// User and agent messages render as titled bubbles with their content.
+	if !strings.Contains(out, "┌─ You ") || !strings.Contains(out, "hi") {
+		t.Errorf("user bubble missing, got:\n%s", out)
 	}
-	if !strings.Contains(out, "[system]") {
+	if !strings.Contains(out, "┌─ VORTEX ") || !strings.Contains(out, "hello") {
+		t.Errorf("agent bubble missing, got:\n%s", out)
+	}
+	// System greeting renders as a centered separator line.
+	if !strings.Contains(out, "───") || !strings.Contains(out, "Agent runtime ready") {
 		t.Error("system greeting should still render")
+	}
+}
+
+func TestAgents_ApprovalBubbleTitled(t *testing.T) {
+	m := NewAgents(nil)
+	m.messages = append(m.messages, ChatMessage{
+		Role: "agent", Content: "⚠ Agent wants approval — write file calc.py",
+	})
+	if out := m.renderMessages(); !strings.Contains(out, "┌─ Approval Required ") {
+		t.Errorf("approval message should render in the approval frame:\n%s", out)
+	}
+}
+
+func TestAgents_AgentReplyShowsDuration(t *testing.T) {
+	m := NewAgents(nil)
+	m.messages = append(m.messages, ChatMessage{
+		Role: "agent", Content: "done", Took: 1200 * time.Millisecond,
+	})
+	if out := m.renderMessages(); !strings.Contains(out, "1.2s") {
+		t.Errorf("agent reply should show elapsed time:\n%s", out)
 	}
 }
 
