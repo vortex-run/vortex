@@ -170,7 +170,139 @@ func TestApp_CtrlCQuitsEvenWhileTyping(t *testing.T) {
 func TestApp_NavigationWorksWhenNotInputFocused(t *testing.T) {
 	a := connectedApp(t) // starts on Overview (no input focus)
 	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	if a.ActiveView() != ViewCode {
+		t.Errorf("'3' on a non-input view should jump to Code, got %d", a.ActiveView())
+	}
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
 	if a.ActiveView() != ViewRoutes {
-		t.Errorf("'3' on a non-input view should jump to Routes, got %d", a.ActiveView())
+		t.Errorf("'4' should jump to Routes, got %d", a.ActiveView())
+	}
+}
+
+func TestApp_TopBarShowsVortexBrand(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if !strings.Contains(a.View(), "▲ VORTEX") {
+		t.Errorf("top bar should show the brand mark:\n%s", a.View())
+	}
+}
+
+func TestApp_SidebarShowsCodeItem(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if !strings.Contains(a.View(), "Code") {
+		t.Errorf("sidebar should list the Code view:\n%s", a.View())
+	}
+}
+
+func TestApp_HelpBarChangesByView(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	a.SwitchView(ViewLogs)
+	logsBar := a.helpBar()
+	if !strings.Contains(logsBar, "[F] Follow") {
+		t.Errorf("logs help bar = %q", logsBar)
+	}
+	a.SwitchView(ViewAgents)
+	agentsBar := a.helpBar()
+	if !strings.Contains(agentsBar, "[Enter] Send") || agentsBar == logsBar {
+		t.Errorf("agents help bar = %q, must differ from logs", agentsBar)
+	}
+	a.SwitchView(ViewMetrics) // no specific hints → default
+	if def := a.helpBar(); !strings.Contains(def, "[?] Help") {
+		t.Errorf("default help bar = %q", def)
+	}
+}
+
+func TestApp_HelpOverlayTogglesWithQuestionMark(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if !a.HelpOpen() {
+		t.Fatal("? should open the help overlay")
+	}
+	if out := a.View(); !strings.Contains(out, "Help — Overview") {
+		t.Errorf("overlay should title the active view:\n%s", out)
+	}
+	// While open, navigation keys are swallowed.
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
+	if a.ActiveView() != ViewOverview {
+		t.Error("navigation must be disabled while help is open")
+	}
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if a.HelpOpen() {
+		t.Error("? should close the help overlay")
+	}
+
+	// Esc also closes.
+	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	a.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if a.HelpOpen() {
+		t.Error("Esc should close the help overlay")
+	}
+}
+
+func TestApp_HelpOverlayListsAgentCommands(t *testing.T) {
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	a.SwitchView(ViewAgents)
+	a.helpOpen = true
+	out := a.View()
+	for _, want := range []string{"/ls", "/read", "/run", "/undo", "Example tasks"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agents help overlay missing %q", want)
+		}
+	}
+}
+
+func TestApp_TutorialFirstRunAndFlag(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+
+	a := connectedApp(t)
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	// First run: no flag file → tutorial starts.
+	a.startTutorialIfFirstRun()
+	if !a.TutorialActive() {
+		t.Fatal("tutorial should be active on first run")
+	}
+	if out := a.View(); !strings.Contains(out, "sidebar") {
+		t.Errorf("tutorial step 1 should mention the sidebar:\n%s", out)
+	}
+
+	// Advance through all 5 steps with →.
+	for i := 0; i < len(tutorialSteps); i++ {
+		a.Update(tea.KeyMsg{Type: tea.KeyRight})
+	}
+	if a.TutorialActive() {
+		t.Error("tutorial should finish after the last step")
+	}
+
+	// The done flag persists: a fresh check must NOT restart it.
+	a.startTutorialIfFirstRun()
+	if a.TutorialActive() {
+		t.Error("tutorial must not run again once the done flag exists")
+	}
+}
+
+func TestApp_TutorialEscSkipsAndWritesFlag(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("AppData", t.TempDir())
+
+	a := connectedApp(t)
+	a.startTutorialIfFirstRun()
+	if !a.TutorialActive() {
+		t.Fatal("tutorial should start")
+	}
+	a.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if a.TutorialActive() {
+		t.Error("Esc should skip the tutorial")
+	}
+	a.startTutorialIfFirstRun()
+	if a.TutorialActive() {
+		t.Error("skipping must also write the done flag")
 	}
 }
