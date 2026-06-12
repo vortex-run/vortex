@@ -161,6 +161,12 @@ tasks:
     cmds:
       - goreleaser check
 
+  code:
+    desc: "Start VORTEX coding agent"
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" code'
+
   tag:
     desc: "Create and push a release tag (usage: task tag VERSION=v0.1.0)"
     requires:
