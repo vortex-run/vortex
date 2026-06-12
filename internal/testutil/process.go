@@ -123,8 +123,21 @@ type VortexProcess struct {
 	ConfigPath string
 	APIAddr    string
 	BinaryPath string
+	// ConfigHome is the isolated user-config dir shared by the server child
+	// AND every CLI invocation via Run — both sides must derive the same
+	// master key (audit verify) while the developer's real config stays out.
+	ConfigHome string
 	stopped    bool
 	logBuf     syncBuffer
+}
+
+// env returns the child environment with the isolated config home applied.
+func (p *VortexProcess) env() []string {
+	return append(os.Environ(),
+		"XDG_CONFIG_HOME="+p.ConfigHome,
+		"AppData="+p.ConfigHome,
+		"APPDATA="+p.ConfigHome,
+	)
 }
 
 // Logs returns the child process's captured stdout+stderr so far.
@@ -163,17 +176,15 @@ func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 	cmd := exec.Command(bin, "start", "--config", configPath, "--log-level", "debug")
 	// Isolate the user config dir: the developer's real ai-provider.json (from
 	// `vortex setup`) must not leak into the child, or gateway-dependent tests
-	// (e.g. forge-disabled-without-AI) behave differently per machine.
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+t.TempDir(),
-		"AppData="+t.TempDir(),
-		"APPDATA="+t.TempDir(),
-	)
+	// (e.g. forge-disabled-without-AI) behave differently per machine. ONE dir
+	// is shared by the server and Run-invoked CLI calls (see env()).
 	p := &VortexProcess{
 		ConfigPath: configPath,
 		APIAddr:    apiBase,
 		BinaryPath: bin,
+		ConfigHome: t.TempDir(),
 	}
+	cmd.Env = p.env()
 	// Tee child output to both os.Stderr (visible while debugging) and an
 	// in-memory buffer so tests can assert on startup log lines.
 	out := io.MultiWriter(os.Stderr, &p.logBuf)
@@ -270,20 +281,29 @@ func (p *VortexProcess) Health(t *testing.T) map[string]any {
 	return m
 }
 
-// Run executes the vortex binary with args and returns combined output and the
-// exit code. It does not fail the test on a non-zero exit — the caller decides.
+// Run executes the vortex binary with args under the process's isolated
+// config home, returning combined output and the exit code. It does not fail
+// the test on a non-zero exit — the caller decides.
 func (p *VortexProcess) Run(t *testing.T, args ...string) (string, int) {
 	t.Helper()
-	return RunBinary(t, p.BinaryPath, args...)
+	return runBinary(t, p.BinaryPath, p.env(), args...)
 }
 
-// RunBinary runs bin with args, returning combined stdout+stderr and the exit
-// code. A 30s context guards against hangs.
+// RunBinary runs bin with args in the inherited environment, returning
+// combined stdout+stderr and the exit code.
 func RunBinary(t *testing.T, bin string, args ...string) (string, int) {
+	t.Helper()
+	return runBinary(t, bin, nil, args...)
+}
+
+// runBinary runs bin with args and env (nil = inherit). A 30s context guards
+// against hangs.
+func runBinary(t *testing.T, bin string, env []string, args ...string) (string, int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
