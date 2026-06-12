@@ -385,59 +385,49 @@ func viewName(id ViewID) string {
 
 // --- help overlay -------------------------------------------------------
 
-// helpBody returns the overlay content for the active view.
+// helpViewID maps the app's ViewID onto the views package's HelpViewID so the
+// help content has one source of truth (views.GetHelp).
+func helpViewID(id ViewID) views.HelpViewID {
+	switch id {
+	case ViewAgents:
+		return views.HelpAgents
+	case ViewCode:
+		return views.HelpCode
+	case ViewLogs:
+		return views.HelpLogs
+	case ViewMetrics:
+		return views.HelpMetrics
+	case ViewRoutes:
+		return views.HelpRoutes
+	case ViewNodes:
+		return views.HelpNodes
+	case ViewSecurity:
+		return views.HelpSecurity
+	case ViewSecrets:
+		return views.HelpSecrets
+	default:
+		return views.HelpOverview
+	}
+}
+
+// helpBody renders the overlay content for the active view from the shared
+// help catalog (views.GetHelp).
 func (a *App) helpBody() string {
+	content := views.GetHelp(helpViewID(a.activeView))
 	var b strings.Builder
-	section := func(title string, items [][2]string) {
-		b.WriteString(brand.StyleTitle.Render(title) + "\n")
-		for _, it := range items {
-			b.WriteString(fmt.Sprintf("  %-12s %s\n", it[0], it[1]))
+	for _, sec := range content.Sections {
+		b.WriteString(brand.StyleTitle.Render(sec.Title) + "\n")
+		for _, it := range sec.Items {
+			switch {
+			case it.Example != "":
+				b.WriteString("  " + brand.StyleSubtitle.Render(`"`+it.Example+`"`) + "\n")
+			case it.Key != "":
+				b.WriteString(fmt.Sprintf("  %-12s %s\n", it.Key, it.Action))
+			default:
+				b.WriteString("  " + it.Action + "\n")
+			}
 		}
 		b.WriteString("\n")
-	}
-	switch a.activeView {
-	case ViewAgents:
-		section("Keyboard shortcuts", [][2]string{
-			{"Enter", "Send message"}, {"↑/↓", "Message history"},
-			{"Tab", "Autocomplete command"}, {"Ctrl+L", "Clear chat"},
-			{"Y+Enter", "Approve action"}, {"N+Enter", "Reject action"},
-		})
-		section("Slash commands", [][2]string{
-			{"/ls [path]", "List files"}, {"/read <file>", "Read a file"},
-			{"/run <cmd>", "Run a command"}, {"/search <q>", "Search files"},
-			{"/git", "Git status"}, {"/undo", "Undo last file change"},
-			{"/history", "Show past sessions"}, {"/help", "Show this help"},
-		})
-		section("Example tasks", [][2]string{
-			{"", `"create a python web scraper"`},
-			{"", `"add auth to my FastAPI app"`},
-			{"", `"research golang frameworks"`},
-			{"", `"fix the bug in main.py"`},
-		})
-	case ViewLogs:
-		section("Keyboard shortcuts", [][2]string{
-			{"f", "Focus filter input"}, {"F", "Toggle follow mode"},
-			{"c", "Clear displayed logs"},
-		})
-		section("Log levels", [][2]string{
-			{"INFO", "normal operation"}, {"WARN", "check this"},
-			{"ERROR", "something failed"},
-		})
-	case ViewOverview:
-		section("Status indicators", [][2]string{
-			{brand.IconPulse + " green", "healthy and running"},
-			{brand.IconPulse + " amber", "degraded or warning"},
-			{brand.IconPulse + " red", "down or error"},
-		})
-		section("Keyboard shortcuts", [][2]string{
-			{"r", "Reload configuration"}, {"Tab", "Navigate to next view"},
-		})
-	default:
-		section("Keyboard shortcuts", [][2]string{
-			{"Tab", "Next view"}, {"Shift+Tab", "Previous view"},
-			{"1-9", "Jump to view"}, {"?", "Toggle this help"},
-			{"q", "Quit"},
-		})
 	}
 	b.WriteString(brand.StyleSubtitle.Render("Press ? or Esc to close"))
 	return b.String()
