@@ -1,0 +1,687 @@
+package views
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/vortex-run/vortex/internal/tui/brand"
+)
+
+// ActivityEntry is one line/box in the code view's activity feed.
+type ActivityEntry struct {
+	Timestamp time.Time
+	Source    string // "user" | "coordinator" | "system" | agent name
+	Content   string
+	Kind      string // "message"|"step-start"|"step-item"|"step-end"|"error"
+	StepNum   int
+	StepTotal int
+}
+
+// CodeAgentStatus is one specialist agent's state in the left panel.
+type CodeAgentStatus struct {
+	Name   string
+	Role   string
+	Status string // "ready"|"busy"|"idle"|"error"
+}
+
+// TaskProgress is the live state of the running task.
+type TaskProgress struct {
+	Current int
+	Total   int
+	Step    string
+	Percent float64
+	EstSecs int
+	CostUSD float64
+}
+
+// codeStatsMsg carries an /api/agents/status + cost refresh.
+type codeStatsMsg struct {
+	stats *tui.AgentsData
+	cost  *tui.AICostData
+}
+
+// codeReplyMsg carries the coordinator's final reply for a submitted task.
+type codeReplyMsg struct {
+	content string
+	err     error
+}
+
+// codeTickMsg drives the periodic panel refresh.
+type codeTickMsg time.Time
+
+// codeSidebarWidth is the fixed left panel width.
+const codeSidebarWidth = 26
+
+// stepPattern recognises "Step N/M" or "step N of M" markers in agent output
+// so the feed can frame them and the progress bar can track them.
+var stepPattern = regexp.MustCompile(`(?i)step\s+(\d+)\s*(?:/|of)\s*(\d+)`)
+
+// CodeModel is the dedicated coding interface (brand redesign part 5) — the
+// full-screen "vortex code" experience: specialist-agent roster, memory stats,
+// task progress, and a live activity feed.
+type CodeModel struct {
+	client   *tui.Client
+	activity []ActivityEntry
+	viewport viewport.Model
+	input    textinput.Model
+	spin     spinner.Model
+	agents   []CodeAgentStatus
+	progress TaskProgress
+	skills   []string // skills surfaced during this session
+	stats    *tui.AgentsData
+	cost     *tui.AICostData
+
+	sessionID   string
+	project     string // project dir shown in the header
+	model       string // AI model override shown in the header
+	team        bool   // multi-agent orchestration (default true)
+	working     bool   // a task is in flight
+	workStart   time.Time
+	costAtStart float64
+	paused      bool
+	confirmStop bool
+	helpOpen    bool
+	standalone  bool // running as `vortex code` (q quits the program)
+
+	width  int
+	height int
+}
+
+// CodeOption configures NewCode.
+type CodeOption func(*CodeModel)
+
+// WithProject sets the project directory shown in the header.
+func WithProject(dir string) CodeOption { return func(m *CodeModel) { m.project = dir } }
+
+// WithModel sets the AI model override shown in the header.
+func WithModel(model string) CodeOption { return func(m *CodeModel) { m.model = model } }
+
+// WithoutTeam disables multi-agent orchestration (single-agent mode).
+func WithoutTeam() CodeOption { return func(m *CodeModel) { m.team = false } }
+
+// Standalone marks the model as the root of its own program (`vortex code`):
+// q quits the program instead of being typed.
+func Standalone() CodeOption { return func(m *CodeModel) { m.standalone = true } }
+
+// NewCode constructs the coding interface model.
+func NewCode(client *tui.Client, opts ...CodeOption) CodeModel {
+	in := textinput.New()
+	in.Placeholder = "Type to interrupt, ask a question, or give new instructions..."
+	in.Prompt = "> "
+	in.Focus()
+
+	m := CodeModel{
+		client:    client,
+		input:     in,
+		viewport:  viewport.New(0, 0),
+		spin:      tui.Spinner(),
+		team:      true,
+		sessionID: fmt.Sprintf("code-%d", time.Now().UnixMilli()),
+		agents: []CodeAgentStatus{
+			{Name: "Coordinator", Role: "plans + routes", Status: "ready"},
+			{Name: "Code Agent", Role: "writes code", Status: "ready"},
+			{Name: "Test Agent", Role: "runs tests", Status: "idle"},
+			{Name: "Review", Role: "reviews diffs", Status: "idle"},
+			{Name: "DevOps", Role: "deploys", Status: "idle"},
+		},
+	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	m.addEntry("system", "Session started", "message")
+	return m
+}
+
+// codeTick schedules the next stats refresh.
+func codeTick() tea.Cmd {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return codeTickMsg(t) })
+}
+
+// Init starts the spinner and the stats ticker.
+func (m CodeModel) Init() tea.Cmd {
+	return tea.Batch(m.spin.Tick, m.fetchStats(), codeTick())
+}
+
+// fetchStats loads agent runtime stats + AI cost.
+func (m CodeModel) fetchStats() tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		out := codeStatsMsg{}
+		if c == nil {
+			return out
+		}
+		if s, err := c.Agents(); err == nil {
+			out.stats = s
+		}
+		if cost, err := c.AICost(); err == nil {
+			out.cost = cost
+		}
+		return out
+	}
+}
+
+// submit sends a task to the coordinator (orchestrated when team mode is on).
+func (m CodeModel) submit(text string) tea.Cmd {
+	c := m.client
+	sid := m.sessionID
+	goal := text
+	if m.team && !strings.HasPrefix(text, "/") {
+		goal = "/orchestrate " + text
+	}
+	return func() tea.Msg {
+		if c == nil {
+			return codeReplyMsg{err: fmt.Errorf("not connected — run: vortex start")}
+		}
+		resp, err := c.Submit(goal, sid)
+		return codeReplyMsg{content: resp, err: err}
+	}
+}
+
+// addEntry appends one activity entry, stamping the time.
+func (m *CodeModel) addEntry(source, content, kind string) {
+	e := ActivityEntry{Timestamp: time.Now(), Source: source, Content: content, Kind: kind}
+	if mm := stepPattern.FindStringSubmatch(content); mm != nil {
+		e.StepNum = atoiSafe(mm[1])
+		e.StepTotal = atoiSafe(mm[2])
+	}
+	m.activity = append(m.activity, e)
+}
+
+// atoiSafe parses n, returning 0 on failure (regex already guarantees digits).
+func atoiSafe(n string) int {
+	v, err := strconv.Atoi(n)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// ingestReply splits a coordinator reply into feed entries, framing step
+// markers and tracking progress / skills mentioned.
+func (m *CodeModel) ingestReply(content string) {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		kind := "message"
+		switch {
+		case stepPattern.MatchString(line):
+			kind = "step-start"
+		case strings.HasPrefix(line, "✓"):
+			kind = "step-end"
+		case strings.HasPrefix(line, "✗") || strings.HasPrefix(line, "⚠"):
+			kind = "error"
+		case strings.HasPrefix(line, "›") || strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-"):
+			kind = "step-item"
+		}
+		m.addEntry("coordinator", line, kind)
+		if mm := stepPattern.FindStringSubmatch(line); mm != nil {
+			m.progress.Current = atoiSafe(mm[1])
+			m.progress.Total = atoiSafe(mm[2])
+			m.progress.Step = line
+			if m.progress.Total > 0 {
+				m.progress.Percent = float64(m.progress.Current) / float64(m.progress.Total) * 100
+			}
+		}
+		if low := strings.ToLower(line); strings.Contains(low, "skill") {
+			m.skills = appendUnique(m.skills, strings.TrimSpace(line))
+		}
+	}
+}
+
+// appendUnique appends s if absent, capping the list at 5.
+func appendUnique(list []string, s string) []string {
+	for _, x := range list {
+		if x == s {
+			return list
+		}
+	}
+	if len(list) >= 5 {
+		return list
+	}
+	return append(list, s)
+}
+
+// Update handles keys, replies, and refreshes.
+func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.input.Width = msg.Width - 6
+		m.viewport.Width = maxInt2(msg.Width-codeSidebarWidth-3, 20)
+		m.viewport.Height = maxInt2(msg.Height-6, 5)
+		m.viewport.SetContent(m.renderFeed())
+		return m, nil
+
+	case codeTickMsg:
+		var cmd tea.Cmd
+		if !m.paused {
+			cmd = m.fetchStats()
+		}
+		return m, tea.Batch(cmd, codeTick())
+
+	case codeStatsMsg:
+		if msg.stats != nil {
+			m.stats = msg.stats
+		}
+		if msg.cost != nil {
+			m.cost = msg.cost
+			if m.working {
+				m.progress.CostUSD = msg.cost.TotalUSD - m.costAtStart
+			}
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		if m.working {
+			m.viewport.SetContent(m.renderFeed())
+			m.viewport.GotoBottom()
+		}
+		return m, cmd
+
+	case codeReplyMsg:
+		m.working = false
+		m.setAgentStatus("Coordinator", "ready")
+		m.setAgentStatus("Code Agent", "ready")
+		if msg.err != nil {
+			m.addEntry("system", "✗ "+msg.err.Error(), "error")
+		} else {
+			m.ingestReply(msg.content)
+			m.progress.Percent = 100
+		}
+		m.viewport.SetContent(m.renderFeed())
+		m.viewport.GotoBottom()
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	var icmd, vcmd tea.Cmd
+	m.input, icmd = m.input.Update(msg)
+	m.viewport, vcmd = m.viewport.Update(msg)
+	return m, tea.Batch(icmd, vcmd)
+}
+
+// handleKey routes key presses: overlays first, then hotkeys, then the input.
+func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	// Stop confirmation owns the keyboard while visible.
+	if m.confirmStop {
+		switch strings.ToLower(key) {
+		case "y":
+			m.confirmStop = false
+			m.working = false
+			m.paused = false
+			m.addEntry("system", "■ Task stopped — work done so far is saved", "message")
+			m.viewport.SetContent(m.renderFeed())
+			m.viewport.GotoBottom()
+		case "n", "esc":
+			m.confirmStop = false
+		}
+		return m, nil
+	}
+	// Help overlay closes on ? or Esc.
+	if m.helpOpen {
+		if key == "?" || key == "esc" || key == "q" {
+			m.helpOpen = false
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		// Toggle focus off the input so hotkeys (P/S/T/?/q) are reachable.
+		if m.input.Focused() {
+			m.input.Blur()
+		} else {
+			m.input.Focus()
+		}
+		return m, nil
+	case "enter":
+		text := strings.TrimSpace(m.input.Value())
+		if text == "" || m.working {
+			return m, nil
+		}
+		m.addEntry("user", text, "message")
+		m.input.Reset()
+		m.working = true
+		m.workStart = time.Now()
+		m.costAtStart = 0
+		if m.cost != nil {
+			m.costAtStart = m.cost.TotalUSD
+		}
+		m.progress = TaskProgress{Step: "Planning..."}
+		m.setAgentStatus("Coordinator", "busy")
+		m.setAgentStatus("Code Agent", "busy")
+		m.addEntry("coordinator", "Planning...", "message")
+		m.viewport.SetContent(m.renderFeed())
+		m.viewport.GotoBottom()
+		return m, tea.Batch(m.submit(text), m.spin.Tick)
+	}
+
+	// Hotkeys work while the input is NOT focused (press Esc first).
+	if !m.input.Focused() {
+		switch key {
+		case "p", "P":
+			m.paused = !m.paused
+			state := "⏸ PAUSED — agent activity frozen (press P to resume)"
+			if !m.paused {
+				state = "▶ Resumed"
+			}
+			m.addEntry("system", state, "message")
+			m.viewport.SetContent(m.renderFeed())
+			m.viewport.GotoBottom()
+			return m, nil
+		case "s", "S":
+			if m.working {
+				m.confirmStop = true
+			}
+			return m, nil
+		case "t", "T":
+			return m, m.forwardToTelegram()
+		case "?":
+			m.helpOpen = true
+			return m, nil
+		case "q":
+			if m.standalone {
+				return m, tea.Quit
+			}
+		}
+	}
+
+	var icmd, vcmd tea.Cmd
+	m.input, icmd = m.input.Update(msg)
+	m.viewport, vcmd = m.viewport.Update(msg)
+	return m, tea.Batch(icmd, vcmd)
+}
+
+// forwardToTelegram sends the current task status through the messaging
+// router (POST /api/notify).
+func (m CodeModel) forwardToTelegram() tea.Cmd {
+	c := m.client
+	summary := m.statusSummary()
+	return func() tea.Msg {
+		if c == nil {
+			return codeReplyMsg{err: fmt.Errorf("not connected")}
+		}
+		if err := c.Notify("📊 Task update from VORTEX", summary); err != nil {
+			return codeReplyMsg{err: fmt.Errorf("telegram forward failed: %w", err)}
+		}
+		return codeReplyMsg{content: "→ Status forwarded to Telegram"}
+	}
+}
+
+// statusSummary builds the human status text for the Telegram forward.
+func (m CodeModel) statusSummary() string {
+	var b strings.Builder
+	if m.progress.Total > 0 {
+		fmt.Fprintf(&b, "Step %d/%d", m.progress.Current, m.progress.Total)
+		if m.progress.Step != "" {
+			b.WriteString(" — " + m.progress.Step)
+		}
+		b.WriteString("\n")
+	}
+	// Include the last few feed lines for context.
+	n := len(m.activity)
+	for i := maxInt2(n-5, 0); i < n; i++ {
+		b.WriteString(m.activity[i].Content + "\n")
+	}
+	if m.working {
+		b.WriteString("⠸ Still working...")
+	} else {
+		b.WriteString("✓ Idle")
+	}
+	return b.String()
+}
+
+// setAgentStatus updates one roster entry.
+func (m *CodeModel) setAgentStatus(name, status string) {
+	for i := range m.agents {
+		if m.agents[i].Name == name {
+			m.agents[i].Status = status
+		}
+	}
+}
+
+// agentIcon maps a status to its brand icon.
+func agentIcon(status string) string {
+	switch status {
+	case "busy":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorWarning)).Render(brand.IconBusy)
+	case "ready":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorSuccess)).Render(brand.IconPulse)
+	case "error":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorDanger)).Render(brand.IconError)
+	default: // idle
+		return brand.StyleSubtitle.Render(brand.IconIdle)
+	}
+}
+
+// View renders the full coding interface.
+func (m CodeModel) View() string {
+	if m.helpOpen {
+		return m.renderHelp()
+	}
+	header := m.renderHeader()
+	left := m.renderSidebar()
+	feed := m.viewport.View()
+	if feed == "" {
+		feed = m.renderFeed()
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " "+brand.IconVSep+" ", feed)
+	inputLine := m.input.View()
+	if m.working {
+		inputLine = m.spin.View() + " Working...  " + inputLine
+	}
+	footer := brand.StyleHelp.Render("[Enter] Send  [Esc] Toggle input  [P] Pause  [S] Stop  [T] Telegram  [?] Help" + m.quitHint())
+
+	var overlay string
+	if m.confirmStop {
+		overlay = m.renderStopConfirm()
+	}
+	parts := []string{header, body, inputLine, footer}
+	if overlay != "" {
+		parts = []string{header, overlay, inputLine, footer}
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// quitHint shows [q] Quit only where q actually quits (standalone mode).
+func (m CodeModel) quitHint() string {
+	if m.standalone {
+		return "  [q] Quit"
+	}
+	return ""
+}
+
+// renderHeader renders the top bar: VORTEX CODE, project, provider, cost.
+func (m CodeModel) renderHeader() string {
+	parts := []string{brand.StyleTitle.Render("▲ VORTEX CODE")}
+	if m.project != "" {
+		parts = append(parts, brand.StyleSubtitle.Render(m.project))
+	}
+	provider := m.model
+	if provider == "" && m.cost != nil {
+		provider = m.cost.Provider
+	}
+	if provider != "" {
+		parts = append(parts, tui.Pill(provider, brand.ColorPurple))
+	}
+	if m.cost != nil {
+		parts = append(parts, tui.Pill(brand.IconCost+" "+brand.FormatCost(m.cost.TotalUSD), brand.ColorSuccess))
+	}
+	if m.paused {
+		parts = append(parts, brand.StyleWarn.Render("⏸ PAUSED"))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// renderSidebar renders the agents / memory / progress / skills panel.
+func (m CodeModel) renderSidebar() string {
+	var b strings.Builder
+	sec := func(title string) {
+		b.WriteString(brand.StyleTitle.Render(title) + "\n")
+	}
+	div := func() {
+		b.WriteString(brand.StyleSubtitle.Render(strings.Repeat(brand.IconSep, codeSidebarWidth-2)) + "\n")
+	}
+
+	sec("AGENTS")
+	for _, a := range m.agents {
+		b.WriteString(fmt.Sprintf("%s %-12s %s\n", agentIcon(a.Status), a.Name, brand.StyleSubtitle.Render(a.Status)))
+	}
+	div()
+
+	sec("MEMORY")
+	if m.stats != nil {
+		fmt.Fprintf(&b, "Skills:   %3d learned\n", m.stats.Skills)
+		fmt.Fprintf(&b, "Episodes: %3d stored\n", m.stats.Episodes)
+		fmt.Fprintf(&b, "Sessions: %3d total\n", m.stats.Sessions)
+	} else {
+		b.WriteString(brand.StyleSubtitle.Render("(connecting...)") + "\n")
+	}
+	div()
+
+	sec("TASK PROGRESS")
+	if m.working || m.progress.Percent > 0 {
+		b.WriteString(brand.ProgressBar(m.progress.Percent, codeSidebarWidth-8) +
+			fmt.Sprintf(" %3.0f%%\n", m.progress.Percent))
+		if m.progress.Total > 0 {
+			fmt.Fprintf(&b, "Step %d of %d\n", m.progress.Current, m.progress.Total)
+		}
+		if m.working {
+			fmt.Fprintf(&b, "Elapsed: %s\n", brand.FormatDuration(time.Since(m.workStart)))
+		}
+		fmt.Fprintf(&b, "Cost so far: %s\n", brand.FormatCost(m.progress.CostUSD))
+	} else {
+		b.WriteString(brand.StyleSubtitle.Render("(no task running)") + "\n")
+	}
+
+	if len(m.skills) > 0 {
+		div()
+		sec("SKILLS USED")
+		for _, s := range m.skills {
+			b.WriteString(brand.IconArrow + " " + truncateStr(s, codeSidebarWidth-4) + "\n")
+		}
+	}
+	return lipgloss.NewStyle().Width(codeSidebarWidth).Render(b.String())
+}
+
+// renderFeed renders the timestamped activity feed with step framing.
+func (m CodeModel) renderFeed() string {
+	w := maxInt2(m.viewport.Width, 40)
+	var b strings.Builder
+	for _, e := range m.activity {
+		ts := brand.StyleSubtitle.Render("[" + e.Timestamp.Format("15:04:05") + "]")
+		switch {
+		case e.Source == "user":
+			b.WriteString(ts + " " + lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).
+				Render(brand.IconUser+" You: "+e.Content) + "\n")
+		case e.Kind == "step-start":
+			b.WriteString(brand.StyleSubtitle.Render("┌─ "+e.Content+" "+
+				strings.Repeat("─", maxInt2(w-lipgloss.Width(e.Content)-6, 1))) + "\n")
+		case e.Kind == "step-item":
+			b.WriteString(brand.StyleSubtitle.Render("│ ") + brand.IconArrow + " " +
+				strings.TrimLeft(e.Content, "›•- ") + "\n")
+		case e.Kind == "step-end":
+			b.WriteString(brand.StyleSubtitle.Render("└─ ") + brand.StyleSuccess.Render(e.Content) + "\n")
+		case e.Kind == "error":
+			b.WriteString(ts + " " + brand.StyleError.Render(e.Content) + "\n")
+		case e.Source == "system":
+			b.WriteString(ts + " " + brand.StyleSubtitle.Render(brand.IconInfo+" "+e.Content) + "\n")
+		default:
+			b.WriteString(ts + " " + lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPurple)).
+				Render(brand.IconAgent+" "+e.Source+": ") + e.Content + "\n")
+		}
+	}
+	if m.working {
+		b.WriteString(brand.StyleSubtitle.Render("│ ") + m.spin.View() + " Working...\n")
+	}
+	return b.String()
+}
+
+// renderStopConfirm renders the stop confirmation box.
+func (m CodeModel) renderStopConfirm() string {
+	box := brand.StyleApproval.Padding(1, 2).Render(
+		brand.StyleWarn.Render("Stop task?") + "\n\n" +
+			"This will stop all agents immediately.\n" +
+			"Work done so far will be saved.\n\n" +
+			"[Y] Stop    [N] Continue")
+	return lipgloss.Place(maxInt2(m.width, 40), maxInt2(m.height-4, 8),
+		lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderHelp renders the ?-overlay.
+func (m CodeModel) renderHelp() string {
+	var b strings.Builder
+	b.WriteString(brand.StyleTitle.Render("Help — VORTEX Code") + "\n\n")
+	b.WriteString(brand.StyleTitle.Render("Keyboard shortcuts") + "\n")
+	for _, it := range [][2]string{
+		{"Enter", "Send task / instruction"},
+		{"Esc", "Toggle input focus (hotkeys work unfocused)"},
+		{"P", "Pause/resume agents"},
+		{"S", "Stop task (with confirmation)"},
+		{"T", "Forward status to Telegram"},
+		{"?", "This help"},
+		{"Ctrl+C", "Abort and quit"},
+	} {
+		fmt.Fprintf(&b, "  %-8s %s\n", it[0], it[1])
+	}
+	b.WriteString("\n" + brand.StyleTitle.Render("How it works") + "\n")
+	for i, s := range []string{
+		"Type your coding task", "Coordinator plans the work",
+		"Specialist agents execute", "You see every step live",
+		"Approve the final result",
+	} {
+		fmt.Fprintf(&b, "  %d. %s\n", i+1, s)
+	}
+	b.WriteString("\n" + brand.StyleTitle.Render("Example tasks") + "\n")
+	for _, s := range []string{
+		`"build a REST API with JWT auth"`, `"add tests to all Python files"`,
+		`"refactor main.py to use async"`, `"fix the bug on line 45 of auth.py"`,
+	} {
+		b.WriteString("  " + s + "\n")
+	}
+	b.WriteString("\n" + brand.StyleSubtitle.Render("Press ? or Esc to close"))
+	box := brand.StyleActive.Padding(1, 2).Render(b.String())
+	return lipgloss.Place(maxInt2(m.width, 50), maxInt2(m.height-1, 20),
+		lipgloss.Center, lipgloss.Center, box)
+}
+
+// IsInputFocused reports whether the chat input owns the keyboard (the app
+// shell disables navigation keys while true).
+func (m CodeModel) IsInputFocused() bool { return m.input.Focused() }
+
+// Accessors for tests.
+func (m CodeModel) Paused() bool                   { return m.paused }
+func (m CodeModel) Working() bool                  { return m.working }
+func (m CodeModel) ConfirmingStop() bool           { return m.confirmStop }
+func (m CodeModel) HelpOpen() bool                 { return m.helpOpen }
+func (m CodeModel) Activity() []ActivityEntry      { return m.activity }
+func (m CodeModel) AgentRoster() []CodeAgentStatus { return m.agents }
+func (m CodeModel) Progress() TaskProgress         { return m.progress }
+
+// maxInt2 returns the larger of a and b.
+func maxInt2(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

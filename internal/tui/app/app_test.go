@@ -173,9 +173,12 @@ func TestApp_NavigationWorksWhenNotInputFocused(t *testing.T) {
 	if a.ActiveView() != ViewCode {
 		t.Errorf("'3' on a non-input view should jump to Code, got %d", a.ActiveView())
 	}
+	// The Code view's input is focused on entry and rightly captures digits;
+	// Esc blurs it, after which navigation keys work again.
+	a.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("4")})
 	if a.ActiveView() != ViewRoutes {
-		t.Errorf("'4' should jump to Routes, got %d", a.ActiveView())
+		t.Errorf("'4' after Esc should jump to Routes, got %d", a.ActiveView())
 	}
 }
 

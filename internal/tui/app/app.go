@@ -100,7 +100,7 @@ func NewApp(client *tui.Client) *App {
 
 	a.views[ViewOverview] = views.NewOverview(client)
 	a.views[ViewAgents] = views.NewAgents(client)
-	a.views[ViewCode] = codePlaceholder{}
+	a.views[ViewCode] = views.NewCode(client)
 	a.views[ViewRoutes] = views.NewRoutes(client)
 	a.views[ViewNodes] = views.NewNodes(client)
 	a.views[ViewLogs] = views.NewLogs(client)
@@ -496,20 +496,6 @@ func (a *App) overlayBox(title, body string) string {
 		brand.StyleTitle.Render(title) + "\n\n" + body)
 	w, h := maxInt(a.width, 40), maxInt(a.height-1, 10)
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
-}
-
-// --- placeholder code view -------------------------------------------------
-
-// codePlaceholder stands in for the dedicated coding interface (part 5). It
-// keeps the sidebar entry live until views.CodeModel replaces it.
-type codePlaceholder struct{}
-
-func (codePlaceholder) Init() tea.Cmd                         { return nil }
-func (c codePlaceholder) Update(tea.Msg) (tea.Model, tea.Cmd) { return c, nil }
-func (codePlaceholder) View() string {
-	return brand.StyleTitle.Render("VORTEX CODE") + "\n\n" +
-		brand.StyleSubtitle.Render("The dedicated coding interface opens in its own terminal:") + "\n\n" +
-		"  vortex code\n"
 }
 
 func maxInt(a, b int) int {
