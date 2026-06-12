@@ -161,6 +161,14 @@ func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 	waitPortFree(t, "127.0.0.1:9090", 10*time.Second)
 
 	cmd := exec.Command(bin, "start", "--config", configPath, "--log-level", "debug")
+	// Isolate the user config dir: the developer's real ai-provider.json (from
+	// `vortex setup`) must not leak into the child, or gateway-dependent tests
+	// (e.g. forge-disabled-without-AI) behave differently per machine.
+	cmd.Env = append(os.Environ(),
+		"XDG_CONFIG_HOME="+t.TempDir(),
+		"AppData="+t.TempDir(),
+		"APPDATA="+t.TempDir(),
+	)
 	p := &VortexProcess{
 		ConfigPath: configPath,
 		APIAddr:    apiBase,

@@ -114,6 +114,17 @@ func resolveWorkingDir() string {
 // reports not-ready (production audit I3).
 const readinessQueueDepthLimit = 1000
 
+// stdoutIsTerminal reports whether stdout is a character device (a console).
+// Piped/captured stdout (CI harnesses, journald, shell redirects) must keep
+// the raw structured logs.
+func stdoutIsTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
 // routeNames lists the configured route names for the startup display.
 func routeNames(cfg *config.Config) []string {
 	out := make([]string, 0, len(cfg.Routes))
@@ -132,7 +143,11 @@ func runStart(ctx context.Context, pidfile string) error {
 	// interactive terminal without --verbose. While active, console logging is
 	// silenced (the ring buffer for the TUI log viewer still receives every
 	// record) and each subsystem reports through display.Step instead.
-	display := startup.NewStartupDisplay(startVerbose || !isInteractive())
+	// BOTH stdin and stdout must be terminals: stdin alone is not enough
+	// because /dev/null is a character device on Linux, which made CI's
+	// integration harness (piped stdout, /dev/null stdin) lose the raw logs
+	// its assertions read.
+	display := startup.NewStartupDisplay(startVerbose || !isInteractive() || !stdoutIsTerminal())
 	if display.Active() {
 		log = logger.New(logger.Config{
 			Level:  logger.ParseLevel(flags.logLevel),
