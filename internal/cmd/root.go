@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/config"
+	vortexerrors "github.com/vortex-run/vortex/internal/errors"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
@@ -110,15 +111,13 @@ func Execute() {
 			errors.Is(err, errSecret) || errors.Is(err, errAudit) ||
 			errors.Is(err, errCluster) || errors.Is(err, errPlugin) ||
 			errors.Is(err, errNamespace) || errors.Is(err, errTune) ||
-			errors.Is(err, errUINotRunning) || errors.Is(err, errVerify) {
+			errors.Is(err, errUINotRunning) || errors.Is(err, errCodeNotRunning) ||
+			errors.Is(err, errVerify) {
 			os.Exit(1)
 		}
-		// PersistentPreRunE may not have run on early parse errors; guard nil.
-		if log != nil {
-			log.Error("vortex exited with error", "err", err)
-		} else {
-			fmt.Fprintln(os.Stderr, "vortex:", err)
-		}
+		// Print a friendly, actionable explanation (brand redesign part 6)
+		// instead of a bare error line, then exit non-zero.
+		fmt.Fprintln(os.Stderr, vortexerrors.Format(err))
 		os.Exit(1)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	vortexerrors "github.com/vortex-run/vortex/internal/errors"
 	"github.com/vortex-run/vortex/internal/tui"
 	"github.com/vortex-run/vortex/internal/tui/brand"
 )
@@ -195,7 +196,9 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		content := msg.content
 		if msg.err != nil {
-			content = "⚠ " + msg.err.Error()
+			// Surface a friendly, actionable explanation (rate limit → add backup
+			// keys, invalid key → run setup, etc.) instead of the raw error.
+			content = vortexerrors.NewFriendly(msg.err).Short()
 		}
 		// An [APPROVAL_REQUIRED] line means the agent is waiting on a decision.
 		if strings.Contains(content, "[APPROVAL_REQUIRED]") {
