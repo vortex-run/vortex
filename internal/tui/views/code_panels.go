@@ -33,6 +33,30 @@ func agentColor(agent string) string {
 	}
 }
 
+// rosterNameByID maps a bus agent ID to its LEFT-roster display name.
+var rosterNameByID = map[string]string{
+	"coordinator":  "Coordinator",
+	"code-agent":   "Code Agent",
+	"test-agent":   "Test Agent",
+	"review-agent": "Review",
+}
+
+// applyCommsStatus updates the roster from a live bus entry: a task assignment
+// marks the recipient busy; a result marks the sender ready. Unknown IDs and
+// the "user" pseudo-agent are ignored.
+func (m *CodeModel) applyCommsStatus(e CommsEntry) {
+	switch e.Kind {
+	case "task":
+		if name, ok := rosterNameByID[e.To]; ok && e.To != "user" {
+			m.setAgentStatus(name, "busy")
+		}
+	case "result":
+		if name, ok := rosterNameByID[e.From]; ok && e.From != "user" {
+			m.setAgentStatus(name, "ready")
+		}
+	}
+}
+
 // HandleAGUI processes the three-panel collaboration messages and keys (bus
 // comms, checkpoints, direct-chat replies, agent selection, checkpoint review).
 // It returns (handled) so the main Update can fall through when it does not
@@ -45,6 +69,9 @@ func (m CodeModel) HandleAGUI(msg tea.Msg) (CodeModel, bool) {
 		if len(m.comms) > 500 {
 			m.comms = m.comms[len(m.comms)-500:]
 		}
+		// Drive the LEFT roster from live bus traffic: a task hand-off marks the
+		// recipient busy; a result marks the sender ready again.
+		m.applyCommsStatus(CommsEntry(msg))
 		return m, true
 	case CheckpointMsg:
 		cp := CheckpointUI(msg)

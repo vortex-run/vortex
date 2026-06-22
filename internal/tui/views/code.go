@@ -305,11 +305,14 @@ func (m CodeModel) listenComms() tea.Cmd {
 // commsClosedMsg signals the comms stream ended so it can be reopened.
 type commsClosedMsg struct{}
 
-// commsKind maps a bus message type to the comms panel's kind tag.
+// commsKind maps a bus message type to the comms panel's kind tag. Checkpoint
+// keeps its special rendering; task/result/progress are passed through so the
+// roster-status logic can tell a hand-off from a result. Anything else renders
+// as a normal message line.
 func commsKind(busType string) string {
 	switch busType {
-	case "checkpoint":
-		return "checkpoint"
+	case "checkpoint", "task", "result", "progress":
+		return busType
 	default:
 		return "message"
 	}

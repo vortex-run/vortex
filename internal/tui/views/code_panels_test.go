@@ -209,6 +209,30 @@ func TestCode_CommsStreamReadyArmsListenLoop(t *testing.T) {
 	}
 }
 
+func TestCode_RosterStatusFromLiveComms(t *testing.T) {
+	m := sizedCode(WithTeam())
+	// A task hand-off to the test agent marks it busy.
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "coordinator", To: "test-agent", Kind: "task", Content: "run tests"})
+	if statusOf(m, "Test Agent") != "busy" {
+		t.Errorf("Test Agent status = %q after task, want busy", statusOf(m, "Test Agent"))
+	}
+	// Its result marks it ready again.
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "test-agent", To: "coordinator", Kind: "result", Content: "passed"})
+	if statusOf(m, "Test Agent") != "ready" {
+		t.Errorf("Test Agent status = %q after result, want ready", statusOf(m, "Test Agent"))
+	}
+}
+
+// statusOf returns the roster status for the named agent (test helper).
+func statusOf(m CodeModel, name string) string {
+	for _, a := range m.AgentRoster() {
+		if a.Name == name {
+			return a.Status
+		}
+	}
+	return ""
+}
+
 func TestCode_CommsClosedResetsChannel(t *testing.T) {
 	m := sizedCode(WithTeam())
 	ch := make(chan tui.CommsRecord)
