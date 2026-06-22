@@ -33,6 +33,7 @@ const (
 	ViewMetrics
 	ViewSecurity
 	ViewSecrets
+	ViewKeys
 	ViewSetup
 )
 
@@ -56,6 +57,7 @@ var sidebarItems = []SidebarItem{
 	{ViewMetrics, "Metrics"},
 	{ViewSecurity, "Security"},
 	{ViewSecrets, "Secrets"},
+	{ViewKeys, "Keys"},
 }
 
 // App is the root Bubble Tea model.
@@ -65,9 +67,11 @@ type App struct {
 	views      map[ViewID]tea.Model
 	selected   int // sidebar selection index
 	health     *tui.HealthData
-	workingDir string          // shown in the top bar
-	cost       *tui.AICostData // AI cost, shown in the top bar
-	lastCost   time.Time       // last cost poll (every 30s)
+	workingDir string             // shown in the top bar
+	cost       *tui.AICostData    // AI cost, shown in the top bar
+	keys       *tui.KeyStatusData // key-rotation status, shown in the top bar
+	switching  time.Time          // brief "↻ Switching..." flash window
+	lastCost   time.Time          // last cost poll (every 30s)
 	width      int
 	height     int
 	setupMode  bool
@@ -107,6 +111,7 @@ func NewApp(client *tui.Client) *App {
 	a.views[ViewMetrics] = views.NewMetrics(client)
 	a.views[ViewSecurity] = views.NewSecurity(client)
 	a.views[ViewSecrets] = views.NewSecrets(client)
+	a.views[ViewKeys] = views.NewKeys(client)
 	a.views[ViewSetup] = views.NewSetup()
 
 	if client != nil && client.IsConnected() {
@@ -159,10 +164,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if st, err := a.client.Status(); err == nil && st.WorkingDir != "" {
 				a.workingDir = st.WorkingDir
 			}
-			// Poll AI cost at most every 30s.
+			// Poll AI cost + key-rotation status at most every 30s.
 			if time.Since(a.lastCost) >= 30*time.Second {
 				if c, err := a.client.AICost(); err == nil {
 					a.cost = c
+				}
+				if k, err := a.client.KeyStatus(); err == nil {
+					a.noteSwitch(k)
+					a.keys = k
 				}
 				a.lastCost = time.Now()
 			}
@@ -295,11 +304,88 @@ func (a *App) topBar() string {
 	if a.workingDir != "" {
 		parts = append(parts, tui.Pill(brand.IconFolder+" "+a.workingDir, brand.ColorPurple))
 	}
+	if pill := a.keyRotationPill(); pill != "" {
+		parts = append(parts, pill)
+	}
 	if a.cost != nil {
 		parts = append(parts, costPill(a.cost))
 	}
 	parts = append(parts, brand.StyleHelp.Render("[Tab] views  [q] quit"))
 	return strings.Join(parts, "  ")
+}
+
+// keyRotationPill renders the active-slot indicator: "🔄 DeepSeek[1/3]"
+// colored by score, or "↻ Switching..." briefly after a switch, or "" when
+// key rotation is not enabled.
+func (a *App) keyRotationPill() string {
+	if a.keys == nil || len(a.keys.Slots) == 0 {
+		return ""
+	}
+	if !a.switching.IsZero() && time.Since(a.switching) < 3*time.Second {
+		return brand.StyleWarn.Render("↻ Switching...")
+	}
+	var active *tui.KeySlotData
+	for i := range a.keys.Slots {
+		if a.keys.Slots[i].Active {
+			active = &a.keys.Slots[i]
+			break
+		}
+	}
+	if active == nil {
+		active = &a.keys.Slots[0]
+	}
+	color := brand.ColorDanger
+	switch {
+	case active.Score > 70:
+		color = brand.ColorSuccess
+	case active.Score >= 40:
+		color = brand.ColorWarning
+	}
+	label := fmt.Sprintf("🔄 %s[%s/%d]", providerLabel(active.Provider), slotIndex(active.ID), len(a.keys.Slots))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(label)
+}
+
+// noteSwitch flashes the "↻ Switching..." indicator when the active slot
+// changes between polls.
+func (a *App) noteSwitch(next *tui.KeyStatusData) {
+	if a.keys == nil || next == nil {
+		return
+	}
+	if activeSlotID(a.keys) != activeSlotID(next) && activeSlotID(next) != "" {
+		a.switching = time.Now()
+	}
+}
+
+// activeSlotID returns the active slot's id ("" if none).
+func activeSlotID(k *tui.KeyStatusData) string {
+	if k == nil {
+		return ""
+	}
+	for _, s := range k.Slots {
+		if s.Active {
+			return s.ID
+		}
+	}
+	return ""
+}
+
+// slotIndex renders "slot-1" as "1".
+func slotIndex(id string) string { return strings.TrimPrefix(id, "slot-") }
+
+// providerLabel display-cases a provider id for the top bar.
+func providerLabel(p string) string {
+	switch p {
+	case "deepseek":
+		return "DeepSeek"
+	case "openai":
+		return "OpenAI"
+	case "openrouter":
+		return "OpenRouter"
+	case "":
+		return "—"
+	default:
+		return strings.ToUpper(p[:1]) + p[1:]
+	}
 }
 
 // sidebar renders the left navigation: selected item highlighted with the
@@ -405,6 +491,8 @@ func helpViewID(id ViewID) views.HelpViewID {
 		return views.HelpSecurity
 	case ViewSecrets:
 		return views.HelpSecrets
+	case ViewKeys:
+		return views.HelpKeys
 	default:
 		return views.HelpOverview
 	}

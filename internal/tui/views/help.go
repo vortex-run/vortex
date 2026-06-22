@@ -25,6 +25,7 @@ const (
 	HelpMetrics
 	HelpSecurity
 	HelpSecrets
+	HelpKeys
 )
 
 // HelpItem is one keyboard shortcut or command with an optional example.
@@ -58,9 +59,32 @@ func GetHelp(id HelpViewID) HelpContent {
 		return logsHelp
 	case HelpCode:
 		return codeHelp
+	case HelpKeys:
+		return keysHelp
 	default:
 		return genericHelp
 	}
+}
+
+var keysHelp = HelpContent{
+	Title: "API Key Slots",
+	Sections: []HelpSection{
+		{Title: "What this does", Items: []HelpItem{
+			{Action: "Up to 4 key slots are health-scored (0-100) and switched"},
+			{Action: "automatically on rate limits or budget exhaustion."},
+			{Action: "Conversation context is preserved across provider switches."},
+		}},
+		{Title: "Keyboard shortcuts", Items: []HelpItem{
+			{Key: "j/k", Action: "Move between slots"},
+			{Key: "Enter", Action: "View slot details"},
+		}},
+		{Title: "Manage from the CLI", Items: []HelpItem{
+			{Key: "keys add", Action: "Add a key slot"},
+			{Key: "keys remove", Action: "Remove a slot"},
+			{Key: "keys test", Action: "Test a slot's key"},
+			{Key: "keys mode", Action: "auto|cheap|fast|quality|balanced"},
+		}},
+	},
 }
 
 var agentsHelp = HelpContent{

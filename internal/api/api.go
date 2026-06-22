@@ -114,6 +114,10 @@ type Server struct {
 	// used by the TUI code view's Telegram forward). Nil yields 503.
 	notifier func(title, body string) error
 
+	// keyStatusProvider backs GET /api/keys/status (autonomous key rotation).
+	// Nil yields an empty slot list. Wired via SetKeyStatusProvider.
+	keyStatusProvider func() KeyStatusInfo
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -202,6 +206,50 @@ type AICostInfo struct {
 // SetAICostProvider wires the GET /api/ai/cost data source. When nil, the
 // endpoint reports zero/free.
 func (s *Server) SetAICostProvider(fn func() AICostInfo) { s.aiCostProvider = fn }
+
+// KeySlotInfo is one API-key slot's status for GET /api/keys/status (autonomous
+// key rotation). The raw key is never exposed — only its masked form.
+type KeySlotInfo struct {
+	ID            string  `json:"id"`
+	Provider      string  `json:"provider"`
+	Label         string  `json:"label"`
+	Model         string  `json:"model"`
+	MaskedKey     string  `json:"masked_key"`
+	Priority      int     `json:"priority"`
+	Enabled       bool    `json:"enabled"`
+	Score         int     `json:"score"`
+	RequestsToday int64   `json:"requests_today"`
+	ErrorsLast10  int     `json:"errors_last_10"`
+	AvgLatencyMs  int64   `json:"avg_latency_ms"`
+	SpentTodayUSD float64 `json:"spent_today_usd"`
+	DailyBudget   float64 `json:"daily_budget"`
+	RateLimited   bool    `json:"rate_limited"`
+	Active        bool    `json:"active"`
+}
+
+// KeyStatusInfo is the GET /api/keys/status response.
+type KeyStatusInfo struct {
+	Mode     string        `json:"mode"`
+	Slots    []KeySlotInfo `json:"slots"`
+	TotalUSD float64       `json:"total_usd"`
+}
+
+// SetKeyStatusProvider wires the GET /api/keys/status data source. When nil the
+// endpoint reports an empty slot list (single-provider mode).
+func (s *Server) SetKeyStatusProvider(fn func() KeyStatusInfo) { s.keyStatusProvider = fn }
+
+// handleKeyStatus returns the key-rotation slot statuses.
+func (s *Server) handleKeyStatus(w http.ResponseWriter, _ *http.Request) {
+	info := KeyStatusInfo{Mode: "single", Slots: []KeySlotInfo{}}
+	if s.keyStatusProvider != nil {
+		info = s.keyStatusProvider()
+	}
+	if info.Slots == nil {
+		info.Slots = []KeySlotInfo{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
 
 // StatusSnapshot returns the current extended status (for non-HTTP callers like
 // the Telegram bot). Empty when no provider is wired.
@@ -334,6 +382,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// Dashboard data endpoints (protected: localhost or valid key).
 	mux.Handle("GET /api/status", s.protected(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("GET /api/ai/cost", s.requireAPIKey(http.HandlerFunc(s.handleAICost)))
+	mux.Handle("GET /api/keys/status", s.requireAPIKey(http.HandlerFunc(s.handleKeyStatus)))
 	mux.Handle("GET /api/healing/status", s.requireAPIKey(http.HandlerFunc(s.handleHealingStatus)))
 	mux.Handle("GET /api/healing/events", s.requireAPIKey(http.HandlerFunc(s.handleHealingEvents)))
 	mux.Handle("GET /api/research/reports", s.requireAPIKey(http.HandlerFunc(s.handleResearchReports)))

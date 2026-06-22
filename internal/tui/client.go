@@ -314,6 +314,42 @@ func (c *Client) AICost() (*AICostData, error) {
 	return &d, nil
 }
 
+// KeySlotData is one API-key slot's status (autonomous key rotation).
+type KeySlotData struct {
+	ID            string  `json:"id"`
+	Provider      string  `json:"provider"`
+	Label         string  `json:"label"`
+	Model         string  `json:"model"`
+	MaskedKey     string  `json:"masked_key"`
+	Priority      int     `json:"priority"`
+	Enabled       bool    `json:"enabled"`
+	Score         int     `json:"score"`
+	RequestsToday int64   `json:"requests_today"`
+	ErrorsLast10  int     `json:"errors_last_10"`
+	AvgLatencyMs  int64   `json:"avg_latency_ms"`
+	SpentTodayUSD float64 `json:"spent_today_usd"`
+	DailyBudget   float64 `json:"daily_budget"`
+	RateLimited   bool    `json:"rate_limited"`
+	Active        bool    `json:"active"`
+}
+
+// KeyStatusData is the GET /api/keys/status response.
+type KeyStatusData struct {
+	Mode     string        `json:"mode"`
+	Slots    []KeySlotData `json:"slots"`
+	TotalUSD float64       `json:"total_usd"`
+}
+
+// KeyStatus fetches the key-rotation slot statuses. An empty slot list means
+// single-provider mode.
+func (c *Client) KeyStatus() (*KeyStatusData, error) {
+	var d KeyStatusData
+	if err := c.getJSON("/api/keys/status", &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // History fetches the list of stored conversation sessions.
 func (c *Client) History() ([]SessionSummaryData, error) {
 	var out struct {
