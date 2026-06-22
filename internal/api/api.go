@@ -118,6 +118,14 @@ type Server struct {
 	// Nil yields an empty slot list. Wired via SetKeyStatusProvider.
 	keyStatusProvider func() KeyStatusInfo
 
+	// a2aHandler serves the A2A protocol tree under /a2a/ (agent teams). It is
+	// NOT auth-gated: agents call one another over loopback, and the cards
+	// expose no secrets. Wired via SetA2AHandler; nil yields 404.
+	a2aHandler http.Handler
+	// teamAgents backs GET /api/team/agents + /api/team/status (auth-gated
+	// views of the agent team). Nil yields an empty list.
+	teamAgents func() []TeamAgentInfo
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -434,6 +442,12 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// VORTEX Studio (M12): browser IDE/terminal/db/git, auth-gated.
 	mux.HandleFunc("/studio/", s.handleStudio)
 
+	// A2A protocol tree (agent teams). Loopback agent-to-agent traffic; cards
+	// expose no secrets, so not auth-gated. 404 when team mode is off.
+	mux.HandleFunc("/a2a/", s.handleA2A)
+	mux.Handle("GET /api/team/agents", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
+	mux.Handle("GET /api/team/status", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
+
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))
 	mux.Handle("DELETE /api/namespaces/{id}", s.protectedAdmin(http.HandlerFunc(s.handleDeleteNamespace)))
@@ -457,6 +471,41 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		IdleTimeout:       120 * time.Second,
 	}
 	return s
+}
+
+// TeamAgentInfo is one team agent's status for /api/team/agents.
+type TeamAgentInfo struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role"`
+	Status       string   `json:"status"`
+	Capabilities []string `json:"capabilities"`
+}
+
+// SetA2AHandler wires the A2A protocol handler tree under /a2a/. Nil disables
+// it (404). Enables agent teams.
+func (s *Server) SetA2AHandler(h http.Handler) { s.a2aHandler = h }
+
+// SetTeamAgentsProvider wires the GET /api/team/agents data source.
+func (s *Server) SetTeamAgentsProvider(fn func() []TeamAgentInfo) { s.teamAgents = fn }
+
+// handleA2A dispatches /a2a/* to the A2A handler (404 when team mode is off).
+func (s *Server) handleA2A(w http.ResponseWriter, r *http.Request) {
+	if s.a2aHandler == nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.a2aHandler.ServeHTTP(w, r)
+}
+
+// handleTeamAgents returns the agent-team cards (auth-gated).
+func (s *Server) handleTeamAgents(w http.ResponseWriter, _ *http.Request) {
+	agents := []TeamAgentInfo{}
+	if s.teamAgents != nil {
+		agents = s.teamAgents()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"agents": agents})
 }
 
 // SetNotifier wires the messaging router behind POST /api/notify. Nil = 503.

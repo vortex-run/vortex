@@ -102,6 +102,12 @@ tasks:
     cmds:
       - '"{{.BIN}}" start --config vortex.cue'
 
+  start:team:
+    desc: Start VORTEX with the specialist agent team (Code/Test/Review)
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" start --config vortex.cue --team'
+
   stop:
     desc: Stop the running VORTEX server
     cmds:

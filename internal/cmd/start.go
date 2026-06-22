@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vortex-run/vortex/internal/a2a"
 	"github.com/vortex-run/vortex/internal/agents"
 	"github.com/vortex-run/vortex/internal/api"
 	"github.com/vortex-run/vortex/internal/audit"
@@ -81,6 +82,7 @@ func newStartCommand() *cobra.Command {
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
 	c.Flags().BoolVar(&startVerbose, "verbose", false, "show raw structured logs instead of the clean startup sequence")
+	c.Flags().BoolVar(&teamMode, "team", false, "enable the specialist agent team (Code/Test/Review agents)")
 	return c
 }
 
@@ -88,6 +90,9 @@ func newStartCommand() *cobra.Command {
 // (--verbose). Non-interactive runs (systemd, CI, pipes) always use raw logs
 // regardless, so journals never lose records to the cosmetic display.
 var startVerbose bool
+
+// teamMode enables the specialist agent team (--team or VORTEX_TEAM_MODE=true).
+var teamMode bool
 
 // telegramFromFile reads the Telegram token + chat id from the setup config
 // (ai-provider.json), returning ok=false when absent.
@@ -243,6 +248,71 @@ func safeGo(_ context.Context, log *slog.Logger, name string, fn func()) {
 		}()
 		fn()
 	}()
+}
+
+// portSuffix turns a listen address (":9090", "0.0.0.0:9090") into ":port".
+func portSuffix(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i >= 0 {
+		return addr[i:]
+	}
+	if addr == "" {
+		return ":9090"
+	}
+	return ":" + addr
+}
+
+// envTrue reports whether an env var is set to a truthy value.
+func envTrue(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// wireAgentTeam builds the A2A server, registers the specialist agents, mounts
+// the A2A tree on the API server, enables team mode on the coordinator, and
+// exposes the /api/team/agents view (agent teams).
+func wireAgentTeam(_ context.Context, apiSrv *api.Server, rt *agents.Runtime, gateway agents.AIGateway, notifier *messaging.Router, workDir string, display *startup.Display, log *slog.Logger) {
+	a2aServer := a2a.NewAgentServer()
+	baseURL := "http://localhost" + portSuffix(apiSrv.Addr())
+	a2aClient := a2a.NewAgentClient(baseURL, "coordinator")
+
+	// Trusted tool registry for the specialists (file ops without approval;
+	// terminal/commit still gated).
+	tools, terr := agents.NewTrustedToolRegistry(agents.LocalFSConfig{Root: workDir})
+	if terr != nil {
+		log.Warn("agent team disabled: tool registry failed", "err", terr)
+		return
+	}
+
+	team := agents.NewAgentTeam(agents.TeamConfig{
+		Client:   a2aClient,
+		Server:   a2aServer,
+		Notifier: routerNotifierAdapter{router: notifier},
+		WorkDir:  workDir,
+		BaseURL:  baseURL,
+	}, gateway, tools)
+
+	rt.Coordinator().SetTeam(team)
+	apiSrv.SetA2AHandler(a2aServer.Handler())
+	apiSrv.SetTeamAgentsProvider(func() []api.TeamAgentInfo {
+		out := []api.TeamAgentInfo{}
+		// Coordinator first, then the specialists from the A2A server.
+		out = append(out, api.TeamAgentInfo{
+			ID: "coordinator", Name: "VORTEX Coordinator", Role: "coordinator", Status: "idle",
+		})
+		for _, c := range a2aServer.List() {
+			out = append(out, api.TeamAgentInfo{
+				ID: c.ID, Name: c.Name, Role: c.Role, Status: c.Status, Capabilities: c.Capabilities,
+			})
+		}
+		return out
+	})
+
+	log.Info("agent team enabled", "agents", []string{"coordinator", "code-agent", "test-agent", "review-agent"})
+	display.Step("Agent team", "coordinator, code-agent, test-agent, review-agent")
 }
 
 // routeNames lists the configured route names for the startup display.
@@ -668,6 +738,12 @@ func runStart(ctx context.Context, pidfile string) error {
 		// Register messaging webhooks (each with its own per-IP rate limit) now
 		// that the runtime exists to receive their messages.
 		registerMessagingWebhooks(apiSrv, msg, agentRuntime, log)
+
+		// Specialist agent team (agent teams): coder → tester → reviewer over
+		// A2A. Enabled by --team or VORTEX_TEAM_MODE=true.
+		if teamMode || envTrue("VORTEX_TEAM_MODE") {
+			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, resolveWorkingDir(), display, log)
+		}
 	}
 
 	// --- VORTEX Studio (M12): browser IDE/terminal/db/git -------------------
