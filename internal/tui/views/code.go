@@ -1,6 +1,7 @@
 package views
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -107,6 +108,10 @@ type CodeModel struct {
 	chat          []ChatLine    // right panel: conversation with selectedAgent
 	checkpoint    *CheckpointUI // active checkpoint review (nil = none)
 	viewingFile   int           // index into checkpoint.Files (-1 = none)
+
+	// commsCh delivers live bus messages from the server's SSE feed; nil until
+	// the stream is opened in Init. listenComms re-subscribes after each message.
+	commsCh <-chan tui.CommsRecord
 
 	width  int
 	height int
@@ -244,9 +249,70 @@ func codeTick() tea.Cmd {
 	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return codeTickMsg(t) })
 }
 
-// Init starts the spinner and the stats ticker.
+// Init starts the spinner, the stats ticker, and (in team mode) the live
+// agent-communication stream.
 func (m CodeModel) Init() tea.Cmd {
-	return tea.Batch(m.spin.Tick, m.fetchStats(), codeTick())
+	cmds := []tea.Cmd{m.spin.Tick, m.fetchStats(), codeTick()}
+	if m.team {
+		cmds = append(cmds, m.startCommsStream())
+	}
+	return tea.Batch(cmds...)
+}
+
+// commsStreamReadyMsg carries the opened SSE channel back into the model.
+type commsStreamReadyMsg struct{ ch <-chan tui.CommsRecord }
+
+// startCommsStream opens the agent-communication SSE feed. On failure it returns
+// a nil-channel ready msg; the codeTick refresh retries by re-issuing it.
+func (m CodeModel) startCommsStream() tea.Cmd {
+	c := m.client
+	return func() tea.Msg {
+		if c == nil {
+			return commsStreamReadyMsg{}
+		}
+		ch, err := c.StreamComms(context.Background())
+		if err != nil {
+			return commsStreamReadyMsg{}
+		}
+		return commsStreamReadyMsg{ch: ch}
+	}
+}
+
+// listenComms blocks on the live comms channel and returns the next message as a
+// CommsMsg. It re-issues itself after each message (see the CommsMsg handler) so
+// the stream keeps flowing; when the channel closes it returns a sentinel that
+// triggers a reconnect on the next tick.
+func (m CodeModel) listenComms() tea.Cmd {
+	ch := m.commsCh
+	return func() tea.Msg {
+		if ch == nil {
+			return nil
+		}
+		rec, ok := <-ch
+		if !ok {
+			return commsClosedMsg{}
+		}
+		return CommsMsg{
+			Time:    time.Now(),
+			From:    rec.From,
+			To:      rec.To,
+			Kind:    commsKind(rec.Type),
+			Content: rec.Content,
+		}
+	}
+}
+
+// commsClosedMsg signals the comms stream ended so it can be reopened.
+type commsClosedMsg struct{}
+
+// commsKind maps a bus message type to the comms panel's kind tag.
+func commsKind(busType string) string {
+	switch busType {
+	case "checkpoint":
+		return "checkpoint"
+	default:
+		return "message"
+	}
 }
 
 // fetchStats loads agent runtime stats + AI cost.
@@ -355,9 +421,27 @@ func appendUnique(list []string, s string) []string {
 
 // Update handles keys, replies, and refreshes.
 func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Live comms-stream lifecycle (team mode). Handled before HandleAGUI so the
+	// listen loop keeps re-subscribing.
+	switch lm := msg.(type) {
+	case commsStreamReadyMsg:
+		m.commsCh = lm.ch
+		if lm.ch == nil {
+			return m, nil // stream not available yet; codeTick retries
+		}
+		return m, m.listenComms()
+	case commsClosedMsg:
+		m.commsCh = nil
+		return m, nil // a later codeTick reopens the stream
+	}
+
 	// Three-panel collaboration messages + selection/checkpoint keys are handled
-	// first; if consumed, the standard handling is skipped.
+	// first; if consumed, the standard handling is skipped. A live CommsMsg must
+	// re-arm the listen loop so subsequent bus messages keep arriving.
 	if updated, handled := m.HandleAGUI(msg); handled {
+		if _, isComms := msg.(CommsMsg); isComms {
+			return updated, updated.listenComms()
+		}
 		return updated, nil
 	}
 
@@ -371,11 +455,15 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case codeTickMsg:
-		var cmd tea.Cmd
+		cmds := []tea.Cmd{codeTick()}
 		if !m.paused {
-			cmd = m.fetchStats()
+			cmds = append(cmds, m.fetchStats())
 		}
-		return m, tea.Batch(cmd, codeTick())
+		// Reopen the comms stream if it was never established or has closed.
+		if m.team && m.commsCh == nil {
+			cmds = append(cmds, m.startCommsStream())
+		}
+		return m, tea.Batch(cmds...)
 
 	case codeStatsMsg:
 		m.memOffline = msg.offline

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/vortex-run/vortex/internal/tui"
 )
 
 func TestCode_ThreePanelLayout(t *testing.T) {
@@ -184,6 +186,37 @@ func TestCode_CoordinatorSubmitShowsUserMessageInChat(t *testing.T) {
 	}
 	if !strings.Contains(m.renderChat(), "create a python calculator") {
 		t.Errorf("CHAT panel should show the user message:\n%s", m.renderChat())
+	}
+}
+
+func TestCode_CommsStreamReadyArmsListenLoop(t *testing.T) {
+	m := sizedCode(WithTeam())
+	ch := make(chan tui.CommsRecord, 1)
+	updated, cmd := m.Update(commsStreamReadyMsg{ch: ch})
+	m = updated.(CodeModel)
+	if cmd == nil {
+		t.Error("a ready stream should kick off the listen loop")
+	}
+	// A live comms message re-arms the loop (returns a follow-up cmd) and lands
+	// in the middle panel.
+	updated2, cmd2 := m.Update(CommsMsg{Time: time.Now(), From: "coordinator", To: "code-agent", Content: "go"})
+	m = updated2.(CodeModel)
+	if cmd2 == nil {
+		t.Error("handling a CommsMsg must re-issue listenComms")
+	}
+	if len(m.Comms()) != 1 || m.Comms()[0].Content != "go" {
+		t.Errorf("comms = %+v, want one entry", m.Comms())
+	}
+}
+
+func TestCode_CommsClosedResetsChannel(t *testing.T) {
+	m := sizedCode(WithTeam())
+	ch := make(chan tui.CommsRecord)
+	m.commsCh = ch
+	updated, _ := m.Update(commsClosedMsg{})
+	m = updated.(CodeModel)
+	if m.commsCh != nil {
+		t.Error("a closed stream should clear commsCh so a tick reopens it")
 	}
 }
 

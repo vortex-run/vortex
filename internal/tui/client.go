@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -91,6 +92,17 @@ type MetricsData struct {
 	ActiveConns    map[string]float64 // by route
 	P99LatencyMs   map[string]float64 // by route
 	ClusterMembers float64
+}
+
+// CommsRecord is one agent-communication entry from GET /api/agents/comms
+// (and the /stream SSE feed). It mirrors the server's api.CommsRecord.
+type CommsRecord struct {
+	ID        string `json:"id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+	SessionID string `json:"session_id"`
 }
 
 // AgentsData mirrors GET /api/agents/status.
@@ -529,6 +541,59 @@ func (c *Client) AgentChat(agentID, sessionID, message string) (string, error) {
 		return "", err
 	}
 	return out.Response, nil
+}
+
+// StreamComms opens the agent-communication SSE feed
+// (GET /api/agents/comms/stream) and delivers each decoded record on the
+// returned channel until ctx is cancelled or the stream ends, at which point
+// the channel is closed. It returns an error only if the initial connection
+// fails; transient decode errors are skipped. The caller owns ctx and should
+// cancel it to stop streaming.
+func (c *Client) StreamComms(ctx context.Context) (<-chan CommsRecord, error) {
+	req, err := c.newReq(ctx, http.MethodGet, "/api/agents/comms/stream", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	// No client timeout: SSE is a long-lived stream bounded by ctx, not a deadline.
+	streamClient := &http.Client{}
+	//nolint:bodyclose // the body is closed by the streaming goroutine below (or here on the error path); bodyclose can't track the cross-goroutine defer.
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("tui: comms stream returned %d", resp.StatusCode)
+	}
+
+	out := make(chan CommsRecord, 64)
+	go func() {
+		defer close(out)
+		defer func() { _ = resp.Body.Close() }()
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		for sc.Scan() {
+			line := sc.Text()
+			if !strings.HasPrefix(line, "data:") {
+				continue // skip event:/comment/blank lines
+			}
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "" || payload == "{}" {
+				continue
+			}
+			var rec CommsRecord
+			if json.Unmarshal([]byte(payload), &rec) != nil {
+				continue
+			}
+			select {
+			case out <- rec:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // Reload triggers a config reload via the control plane.

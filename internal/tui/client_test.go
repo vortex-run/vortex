@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,19 @@ func newFakeVortex(t *testing.T) *fakeVortex {
 	})
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "# HELP x\n# TYPE x gauge\nvortex_cluster_members 1\nvortex_requests_total{route=\"api\"} 100\nvortex_active_connections{route=\"api\"} 5\n")
+	})
+	mux.HandleFunc("/api/agents/comms/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		// Emit two records, an ignorable event line, then end the stream.
+		_, _ = io.WriteString(w, "data: {\"from\":\"coordinator\",\"to\":\"code-agent\",\"type\":\"task\",\"content\":\"go\"}\n\n")
+		_, _ = io.WriteString(w, "event: ping\n\n")
+		_, _ = io.WriteString(w, "data: {\"from\":\"code-agent\",\"to\":\"coordinator\",\"type\":\"result\",\"content\":\"done\"}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		<-r.Context().Done()
 	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
@@ -173,6 +187,44 @@ func TestClient_LoadAPIKeyFromEnv(t *testing.T) {
 	c := NewClient(ClientConfig{})
 	if c.LoadAPIKey() != "env-key" {
 		t.Errorf("LoadAPIKey = %q, want env-key", c.LoadAPIKey())
+	}
+}
+
+func TestClient_StreamComms(t *testing.T) {
+	f := newFakeVortex(t)
+	c := testClient(t, f, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := c.StreamComms(ctx)
+	if err != nil {
+		t.Fatalf("StreamComms: %v", err)
+	}
+	var got []CommsRecord
+	timeout := time.After(2 * time.Second)
+	for len(got) < 2 {
+		select {
+		case rec, ok := <-ch:
+			if !ok {
+				t.Fatalf("stream closed early with %d records", len(got))
+			}
+			got = append(got, rec)
+		case <-timeout:
+			t.Fatalf("timed out; got %d records", len(got))
+		}
+	}
+	if got[0].From != "coordinator" || got[0].Content != "go" {
+		t.Errorf("record 0 = %+v", got[0])
+	}
+	if got[1].Type != "result" || got[1].Content != "done" {
+		t.Errorf("record 1 = %+v", got[1])
+	}
+}
+
+func TestClient_StreamCommsErrorWhenDown(t *testing.T) {
+	c := NewClient(ClientConfig{BaseURL: "http://127.0.0.1:1"})
+	if _, err := c.StreamComms(context.Background()); err == nil {
+		t.Error("StreamComms against a dead server should error")
 	}
 }
 
