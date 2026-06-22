@@ -233,6 +233,60 @@ func statusOf(m CodeModel, name string) string {
 	return ""
 }
 
+func TestCode_InputHistoryRecall(t *testing.T) {
+	m := sizedCode(WithTeam())
+	// Submit two coordinator tasks to build history.
+	for _, msg := range []string{"first task", "second task"} {
+		m.input.SetValue(msg)
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(CodeModel)
+		// Clear working so the next Enter is accepted.
+		updated2, _ := m.Update(codeReplyMsg{content: "ok"})
+		m = updated2.(CodeModel)
+	}
+	if len(m.inputHistory) != 2 {
+		t.Fatalf("history = %v, want 2 entries", m.inputHistory)
+	}
+	// ↑ recalls the most recent, ↑ again the older one.
+	up := tea.KeyMsg{Type: tea.KeyUp}
+	updated, _ := m.Update(up)
+	m = updated.(CodeModel)
+	if m.input.Value() != "second task" {
+		t.Errorf("first ↑ = %q, want 'second task'", m.input.Value())
+	}
+	updated, _ = m.Update(up)
+	m = updated.(CodeModel)
+	if m.input.Value() != "first task" {
+		t.Errorf("second ↑ = %q, want 'first task'", m.input.Value())
+	}
+	// ↓ moves back toward newest, then to an empty input.
+	down := tea.KeyMsg{Type: tea.KeyDown}
+	updated, _ = m.Update(down)
+	m = updated.(CodeModel)
+	if m.input.Value() != "second task" {
+		t.Errorf("↓ = %q, want 'second task'", m.input.Value())
+	}
+	updated, _ = m.Update(down)
+	m = updated.(CodeModel)
+	if m.input.Value() != "" {
+		t.Errorf("↓ past newest = %q, want empty", m.input.Value())
+	}
+}
+
+func TestCode_ThinkingIndicatorWhileWorking(t *testing.T) {
+	m := sizedCode(WithTeam())
+	m.working = true
+	if !strings.Contains(m.renderChat(), "thinking...") {
+		t.Errorf("chat should show a thinking indicator while working:\n%s", m.renderChat())
+	}
+	// Not shown once the task completes.
+	updated, _ := m.Update(codeReplyMsg{content: "done"})
+	m = updated.(CodeModel)
+	if strings.Contains(m.renderChat(), "thinking...") {
+		t.Error("thinking indicator should disappear after the task completes")
+	}
+}
+
 func TestCode_CommsClosedResetsChannel(t *testing.T) {
 	m := sizedCode(WithTeam())
 	ch := make(chan tui.CommsRecord)

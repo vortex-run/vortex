@@ -246,6 +246,12 @@ func (m CodeModel) renderChat() string {
 			b.WriteString(c.Render(line.Agent+": ") + line.Content + "\n")
 		}
 	}
+	// Animated thinking indicator while a task is in flight (Claude-Code feel).
+	if m.working {
+		c := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor("coordinator")))
+		b.WriteString(c.Render(brand.IconAgent+" "+m.selectAgentName()) + " " +
+			m.spin.View() + brand.StyleSubtitle.Render(" thinking...") + "\n")
+	}
 	return lipgloss.NewStyle().Width(w).Render(b.String())
 }
 

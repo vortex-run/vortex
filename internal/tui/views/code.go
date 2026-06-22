@@ -89,6 +89,11 @@ type CodeModel struct {
 	// chat panel, so the final codeReplyMsg does not append a duplicate line.
 	streamedThisTurn bool
 
+	// inputHistory holds prior submitted inputs (most recent last); histIdx is
+	// the cursor for up/down recall (len = "not browsing").
+	inputHistory []string
+	histIdx      int
+
 	sessionID   string
 	project     string       // project dir shown in the header
 	model       string       // AI model override shown in the header
@@ -574,6 +579,7 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// Chatting with a specific agent → direct chat (does not start a task).
 		if m.team && m.selectedAgent != "coordinator" {
+			m.recordHistory(text)
 			m.chat = append(m.chat, ChatLine{Role: "user", Content: text})
 			m.input.Reset()
 			return m, m.sendDirectChat(m.selectedAgent, text)
@@ -581,6 +587,7 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.working {
 			return m, nil
 		}
+		m.recordHistory(text)
 		m.addEntry("user", text, "message")
 		// Mirror the user's message into the CHAT panel immediately so it is
 		// visible in team mode (where the right panel shows the chat, not the
@@ -632,10 +639,54 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Input history recall (terminal-style): ↑ older, ↓ newer. Only while the
+	// input is focused and there is history to browse.
+	if m.input.Focused() && len(m.inputHistory) > 0 {
+		switch key {
+		case "up":
+			m.recallHistory(-1)
+			return m, nil
+		case "down":
+			m.recallHistory(+1)
+			return m, nil
+		}
+	}
+
 	var icmd, vcmd tea.Cmd
 	m.input, icmd = m.input.Update(msg)
 	m.viewport, vcmd = m.viewport.Update(msg)
 	return m, tea.Batch(icmd, vcmd)
+}
+
+// recordHistory appends a submitted input to the recall buffer (deduping an
+// immediate repeat) and resets the recall cursor. Capped at 100 entries.
+func (m *CodeModel) recordHistory(text string) {
+	if n := len(m.inputHistory); n == 0 || m.inputHistory[n-1] != text {
+		m.inputHistory = append(m.inputHistory, text)
+		if len(m.inputHistory) > 100 {
+			m.inputHistory = m.inputHistory[len(m.inputHistory)-100:]
+		}
+	}
+	m.histIdx = len(m.inputHistory) // not browsing
+}
+
+// recallHistory moves the recall cursor by delta and loads that entry into the
+// input. histIdx == len(history) means "not browsing" (empty/current input).
+func (m *CodeModel) recallHistory(delta int) {
+	idx := m.histIdx + delta
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(m.inputHistory) {
+		// Past the newest entry → clear back to an empty input.
+		m.histIdx = len(m.inputHistory)
+		m.input.SetValue("")
+		m.input.CursorEnd()
+		return
+	}
+	m.histIdx = idx
+	m.input.SetValue(m.inputHistory[idx])
+	m.input.CursorEnd()
 }
 
 // forwardToTelegram sends the current task status through the messaging
