@@ -105,11 +105,20 @@ func telegramFromFile() (token string, chatID int64, ok bool) {
 	return cfg.TelegramToken, chatID, true
 }
 
-// resolveWorkingDir returns the process working directory. It is shown in the
-// TUI top bar as INFORMATION ONLY — the agent's local FS/terminal tools have no
-// path confinement (the approval gate is the security control), so this never
-// restricts where files may be written.
+// resolveWorkingDir returns the base directory the agents use for relative
+// paths (where the Code Agent writes files). It honours VORTEX_WORK_DIR so the
+// server can be pointed at a project directory (e.g. the one the user opens with
+// `vortex code`), falling back to the process working directory. It is shown in
+// the TUI top bar; the agent's FS/terminal tools have no path confinement (the
+// approval gate is the security control), so this never restricts where files
+// may be written.
 func resolveWorkingDir() string {
+	if dir := strings.TrimSpace(os.Getenv("VORTEX_WORK_DIR")); dir != "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			return abs
+		}
+		return dir
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return "."
