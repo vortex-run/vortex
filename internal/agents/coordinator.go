@@ -66,7 +66,25 @@ const handleMessageTimeout = 120 * time.Second
 
 const intentSystemPrompt = `You are the VORTEX coordinator. Classify the user's request into exactly one of: BUILD_APP, RESEARCH, DEVOPS_CHECK, DATA_PIPELINE, GENERAL_QUESTION, UNKNOWN. Respond with only the classification keyword.`
 
-const answerSystemPrompt = `You are the VORTEX assistant. Answer the user's question concisely.`
+const answerSystemPrompt = `You are VORTEX, an autonomous coding assistant like Claude Code. Answer the user's question concisely and helpfully.
+
+RESPONSE RULES — NEVER BREAK THESE:
+- NEVER mention skill names, tool names, or internal step lists.
+- NEVER show "N tasks: N completed" metrics or internal checkmarks.
+- NEVER echo the user's goal back verbatim (no "Goal: ...").
+- NEVER show internal planning data, timings like "(14.6s)", or boilerplate about following a stored procedure or learned routine.
+- Speak to the user in plain, natural language.
+
+For a coding request (build/create/write/make): say briefly what you'll build, then let the agent team do it — do not write the code yourself in this reply.
+
+For an ambiguous request, ask ONE clarifying question in exactly this format so the UI can render a selector:
+QUESTION: <your question>
+OPTIONS:
+- <option one>
+- <option two>
+- <option three>
+
+For a bare number like "1", "2", "3": it is the user's selection from your previous OPTIONS menu — treat it as the answer to your last question, never as a new task.`
 
 // ApprovalFunc requests human approval for an action (e.g. a run_command).
 // It returns true if approved, false if rejected or timed out. The messaging
@@ -386,6 +404,66 @@ func skillPromptBlock(sk *Skill) string {
 	}
 	b.WriteString("Use this procedure unless the user asks for something different.")
 	return b.String()
+}
+
+// filterCoordinatorResponse strips internal planning artifacts (skill blocks,
+// task-count metrics, tool/step annotations, goal echoes) that must never reach
+// the user, while preserving the natural-language answer. It is a defensive net:
+// the primary fix is to not generate this text, but models and legacy paths can
+// still leak it, so every coordinator reply is filtered before display.
+func filterCoordinatorResponse(raw string) string {
+	lines := strings.Split(raw, "\n")
+	clean := make([]string, 0, len(lines))
+	skip := false // skip a multi-line internal block until a blank line
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		low := strings.ToLower(trimmed)
+
+		// A blank line ends any block we were skipping.
+		if trimmed == "" {
+			skip = false
+			clean = append(clean, line)
+			continue
+		}
+
+		// Start of a multi-line internal block: skip it and the lines that follow.
+		if strings.Contains(low, "proven skill") ||
+			strings.HasPrefix(low, "steps:") ||
+			strings.Contains(low, "use this procedure") {
+			skip = true
+			continue
+		}
+
+		// Single-line internal artifacts: drop the line outright.
+		if strings.HasPrefix(low, "coordinator: goal:") ||
+			strings.HasPrefix(low, "goal:") ||
+			strings.Contains(low, "(tool:") ||
+			(strings.Contains(low, "tasks:") && strings.Contains(low, "completed")) ||
+			isInternalStepLine(trimmed) {
+			continue
+		}
+
+		if skip {
+			continue
+		}
+		clean = append(clean, line)
+	}
+	return strings.TrimSpace(strings.Join(clean, "\n"))
+}
+
+// isInternalStepLine reports whether a line is a numbered internal step that
+// carries an internal annotation (a tool reference) — e.g. "2. Execute (tool:
+// run)". Plain numbered prose the model writes for the user is kept.
+func isInternalStepLine(line string) bool {
+	if len(line) < 2 || line[0] < '0' || line[0] > '9' {
+		return false
+	}
+	// "N." or "N)" prefix followed by an internal tool annotation.
+	rest := line[1:]
+	if !strings.HasPrefix(rest, ".") && !strings.HasPrefix(rest, ")") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(line), "(tool:")
 }
 
 // markSkillUsed records the outcome of a skill-guided task (best effort).
@@ -877,7 +955,18 @@ func strParamOr(params map[string]any, key, def string) string {
 // intent via the AI gateway and routes to the matching handler. For M10, the
 // BUILD_APP/RESEARCH/DEVOPS/DATA handlers are stubs; GENERAL_QUESTION is
 // answered directly and UNKNOWN returns a clarifying question.
-func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string) (string, error) {
+func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID string) (string, error) {
+	reply, err := c.handleMessageInner(ctx, userMsg, sessionID)
+	if err != nil {
+		return reply, err
+	}
+	// Defensive net: strip any internal planning artifacts before display.
+	return filterCoordinatorResponse(reply), nil
+}
+
+// handleMessageInner is the routing core of HandleMessage (filtering applied by
+// the public wrapper).
+func (c *Coordinator) handleMessageInner(_ context.Context, userMsg, sessionID string) (string, error) {
 	if strings.TrimSpace(userMsg) == "" {
 		return "", fmt.Errorf("agents: empty user message")
 	}
