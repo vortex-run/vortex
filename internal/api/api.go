@@ -126,6 +126,12 @@ type Server struct {
 	// views of the agent team). Nil yields an empty list.
 	teamAgents func() []TeamAgentInfo
 
+	// Agent-team collaboration providers (AG-UI File 6): the comms feed, direct
+	// chat, and human checkpoints. All auth-gated; nil disables each feature.
+	comms       CommsProvider
+	agentChat   ChatProvider
+	checkpoints CheckpointProvider
+
 	// trustLoopback controls whether loopback callers bypass auth on the
 	// control plane. Default true (on-box `vortex reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
@@ -447,6 +453,10 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.HandleFunc("/a2a/", s.handleA2A)
 	mux.Handle("GET /api/team/agents", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
 	mux.Handle("GET /api/team/status", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
+
+	// Agent-team collaboration (AG-UI File 6): comms feed + SSE, direct chat,
+	// checkpoint review.
+	s.registerTeamCollab(mux)
 
 	mux.Handle("GET /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleListNamespaces)))
 	mux.Handle("POST /api/namespaces", s.protectedAdmin(http.HandlerFunc(s.handleCreateNamespace)))
