@@ -174,10 +174,14 @@ const maxStepRetries = 2
 func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func(string)) (*TeamResult, error) {
 	start := time.Now()
 	res := &TeamResult{Goal: plan.Goal, Steps: plan.Steps}
+	// progress fans a human-readable line to the caller's progressFn AND, when a
+	// bus is configured, publishes it as a structured message so the AGENT COMMS
+	// panel / SSE feed render the live inter-agent conversation.
 	progress := func(s string) {
 		if progressFn != nil {
 			progressFn(s)
 		}
+		t.publish(a2a.MsgProgress, "coordinator", "user", s, plan.SessionID)
 	}
 
 	fileSet := map[string]bool{}
@@ -190,6 +194,9 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			step.Status = "skipped"
 			continue
 		}
+
+		// Publish the task hand-off coordinator → specialist for the comms panel.
+		t.publish(a2a.MsgTask, "coordinator", agentID, step.Goal, plan.SessionID)
 
 		var stepResult *a2a.TaskResult
 		var lastErr string
@@ -208,6 +215,8 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 
 			if result.Success {
 				progress(fmt.Sprintf("[%s] ✓ %s", step.AgentRole, summaryLine(result.Output)))
+				// Publish the specialist → coordinator result for the comms panel.
+				t.publish(a2a.MsgResult, agentID, "coordinator", summaryLine(result.Output), plan.SessionID)
 				break
 			}
 			lastErr = strings.Join(result.Errors, "; ")
@@ -375,6 +384,22 @@ func (t *AgentTeam) notify(title, body string) {
 	if t.config.Notifier != nil {
 		t.config.Notifier.Notify(title, body)
 	}
+}
+
+// publish emits a structured message onto the bus (no-op when unconfigured) so
+// the AGENT COMMS panel and the /api/agents/comms SSE feed see the live
+// inter-agent conversation.
+func (t *AgentTeam) publish(msgType, from, to, content, sessionID string) {
+	if t.config.Bus == nil || content == "" {
+		return
+	}
+	t.config.Bus.Publish(a2a.BusMessage{
+		From:      from,
+		To:        to,
+		Type:      msgType,
+		Content:   content,
+		SessionID: sessionID,
+	})
 }
 
 // Summary renders the team result for the user / Telegram.

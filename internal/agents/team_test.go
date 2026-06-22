@@ -146,6 +146,40 @@ func TestTeam_ExecuteHappyPath(t *testing.T) {
 	}
 }
 
+func TestTeam_PublishesToBus(t *testing.T) {
+	written := map[string]string{}
+	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
+	bus := a2a.NewMessageBus()
+	team := NewAgentTeam(
+		TeamConfig{WorkDir: t.TempDir(), Bus: bus},
+		gw, teamRegistry(t, written, "--- PASS: TestX (0.00s)\nok"),
+	)
+
+	plan := &TeamPlan{Goal: "build hello", SessionID: "s1", Steps: defaultSteps("build hello")}
+	if _, err := team.Execute(context.Background(), plan, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	msgs := bus.History("s1", 0)
+	if len(msgs) == 0 {
+		t.Fatal("bus received no messages during Execute — comms panel would be empty")
+	}
+	var sawTask, sawResult, sawProgress bool
+	for _, m := range msgs {
+		switch m.Type {
+		case a2a.MsgTask:
+			sawTask = true
+		case a2a.MsgResult:
+			sawResult = true
+		case a2a.MsgProgress:
+			sawProgress = true
+		}
+	}
+	if !sawTask || !sawResult || !sawProgress {
+		t.Errorf("missing message types: task=%v result=%v progress=%v", sawTask, sawResult, sawProgress)
+	}
+}
+
 func TestTeam_PassesContextForward(t *testing.T) {
 	written := map[string]string{}
 	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
