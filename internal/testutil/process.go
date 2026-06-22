@@ -166,6 +166,11 @@ func (b *syncBuffer) String() string {
 // waits for /health to answer 200 (up to 5s), and returns the process. The
 // process is stopped on test cleanup.
 func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
+	return StartVortexWithArgs(t, bin, configPath)
+}
+
+// StartVortexWithArgs is StartVortex with extra start flags (e.g. "--team").
+func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...string) *VortexProcess {
 	t.Helper()
 	// The management API binds a fixed port (:9090). Wait for any previous
 	// test's process to release it, so this process — not a lingering stale one
@@ -173,7 +178,8 @@ func StartVortex(t *testing.T, bin, configPath string) *VortexProcess {
 	// observe the wrong server's responses (e.g. one without Studio wired).
 	waitPortFree(t, "127.0.0.1:9090", 10*time.Second)
 
-	cmd := exec.Command(bin, "start", "--config", configPath, "--log-level", "debug")
+	args := append([]string{"start", "--config", configPath, "--log-level", "debug"}, extraArgs...)
+	cmd := exec.Command(bin, args...)
 	// Isolate the user config dir: the developer's real ai-provider.json (from
 	// `vortex setup`) must not leak into the child, or gateway-dependent tests
 	// (e.g. forge-disabled-without-AI) behave differently per machine. ONE dir
