@@ -84,6 +84,9 @@ type CodeModel struct {
 	// memOffline is set when a stats refresh cannot reach the server, so the
 	// MEMORY panel shows "✗ Server offline" instead of a stuck "(connecting...)".
 	memOffline bool
+	// streamedThisTurn is set while tokens for the current reply stream into the
+	// chat panel, so the final codeReplyMsg does not append a duplicate line.
+	streamedThisTurn bool
 
 	sessionID   string
 	project     string       // project dir shown in the header
@@ -412,6 +415,13 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.memOffline = true
 		default:
 			m.ingestReply(msg.content)
+			// Also surface the coordinator's reply in the CHAT panel so it is
+			// visible in team mode (the right panel renders the chat, not the
+			// feed). Skip if streaming already populated it (see streamTokenMsg).
+			if c := strings.TrimSpace(msg.content); c != "" && !m.streamedThisTurn {
+				m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: c})
+			}
+			m.streamedThisTurn = false
 			m.progress.Percent = 100
 		}
 		m.viewport.SetContent(m.renderFeed())

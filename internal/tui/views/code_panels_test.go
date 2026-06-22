@@ -187,6 +187,26 @@ func TestCode_CoordinatorSubmitShowsUserMessageInChat(t *testing.T) {
 	}
 }
 
+func TestCode_CoordinatorReplyShownInChat(t *testing.T) {
+	m := sizedCode(WithTeam())
+	m.working = true
+	m.chat = append(m.chat, ChatLine{Role: "user", Content: "what can you do?"})
+	updated, _ := m.Update(codeReplyMsg{content: "I coordinate a team of agents."})
+	m = updated.(CodeModel)
+
+	if m.Working() {
+		t.Error("reply should clear working")
+	}
+	// The coordinator reply must be added as an agent line in the chat panel.
+	last := m.Chat()[len(m.Chat())-1]
+	if last.Role != "agent" || last.Agent != "coordinator" || last.Content != "I coordinate a team of agents." {
+		t.Fatalf("last chat line = %+v, want coordinator agent reply", last)
+	}
+	if !strings.Contains(m.renderChat(), "I coordinate a team of agents.") {
+		t.Errorf("CHAT panel should show the coordinator reply:\n%s", m.renderChat())
+	}
+}
+
 // sizedCodeWithCheckpoint returns a team model with an active checkpoint.
 func sizedCodeWithCheckpoint(t *testing.T) CodeModel {
 	t.Helper()
