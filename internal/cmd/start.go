@@ -24,6 +24,7 @@ import (
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/devops"
 	"github.com/vortex-run/vortex/internal/forge"
+	"github.com/vortex-run/vortex/internal/gateway"
 	"github.com/vortex-run/vortex/internal/healing"
 	"github.com/vortex-run/vortex/internal/messaging"
 	"github.com/vortex-run/vortex/internal/observability"
@@ -41,6 +42,7 @@ import (
 	"github.com/vortex-run/vortex/internal/studio"
 	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/vortex-run/vortex/internal/tui/brand"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
 	"go.opentelemetry.io/otel/trace"
@@ -123,6 +125,124 @@ func stdoutIsTerminal() bool {
 		return false
 	}
 	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// routerNotifierAdapter adapts a messaging.Router to gateway.Notifier so the
+// key-rotation router can alert via Telegram without gateway importing
+// messaging.
+type routerNotifierAdapter struct{ router *messaging.Router }
+
+func (a routerNotifierAdapter) Notify(title, body string) {
+	if a.router != nil {
+		_ = a.router.Send(context.Background(), messaging.SeverityWarn, title, body)
+	}
+}
+
+// wireKeyRotation opens the key-slot store and, when slots are configured,
+// enables autonomous rotation on the gateway: a health-scored router with
+// failover, a context bridge for provider switches, a background health
+// monitor, a midnight daily-stats reset, and the GET /api/keys/status feed.
+// With no slots it logs single-provider mode (backward compatible).
+func wireKeyRotation(ctx context.Context, apiSrv *api.Server, gw *messaging.AIGateway, notifier *messaging.Router, display *startup.Display, log *slog.Logger) {
+	encKey, err := deriveKey("keystore")
+	if err != nil {
+		log.Warn("key rotation unavailable: could not derive keystore key", "err", err)
+		return
+	}
+	store, err := gateway.NewKeyStore(keystorePath(), encKey)
+	if err != nil {
+		log.Warn("key rotation unavailable: could not open key store", "err", err)
+		return
+	}
+
+	slots, _ := store.List()
+	if len(slots) == 0 {
+		log.Info("AI gateway: single provider mode")
+		display.Step("Key rotation", "single provider mode")
+		_ = store.Close()
+		return
+	}
+
+	mode := gateway.BudgetMode(loadKeysMode())
+	router := gateway.NewRouter(gateway.RouterConfig{
+		Store:    store,
+		Mode:     mode,
+		Notifier: routerNotifierAdapter{router: notifier},
+	})
+	bridge := gateway.NewContextBridge(gw)
+	gw.SetKeyRotation(router, bridge, store)
+
+	// Feed GET /api/keys/status (TUI Keys view + top-bar indicator).
+	apiSrv.SetKeyStatusProvider(func() api.KeyStatusInfo {
+		return keyStatusSnapshot(store, router, string(mode))
+	})
+
+	// Prime the active slot so the status feed has one before the first call.
+	_, _ = router.SelectSlot(ctx, "simple")
+
+	safeGo(ctx, log, "key-health-monitor", func() { router.StartHealthMonitor(ctx) })
+	safeGo(ctx, log, "key-midnight-reset", func() { midnightReset(ctx, store, log) })
+
+	log.Info("AI gateway: key rotation enabled", "slots", len(slots), "mode", string(mode))
+	display.Step("Key rotation", fmt.Sprintf("enabled, %d slots (%s)", len(slots), mode))
+}
+
+// keyStatusSnapshot builds the API status response from the store + router.
+func keyStatusSnapshot(store *gateway.KeyStore, router *gateway.Router, mode string) api.KeyStatusInfo {
+	active := router.ActiveSlotID()
+	slots, _ := store.List()
+	out := api.KeyStatusInfo{Mode: mode, Slots: []api.KeySlotInfo{}}
+	for _, s := range slots {
+		h, _ := store.GetHealth(s.ID)
+		out.TotalUSD += h.SpentTodayUSD
+		// Mask the real key (decrypt only to take a 4-char prefix; never expose
+		// the full value through the API).
+		masked := ""
+		if dec, derr := store.GetDecrypted(s.ID); derr == nil {
+			masked = brand.MaskSecret(dec.APIKey)
+		}
+		out.Slots = append(out.Slots, api.KeySlotInfo{
+			ID: s.ID, Provider: s.Provider, Label: s.Label, Model: s.Model,
+			MaskedKey: masked, Priority: s.Priority, Enabled: s.Enabled,
+			Score: h.Score, RequestsToday: h.RequestsToday, ErrorsLast10: h.ErrorsLast10,
+			AvgLatencyMs: h.AvgLatencyMs, SpentTodayUSD: h.SpentTodayUSD, DailyBudget: s.DailyBudget,
+			RateLimited: h.RateLimited, Active: s.ID == active,
+		})
+	}
+	return out
+}
+
+// midnightReset zeroes per-day key stats at each local midnight until ctx ends.
+func midnightReset(ctx context.Context, store *gateway.KeyStore, log *slog.Logger) {
+	for {
+		now := time.Now()
+		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Add(24 * time.Hour)
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			if err := store.ResetDailyStats(); err != nil {
+				log.Warn("midnight key-stats reset failed", "err", err)
+			} else {
+				log.Info("key rotation: daily stats reset")
+			}
+		}
+	}
+}
+
+// safeGo runs fn in a goroutine with panic recovery (a panicking background
+// monitor must never take down VORTEX).
+func safeGo(_ context.Context, log *slog.Logger, name string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("background goroutine panic recovered", "goroutine", name, "panic", r)
+			}
+		}()
+		fn()
+	}()
 }
 
 // routeNames lists the configured route names for the startup display.
@@ -480,6 +600,10 @@ func runStart(ctx context.Context, pidfile string) error {
 		// can use VORTEX as its AI backend with provider routing + cost tracking.
 		apiSrv.SetOpenAIGateway(gw.ModelIDs, gw.CompleteForModel)
 		log.Info("OpenAI-compatible server enabled", "endpoint", "/v1/chat/completions", "models", gw.ModelIDs())
+
+		// Autonomous API key rotation: when key slots are configured, route
+		// through health-scored slots with failover + context preservation.
+		wireKeyRotation(ctx, apiSrv, gw, msg.router, display, log)
 	}
 
 	// --- agent runtime (M10/M11) --------------------------------------------
