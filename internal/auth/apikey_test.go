@@ -25,6 +25,71 @@ func TestAPIKey_IssueReturnsIDAndSecret(t *testing.T) {
 	}
 }
 
+func TestAPIKey_Count(t *testing.T) {
+	s := NewAPIKeyStore()
+	if s.Count() != 0 {
+		t.Errorf("new store Count = %d, want 0", s.Count())
+	}
+	_, _, _ = s.Issue("u1", "o1", nil, "", 0)
+	_, _, _ = s.Issue("u2", "o1", nil, "", 0)
+	if s.Count() != 2 {
+		t.Errorf("Count = %d, want 2", s.Count())
+	}
+}
+
+func TestAPIKey_ImportRawIsVerifiable(t *testing.T) {
+	// A key issued by one store can be re-admitted into a fresh, empty store via
+	// its raw secret (the tui-key recovery path).
+	src := NewAPIKeyStore()
+	_, secret, _ := src.Issue("admin", "default", []Role{RoleAdmin}, "orig", 0)
+
+	dst := NewAPIKeyStore()
+	if err := dst.ImportRaw(secret, "admin", "default", []Role{RoleAdmin}, "tui-setup-key"); err != nil {
+		t.Fatalf("ImportRaw: %v", err)
+	}
+	if dst.Count() != 1 {
+		t.Fatalf("Count after import = %d, want 1", dst.Count())
+	}
+	key, err := dst.Verify(secret)
+	if err != nil {
+		t.Fatalf("imported key should verify: %v", err)
+	}
+	if len(key.Roles) != 1 || key.Roles[0] != RoleAdmin {
+		t.Errorf("imported roles = %v, want [admin]", key.Roles)
+	}
+}
+
+func TestAPIKey_ImportRawRejectsMalformed(t *testing.T) {
+	s := NewAPIKeyStore()
+	if err := s.ImportRaw("no-dot-here", "admin", "default", nil, ""); err == nil {
+		t.Error("ImportRaw should reject a key without an <id>. prefix")
+	}
+	if s.Count() != 0 {
+		t.Errorf("malformed import should not add a key, Count = %d", s.Count())
+	}
+}
+
+func TestAPIKey_ImportRawPersists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keys.json")
+	src := NewAPIKeyStore()
+	_, secret, _ := src.Issue("admin", "default", []Role{RoleAdmin}, "orig", 0)
+
+	dst := NewAPIKeyStore()
+	dst.SetPath(path)
+	if err := dst.ImportRaw(secret, "admin", "default", []Role{RoleAdmin}, "tui-setup-key"); err != nil {
+		t.Fatal(err)
+	}
+	// Reload from disk and confirm the imported key survived + verifies.
+	reloaded := NewAPIKeyStore()
+	if err := reloaded.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reloaded.Verify(secret); err != nil {
+		t.Errorf("imported key did not persist/verify after reload: %v", err)
+	}
+}
+
 func TestAPIKey_SecretNotStored(t *testing.T) {
 	s := NewAPIKeyStore()
 	key, secret, _ := s.Issue("u1", "o1", nil, "", 0)

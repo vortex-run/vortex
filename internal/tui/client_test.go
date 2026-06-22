@@ -176,6 +176,35 @@ func TestClient_LoadAPIKeyFromEnv(t *testing.T) {
 	}
 }
 
+func TestClient_LoadAPIKeyFromCacheDir(t *testing.T) {
+	// No env var, no config-dir file: LoadAPIKey must fall back to the cache-dir
+	// tui-key (where `vortex start` auto-creates it).
+	t.Setenv("VORTEX_API_KEY", "")
+	home := t.TempDir()
+	// Push both config and cache dirs into the temp home; only write the cache one.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("APPDATA", filepath.Join(home, "config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Skipf("UserCacheDir unavailable: %v", err)
+	}
+	keyPath := filepath.Join(cacheDir, "vortex", "tui-key")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("cache-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClient(ClientConfig{})
+	if got := c.LoadAPIKey(); got != "cache-key" {
+		t.Errorf("LoadAPIKey = %q, want cache-key (cache-dir fallback)", got)
+	}
+}
+
 func TestParsePrometheus(t *testing.T) {
 	text := strings.Join([]string{
 		"# HELP vortex_requests_total reqs",

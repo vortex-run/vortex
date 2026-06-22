@@ -530,7 +530,11 @@ func runStart(ctx context.Context, pidfile string) error {
 	rbac := auth.NewRBAC()
 	apiSrv.SetAuth(auth.NewAuthMiddleware(keyStore, nil, rbac), keyStore, rbac)
 	log.Info("auth middleware enabled", "key_store", keyStorePath, "roles", len(rbac.Roles()))
-	display.Step("Authentication", fmt.Sprintf("enabled, %d keys", len(keyStore.List("default"))))
+	// Make sure at least one key exists so the local TUI/dashboard can
+	// authenticate: import the setup-written tui-key, else auto-create one and
+	// persist its raw secret to tui-key for the TUI to read back.
+	ensureAPIKey(keyStore, log)
+	display.Step("Authentication", fmt.Sprintf("enabled, %d key(s)", keyStore.Count()))
 	mgr.OnShutdown("apikeys", func(context.Context) error {
 		if err := keyStore.Save(keyStorePath); err != nil {
 			log.Warn("saving API key store failed", "err", err)
@@ -1118,6 +1122,61 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 		log.Warn("loading API key store failed, starting empty", "path", path, "err", err)
 	}
 	return store, path
+}
+
+// tuiKeyPath returns where the plaintext TUI/dashboard key lives:
+// <user-config>/vortex/tui-key. This matches tui.APIKeyFilePath() but is
+// computed locally so the server path does not import the TUI package.
+func tuiKeyPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "vortex", "tui-key")
+}
+
+// ensureAPIKey guarantees the store holds at least one usable key so the local
+// TUI/dashboard can authenticate. It first imports the setup-written tui-key
+// (re-admitting it when the persisted hash store is empty), and if the store is
+// still empty, auto-creates an admin key and writes its raw secret to tui-key.
+func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
+	keyPath := tuiKeyPath()
+
+	// Step 1: import an existing tui-key (from `vortex setup`) so a raw key that
+	// outlived an empty/rotated hash store still authenticates.
+	if data, err := os.ReadFile(keyPath); err == nil {
+		if raw := strings.TrimSpace(string(data)); raw != "" {
+			if _, verr := keyStore.Verify(raw); verr != nil {
+				// Not currently valid (store empty or out of sync) — re-admit it.
+				if ierr := keyStore.ImportRaw(raw, "admin", "default", []auth.Role{auth.RoleAdmin}, "tui-setup-key"); ierr != nil {
+					log.Warn("importing tui-key failed", "err", ierr)
+				} else {
+					log.Info("loaded TUI key from setup config")
+				}
+			}
+		}
+	}
+
+	// Step 2: if still empty, auto-create an admin key and save it for the TUI.
+	if keyStore.Count() > 0 {
+		return
+	}
+	_, raw, err := keyStore.Issue("admin", "default", []auth.Role{auth.RoleAdmin}, "auto-created", 0)
+	if err != nil {
+		log.Warn("auto-creating admin API key failed", "err", err)
+		return
+	}
+	if derr := os.MkdirAll(filepath.Dir(keyPath), 0o700); derr != nil {
+		log.Warn("creating tui-key dir failed", "err", derr)
+	}
+	if werr := os.WriteFile(keyPath, []byte(raw), 0o600); werr != nil {
+		log.Warn("saving auto-created key to tui-key failed", "err", werr)
+	}
+	masked := raw
+	if len(masked) > 8 {
+		masked = masked[:8] + "****"
+	}
+	log.Info("auto-created admin API key — saved to tui-key", "key", masked)
 }
 
 // openRuntimeAuditLog opens the audit log used by the running server. The path
@@ -2408,7 +2467,9 @@ func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *ag
 		wireTelegramCommands(m.telegram, apiSrv, rt)
 		bot := m.telegram
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			// 5s cap: a revoked/unreachable token must not keep this goroutine
+			// (or its API connection) alive any longer than necessary.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if serr := bot.SetCommands(ctx); serr != nil {
 				log.Warn("telegram setMyCommands failed", "err", serr)

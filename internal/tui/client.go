@@ -598,18 +598,32 @@ func APIKeyFilePath() string {
 	return filepath.Join(dir, "vortex", "tui-key")
 }
 
-// LoadAPIKey resolves an API key from VORTEX_API_KEY, then the persisted
-// setup key file (APIKeyFilePath). It returns "" when none is found.
+// LoadAPIKey resolves an API key, checking in order: the VORTEX_API_KEY env
+// var, the setup/TUI key file under the user config dir (APIKeyFilePath), then
+// the same file under the user cache dir. It returns the first non-empty value,
+// or "" when none is found.
 func (c *Client) LoadAPIKey() string {
 	if k := os.Getenv("VORTEX_API_KEY"); k != "" {
 		return k
 	}
-	if data, err := os.ReadFile(APIKeyFilePath()); err == nil {
-		if k := strings.TrimSpace(string(data)); k != "" {
-			return k
+	for _, path := range apiKeyFileCandidates() {
+		if data, err := os.ReadFile(path); err == nil {
+			if k := strings.TrimSpace(string(data)); k != "" {
+				return k
+			}
 		}
 	}
 	return ""
+}
+
+// apiKeyFileCandidates returns the tui-key file locations to check, in order:
+// <user-config>/vortex/tui-key then <user-cache>/vortex/tui-key.
+func apiKeyFileCandidates() []string {
+	paths := []string{APIKeyFilePath()}
+	if cache, err := os.UserCacheDir(); err == nil {
+		paths = append(paths, filepath.Join(cache, "vortex", "tui-key"))
+	}
+	return paths
 }
 
 // parsePrometheus extracts the metrics the TUI displays from exposition text.

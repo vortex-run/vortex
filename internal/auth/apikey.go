@@ -114,6 +114,49 @@ func (s *APIKeyStore) Issue(userID, orgID string, roles []Role, desc string, ttl
 	return key, secret, nil
 }
 
+// ImportRaw registers an already-issued raw secret (of the form "<id>.<random>")
+// as a valid key, hashing it the same way Issue does. It is used to re-admit a
+// key that exists outside the store (e.g. the tui-key file written by
+// `vortex setup`) when the persisted hash store is empty or out of sync. It
+// returns an error when the raw key is malformed. When a persistence path is
+// set the new key is flushed to disk immediately.
+func (s *APIKeyStore) ImportRaw(rawKey, userID, orgID string, roles []Role, desc string) error {
+	id, ok := keyIDFromSecret(rawKey)
+	if !ok {
+		return fmt.Errorf("auth: import: malformed raw key (want \"<id>.<secret>\")")
+	}
+	hash, err := bcrypt.GenerateFromPassword(prehash(rawKey), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("auth: import: hashing key: %w", err)
+	}
+	key := APIKey{
+		ID:          id,
+		Hash:        string(hash),
+		UserID:      userID,
+		OrgID:       orgID,
+		Roles:       roles,
+		CreatedAt:   time.Now().UTC(),
+		Description: desc,
+	}
+	s.mu.Lock()
+	s.keys[id] = key
+	path := s.path
+	s.mu.Unlock()
+	if path != "" {
+		if err := s.Save(path); err != nil {
+			return fmt.Errorf("auth: persisting imported key: %w", err)
+		}
+	}
+	return nil
+}
+
+// Count returns the number of keys held in the store (across all orgs).
+func (s *APIKeyStore) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.keys)
+}
+
 // Verify checks a presented secret and returns the matching key. The secret
 // carries its key ID as a prefix ("<id>.<random>"), so verification is a single
 // bcrypt comparison against that key. It returns ErrNotFound when no key matches
