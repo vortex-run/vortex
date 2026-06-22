@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/vortex-run/vortex/internal/tui"
 	"github.com/vortex-run/vortex/internal/tui/brand"
 )
 
@@ -206,10 +207,14 @@ func (m CodeModel) renderChat() string {
 		b.WriteString(brand.StyleSubtitle.Render("Talk to "+m.selectAgentName()+" — type below.") + "\n")
 	}
 	for _, line := range m.chat {
-		if line.Role == "user" {
+		switch {
+		case line.Role == "user":
 			b.WriteString(lipgloss.PlaceHorizontal(minInt(w, 40), lipgloss.Right,
 				lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).Render("You: "+line.Content)) + "\n")
-		} else {
+		case strings.HasPrefix(line.Content, tui.ConnectionErrorPrefix):
+			// Connection error: render the whole notice in red as a system message.
+			b.WriteString(brand.StyleError.Render(line.Content) + "\n")
+		default:
 			c := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor(m.selectedAgent)))
 			b.WriteString(c.Render(line.Agent+": ") + line.Content + "\n")
 		}

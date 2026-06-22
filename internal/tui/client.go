@@ -14,6 +14,19 @@ import (
 	"time"
 )
 
+// ConnectionErrorMessage is the user-facing text returned (as the response
+// body, not an error) when the TUI cannot reach the server. Returning it as the
+// response means the code view renders it inline like an agent message instead
+// of failing silently. ConnectionErrorPrefix lets callers detect it.
+const (
+	ConnectionErrorPrefix  = "✗ Cannot reach VORTEX server"
+	ConnectionErrorMessage = ConnectionErrorPrefix + "\n\n" +
+		"Start the server first:\n" +
+		"  task start:team    (with agent team)\n" +
+		"  task start         (single agent mode)\n\n" +
+		"Then run: vortex code"
+)
+
 // ClientConfig configures the TUI's API client.
 type ClientConfig struct {
 	BaseURL string // default http://localhost:9090
@@ -419,7 +432,10 @@ func (c *Client) Submit(msg, sessionID string) (string, error) {
 	submitClient := &http.Client{Timeout: submitTimeout}
 	resp, err := submitClient.Do(req)
 	if err != nil {
-		return "", err
+		// Server unreachable (connection refused, DNS, timeout): surface a
+		// helpful message as the response so the user sees it in the chat panel
+		// instead of a silent no-op.
+		return ConnectionErrorMessage, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -498,7 +514,9 @@ func (c *Client) AgentChat(agentID, sessionID, message string) (string, error) {
 	chatClient := &http.Client{Timeout: submitTimeout}
 	resp, err := chatClient.Do(req)
 	if err != nil {
-		return "", err
+		// Same as Submit: show the offline message inline rather than failing
+		// silently in the chat panel.
+		return ConnectionErrorMessage, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

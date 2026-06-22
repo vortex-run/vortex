@@ -46,8 +46,9 @@ type TaskProgress struct {
 
 // codeStatsMsg carries an /api/agents/status + cost refresh.
 type codeStatsMsg struct {
-	stats *tui.AgentsData
-	cost  *tui.AICostData
+	stats   *tui.AgentsData
+	cost    *tui.AICostData
+	offline bool // the stats fetch could not reach the server
 }
 
 // codeReplyMsg carries the coordinator's final reply for a submitted task.
@@ -80,6 +81,9 @@ type CodeModel struct {
 	skills   []string // skills surfaced during this session
 	stats    *tui.AgentsData
 	cost     *tui.AICostData
+	// memOffline is set when a stats refresh cannot reach the server, so the
+	// MEMORY panel shows "✗ Server offline" instead of a stuck "(connecting...)".
+	memOffline bool
 
 	sessionID   string
 	project     string       // project dir shown in the header
@@ -248,10 +252,13 @@ func (m CodeModel) fetchStats() tea.Cmd {
 	return func() tea.Msg {
 		out := codeStatsMsg{}
 		if c == nil {
+			out.offline = true
 			return out
 		}
 		if s, err := c.Agents(); err == nil {
 			out.stats = s
+		} else {
+			out.offline = true
 		}
 		if cost, err := c.AICost(); err == nil {
 			out.cost = cost
@@ -368,6 +375,7 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmd, codeTick())
 
 	case codeStatsMsg:
+		m.memOffline = msg.offline
 		if msg.stats != nil {
 			m.stats = msg.stats
 		}
@@ -392,9 +400,17 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.working = false
 		m.setAgentStatus("Coordinator", "ready")
 		m.setAgentStatus("Code Agent", "ready")
-		if msg.err != nil {
+		switch {
+		case msg.err != nil:
 			m.addEntry("system", "✗ "+msg.err.Error(), "error")
-		} else {
+		case strings.HasPrefix(msg.content, tui.ConnectionErrorPrefix):
+			// The client returns the offline notice as the response body; show it
+			// as a red system message (and in the chat panel) rather than a
+			// normal coordinator reply.
+			m.addEntry("system", msg.content, "error")
+			m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "system", Content: msg.content})
+			m.memOffline = true
+		default:
 			m.ingestReply(msg.content)
 			m.progress.Percent = 100
 		}
@@ -687,11 +703,14 @@ func (m CodeModel) renderSidebar() string {
 	}
 
 	sec("MEMORY")
-	if m.stats != nil {
+	switch {
+	case m.stats != nil:
 		fmt.Fprintf(&b, "Skills:   %3d learned\n", m.stats.Skills)
 		fmt.Fprintf(&b, "Episodes: %3d stored\n", m.stats.Episodes)
 		fmt.Fprintf(&b, "Sessions: %3d total\n", m.stats.Sessions)
-	} else {
+	case m.memOffline:
+		b.WriteString(brand.StyleError.Render("✗ Server offline") + "\n")
+	default:
 		b.WriteString(brand.StyleSubtitle.Render("(connecting...)") + "\n")
 	}
 	div()

@@ -297,6 +297,46 @@ func TestCode_MemoryPanelShowsStats(t *testing.T) {
 	}
 }
 
+func TestCode_MemoryPanelOfflineNotConnecting(t *testing.T) {
+	m := sizedCode()
+	// Before any fetch it shows the neutral connecting hint.
+	if !strings.Contains(m.renderSidebar(), "connecting") {
+		t.Error("initial memory panel should show (connecting...)")
+	}
+	// A failed stats fetch flips it to a red offline notice (not stuck on
+	// connecting forever).
+	updated, _ := m.Update(codeStatsMsg{offline: true})
+	m = updated.(CodeModel)
+	out := m.renderSidebar()
+	if !strings.Contains(out, "Server offline") {
+		t.Errorf("offline memory panel should show 'Server offline':\n%s", out)
+	}
+	if strings.Contains(out, "connecting") {
+		t.Errorf("offline memory panel should not stay on (connecting...):\n%s", out)
+	}
+}
+
+func TestCode_ConnectionErrorReplyShownInChat(t *testing.T) {
+	m := sizedCode(WithTeam())
+	m.working = true
+	updated, _ := m.Update(codeReplyMsg{content: tui.ConnectionErrorMessage})
+	m = updated.(CodeModel)
+	// The notice lands in both the activity feed and the chat panel, and flips
+	// the memory panel to offline.
+	if !strings.Contains(m.renderFeed(), tui.ConnectionErrorPrefix) {
+		t.Error("connection error should appear in the activity feed")
+	}
+	if len(m.Chat()) != 1 || !strings.Contains(m.Chat()[0].Content, tui.ConnectionErrorPrefix) {
+		t.Errorf("connection error should appear in the chat panel: %+v", m.Chat())
+	}
+	if !strings.Contains(m.renderChat(), tui.ConnectionErrorPrefix) {
+		t.Errorf("renderChat should show the connection error:\n%s", m.renderChat())
+	}
+	if m.Working() {
+		t.Error("a connection-error reply should clear the working state")
+	}
+}
+
 func TestCode_InputFocusReporting(t *testing.T) {
 	m := sizedCode()
 	if !m.IsInputFocused() {

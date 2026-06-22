@@ -127,6 +127,28 @@ func TestClient_Submit(t *testing.T) {
 	}
 }
 
+func TestClient_SubmitDownReturnsFriendlyMessage(t *testing.T) {
+	c := NewClient(ClientConfig{BaseURL: "http://127.0.0.1:1"})
+	resp, err := c.Submit("hi", "s1")
+	if err != nil {
+		t.Fatalf("Submit against a dead server should not error, got: %v", err)
+	}
+	if !strings.HasPrefix(resp, ConnectionErrorPrefix) {
+		t.Errorf("Submit response = %q, want the connection-error notice", resp)
+	}
+}
+
+func TestClient_AgentChatDownReturnsFriendlyMessage(t *testing.T) {
+	c := NewClient(ClientConfig{BaseURL: "http://127.0.0.1:1"})
+	resp, err := c.AgentChat("code-agent", "s1", "hi")
+	if err != nil {
+		t.Fatalf("AgentChat against a dead server should not error, got: %v", err)
+	}
+	if !strings.HasPrefix(resp, ConnectionErrorPrefix) {
+		t.Errorf("AgentChat response = %q, want the connection-error notice", resp)
+	}
+}
+
 func TestClient_Reload(t *testing.T) {
 	f := newFakeVortex(t)
 	c := testClient(t, f, "")
