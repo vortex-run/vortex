@@ -32,13 +32,14 @@ func codeKey(m CodeModel, s string) CodeModel {
 }
 
 func TestCode_InitializesAllPanels(t *testing.T) {
-	m := sizedCode(WithProject("S:\\myapp"), WithModel("deepseek-chat"))
+	// Team mode (default) shows the three-panel layout.
+	m := sizedCode(WithProject(`S:\myapp`), WithModel("deepseek-chat"))
 	out := m.View()
 	for _, want := range []string{
-		"VORTEX CODE", "S:\\myapp", "deepseek-chat",
-		"AGENTS", "Coordinator", "Code Agent", "Test Agent", "Review", "DevOps",
-		"MEMORY", "TASK PROGRESS",
-		"Session started",
+		"VORTEX CODE", `S:\myapp`, "deepseek-chat",
+		"AGENTS", "Coordinator", "Code Agent", "Test Agent", "Review",
+		"AGENT COMMS", "CHAT", "MEMORY", "TASK PROGRESS",
+		"Chatting with:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q", want)
@@ -46,6 +47,18 @@ func TestCode_InitializesAllPanels(t *testing.T) {
 	}
 	if len(m.AgentRoster()) != 5 {
 		t.Errorf("roster = %d agents, want 5", len(m.AgentRoster()))
+	}
+}
+
+func TestCode_SoloShowsActivityFeed(t *testing.T) {
+	// Solo mode keeps the activity-feed layout.
+	m := sizedCode(WithoutTeam())
+	out := m.View()
+	if !strings.Contains(out, "Session started") {
+		t.Errorf("solo view should show the activity feed:\n%s", out)
+	}
+	if strings.Contains(out, "AGENT COMMS") {
+		t.Error("solo view should not show the comms panel")
 	}
 }
 
