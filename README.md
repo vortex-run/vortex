@@ -103,6 +103,33 @@ curl -fsSL https://vortex.run/install | sh
 [Releases](https://github.com/vortex-run/vortex/releases) page, extract
 `vortex.exe`, and run `vortex service install`.
 
+**Build from source? Add `vortex` to your PATH** so `vortex code` works from
+any project directory:
+
+```powershell
+# This session only:
+$env:PATH += ";S:\vortex\bin"
+
+# Permanent (user PATH) — run once:
+.\scripts\install-path.ps1   # or: task install:path
+
+# Or manually via System Properties → Environment Variables → Path
+# → Add S:\vortex\bin
+```
+
+On Linux / macOS, the equivalent helper appends to your shell rc:
+
+```bash
+./scripts/install-path.sh    # adds bin/ to ~/.zshrc or ~/.bashrc
+```
+
+Then, from anywhere:
+
+```bash
+cd ~/myproject
+vortex code        # operates on THIS project (the current directory)
+```
+
 **Verify a release** before trusting it:
 ```bash
 vortex verify            # checks this binary against the signed release

@@ -42,6 +42,14 @@ tasks:
     generates:
       - "{{.BIN}}"
 
+  install:path:
+    desc: Add vortex to PATH (run once) so `vortex code` works from any directory
+    cmds:
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-path.ps1
+        platforms: [windows]
+      - cmd: ./scripts/install-path.sh
+        platforms: [linux, darwin]
+
   ui:
     desc: Open the VORTEX terminal dashboard
     cmds:
