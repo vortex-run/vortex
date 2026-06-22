@@ -1,16 +1,20 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/gateway"
 )
 
 func TestNewAIGateway_RequiresProvider(t *testing.T) {
@@ -445,5 +449,191 @@ func TestCompleteForModelSendsRequestedModel(t *testing.T) {
 	}
 	if gotModel != "deepseek-reasoner" {
 		t.Errorf("upstream model = %q, want deepseek-reasoner", gotModel)
+	}
+}
+
+// --- key rotation (autonomous API key rotation) -----------------------------
+
+// openAICompatHandler returns a handler that replies with the OpenAI chat shape,
+// or a 429 when rateLimit is true. It records the call count.
+func openAICompatHandler(reply string, rateLimit bool, calls *int) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if calls != nil {
+			*calls++
+		}
+		if rateLimit {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":"rate limit exceeded"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"`+reply+`"}}],"usage":{"total_tokens":5}}`)
+	}
+}
+
+// rotatingGateway wires a KeyStore + Router into a fresh AIGateway, returning
+// all three plus a cleanup.
+func rotatingGateway(t *testing.T, slots ...gateway.KeySlot) (*AIGateway, *gateway.KeyStore, *gateway.Router) {
+	t.Helper()
+	store, err := gateway.NewKeyStore(filepath.Join(t.TempDir(), "keys.db"), bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	for _, s := range slots {
+		if err := store.Add(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gw, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderDeepSeek, APIKey: "static"}}, // ignored once rotation on
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gateway.NewRouter(gateway.RouterConfig{Store: store, Mode: gateway.ModeQuality})
+	bridge := gateway.NewContextBridge(gw)
+	gw.SetKeyRotation(router, bridge, store)
+	return gw, store, router
+}
+
+func TestAIGateway_RotationUsesSlots(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(openAICompatHandler("rotated reply", false, &calls))
+	defer srv.Close()
+
+	gw, _, _ := rotatingGateway(t, gateway.KeySlot{
+		ID: "slot-1", Provider: ProviderDeepSeek, APIKey: "sk-1",
+		Model: "deepseek-chat", Endpoint: srv.URL, Priority: 1, Enabled: true,
+	})
+	out, err := gw.Complete(context.Background(), "hello there", "be brief")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if out != "rotated reply" {
+		t.Errorf("reply = %q, want rotated reply", out)
+	}
+	if calls != 1 {
+		t.Errorf("slot endpoint called %d times, want 1", calls)
+	}
+}
+
+func TestAIGateway_RateLimitFailsOver(t *testing.T) {
+	var c1, c2 int
+	limited := httptest.NewServer(openAICompatHandler("", true, &c1))
+	defer limited.Close()
+	healthy := httptest.NewServer(openAICompatHandler("backup reply", false, &c2))
+	defer healthy.Close()
+
+	gw, store, _ := rotatingGateway(t,
+		gateway.KeySlot{ID: "slot-1", Provider: ProviderDeepSeek, APIKey: "sk-1", Model: "deepseek-chat", Endpoint: limited.URL, Priority: 1, Enabled: true},
+		gateway.KeySlot{ID: "slot-2", Provider: ProviderGroq, APIKey: "sk-2", Model: "llama", Endpoint: healthy.URL, Priority: 2, Enabled: true},
+	)
+	out, err := gw.Complete(context.Background(), "a longer prompt that is not simple so it can route by quality across slots", "sys")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if out != "backup reply" {
+		t.Errorf("reply = %q, want backup reply (failed over to slot-2)", out)
+	}
+	// Slot 1 was tried and marked rate-limited.
+	h, _ := store.GetHealth("slot-1")
+	if !h.RateLimited {
+		t.Error("slot-1 should be rate-limited after the 429")
+	}
+	if c2 == 0 {
+		t.Error("healthy slot should have been called")
+	}
+}
+
+func TestAIGateway_AllSlotsFailReturnsError(t *testing.T) {
+	var calls int
+	limited := httptest.NewServer(openAICompatHandler("", true, &calls))
+	defer limited.Close()
+	gw, _, _ := rotatingGateway(t, gateway.KeySlot{
+		ID: "slot-1", Provider: ProviderDeepSeek, APIKey: "sk-1", Model: "m", Endpoint: limited.URL, Priority: 1, Enabled: true,
+	})
+	if _, err := gw.Complete(context.Background(), "hi", "sys"); err == nil {
+		t.Error("expected error when the only slot keeps failing")
+	}
+}
+
+func TestAIGateway_CostRecordedAfterCompletion(t *testing.T) {
+	srv := httptest.NewServer(openAICompatHandler("ok", false, nil))
+	defer srv.Close()
+	gw, store, _ := rotatingGateway(t, gateway.KeySlot{
+		ID: "slot-1", Provider: ProviderDeepSeek, APIKey: "sk-1", Model: "deepseek-chat", Endpoint: srv.URL, Priority: 1, Enabled: true,
+	})
+	gw.cfg.CostPerToken = map[string]float64{"deepseek-chat": 0.0001}
+	if _, err := gw.Complete(context.Background(), "hello", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := store.GetHealth("slot-1")
+	if h.RequestsToday != 1 {
+		t.Errorf("requests = %d, want 1", h.RequestsToday)
+	}
+	if h.SpentTodayUSD <= 0 {
+		t.Errorf("spend = %v, want > 0 (5 tokens * 0.0001)", h.SpentTodayUSD)
+	}
+}
+
+func TestAIGateway_SingleProviderModeUnchanged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"content":[{"text":"static mode"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer srv.Close()
+	gw, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderClaude, APIKey: "k", Endpoint: srv.URL}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No rotation wired → original behaviour.
+	out, err := gw.Complete(context.Background(), "hi", "sys")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if out != "static mode" {
+		t.Errorf("single-provider reply = %q", out)
+	}
+}
+
+func TestDetectRequestType(t *testing.T) {
+	cases := map[string]string{
+		"hi":                        "simple",
+		"please show me this image": "vision",
+		// Long (>100 chars), no coding keyword → complex.
+		"please write a thoughtful essay about the history of jazz music and its broad cultural impact over time": "complex",
+		// Long (>100 chars), coding keyword → coding.
+		"refactor this python function so it is cleaner, then add unit tests and run the suite to confirm it passes": "coding",
+	}
+	for in, want := range cases {
+		if got := detectRequestType(in); got != want {
+			t.Errorf("detectRequestType(%.30q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAIGateway_CompleteWithSessionPreservesContext(t *testing.T) {
+	srv := httptest.NewServer(openAICompatHandler("session reply", false, nil))
+	defer srv.Close()
+	gw, _, _ := rotatingGateway(t, gateway.KeySlot{
+		ID: "slot-1", Provider: ProviderDeepSeek, APIKey: "sk-1", Model: "deepseek-chat", Endpoint: srv.URL, Priority: 1, Enabled: true,
+	})
+	msgs := []gateway.ContextMessage{
+		{Role: "user", Content: "build a calculator"},
+		{Role: "assistant", Content: "sure"},
+		{Role: "user", Content: "add tests"},
+	}
+	out, err := gw.CompleteWithSession(context.Background(), "sess-1", msgs, "sys")
+	if err != nil {
+		t.Fatalf("CompleteWithSession: %v", err)
+	}
+	if !strings.Contains(out, "session reply") {
+		t.Errorf("reply = %q", out)
+	}
+	// The conversation was stored for handoff.
+	if gw.bridge.Get("sess-1") == nil {
+		t.Error("session should be stored in the bridge")
 	}
 }
