@@ -65,6 +65,46 @@ func TestCoordinator_TeamModeRunsPipeline(t *testing.T) {
 	}
 }
 
+func TestCoordinator_TeamPrefixForcesPipeline(t *testing.T) {
+	written := map[string]string{}
+	gw := &scriptedGateway{
+		codeReply: codePlanJSON,
+		reviewRpl: goodReviewJSON,
+		planReply: `{"steps":[{"agent_role":"coder","goal":"implement"},{"agent_role":"reviewer","goal":"review"}]}`,
+	}
+	c := teamCoordinator(t, gw, written, "--- PASS: TestX (0.00s)")
+
+	// "a flask calculator" does NOT match shouldUseTeam keywords, but the /team
+	// prefix (sent by `vortex code --team`) must force the pipeline anyway.
+	if shouldUseTeam("a flask calculator") {
+		t.Fatal("precondition: goal should not match team keywords")
+	}
+	out, err := c.HandleMessage(context.Background(), "/team a flask calculator", "s1")
+	if err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	if written["hello.py"] == "" {
+		t.Error("/team must run the code agent and write files")
+	}
+	// The reply must be the clean team summary, not orchestration internals.
+	if !strings.Contains(out, "Task complete") {
+		t.Errorf("expected clean team summary, got:\n%s", out)
+	}
+	for _, banned := range []string{"proven skill", "(tool:", "tasks:", "Goal:"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("team reply leaked internal data %q:\n%s", banned, out)
+		}
+	}
+}
+
+func TestCoordinator_TeamPrefixFallsBackWhenNoTeam(t *testing.T) {
+	// /team with no team wired must not error — it strips the prefix and proceeds.
+	c := newTestCoordinator(t, &scriptedGateway{codeReply: codePlanJSON})
+	if _, err := c.HandleMessage(context.Background(), "/team build a thing", "s1"); err != nil {
+		t.Fatalf("/team without a team should not error: %v", err)
+	}
+}
+
 func TestCoordinator_TeamModeSkipsNonCoding(t *testing.T) {
 	written := map[string]string{}
 	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}

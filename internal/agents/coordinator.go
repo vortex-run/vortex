@@ -986,6 +986,20 @@ func (c *Coordinator) handleMessageInner(_ context.Context, userMsg, sessionID s
 		return c.continueClarification(ctx, sessionID, userMsg)
 	}
 
+	// Explicit team request (the `vortex code --team` TUI sends "/team <goal>"):
+	// FORCE the specialist pipeline regardless of keyword heuristics. This is the
+	// correct path for team mode — it runs coder → tester → reviewer and writes
+	// real files, instead of the orchestration engine that leaked internals.
+	if goal, isTeam := strings.CutPrefix(strings.TrimSpace(userMsg), "/team "); isTeam {
+		goal = strings.TrimSpace(goal)
+		if team, on := c.teamHandler(); on && team != nil {
+			return c.handleTeamTask(ctx, team, goal, sessionID, nil)
+		}
+		// Team not available — continue with the plain goal (no /team prefix) so a
+		// single-agent build still happens rather than failing.
+		userMsg = goal
+	}
+
 	// Specialist team mode (agent teams): a complex coding task is run through
 	// the coder → tester → reviewer pipeline instead of the single-agent path.
 	if team, on := c.teamHandler(); on && team != nil && shouldUseTeam(userMsg) {
@@ -1377,12 +1391,15 @@ func (c *Coordinator) handleTeamTask(ctx context.Context, team *AgentTeam, msg, 
 	if err != nil {
 		return "", err
 	}
+	slog.Info("coordinator: calling team.Execute", "goal", msg, "steps", len(plan.Steps))
 	progress(formatPlan(plan))
 
 	result, err := team.Execute(ctx, plan, progress)
 	if err != nil {
+		slog.Warn("coordinator: team.Execute failed", "goal", msg, "err", err)
 		return "", err
 	}
+	slog.Info("coordinator: team result", "success", result.Success, "files", result.Files)
 	summary := result.Summary()
 	c.recordExchange(sessionID, msg, summary)
 	return summary, nil

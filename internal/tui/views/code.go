@@ -346,8 +346,12 @@ func (m CodeModel) submit(text string) tea.Cmd {
 	c := m.client
 	sid := m.sessionID
 	goal := text
+	// In team mode, force the specialist pipeline (coder → tester → reviewer)
+	// with an explicit /team prefix. The previous /orchestrate prefix bypassed
+	// the team entirely, routing to the orchestration engine (which leaked skill
+	// internals + fake task metrics and never wrote code).
 	if m.team && !strings.HasPrefix(text, "/") {
-		goal = "/orchestrate " + text
+		goal = "/team " + text
 	}
 	return func() tea.Msg {
 		if c == nil {
