@@ -28,15 +28,21 @@ type TeamConfig struct {
 	// BaseURL is the A2A server base (e.g. http://localhost:9090); used to set
 	// each agent card's Endpoint. Optional.
 	BaseURL string
+	// Bus, when set, publishes inter-agent communication for the UI to render.
+	Bus *a2a.MessageBus
+	// Checkpoints, when set, pauses between agent steps for human review
+	// (approve/edit/reject) before passing work to the next agent.
+	Checkpoints *a2a.CheckpointManager
 }
 
 // AgentTeam manages the specialist agent pipeline (coder → tester → reviewer)
 // over A2A, with checkpoints between steps for retries.
 type AgentTeam struct {
-	config TeamConfig
-	code   *specialists.CodeAgent
-	test   *specialists.TestAgent
-	review *specialists.ReviewAgent
+	config  TeamConfig
+	code    *specialists.CodeAgent
+	test    *specialists.TestAgent
+	review  *specialists.ReviewAgent
+	runTool specialists.ToolFunc // for reading previews + applying edits
 }
 
 // agentIDs maps a role to the registered agent id.
@@ -66,7 +72,7 @@ func NewAgentTeam(cfg TeamConfig, gateway AIGateway, tools *ToolRegistry) *Agent
 	review := specialists.NewReviewAgent(specialists.NewBaseAgent(
 		mkCard(reviewAgentID, "VORTEX Review Agent", "reviewer"), gateway, runTool, cfg.Client, cfg.WorkDir))
 
-	t := &AgentTeam{config: cfg, code: code, test: test, review: review}
+	t := &AgentTeam{config: cfg, code: code, test: test, review: review, runTool: runTool}
 	if cfg.Server != nil {
 		cfg.Server.Register(code)
 		cfg.Server.Register(test)
@@ -249,6 +255,40 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			res.TestsPassed = countPassed(stepResult.Output)
 		}
 		prevContext += fmt.Sprintf("\n[%s result]\n%s\n", step.AgentRole, stepResult.Output)
+
+		// Checkpoint: pause for human review before handing off to the next
+		// step (not after the final step). A rejection stops the pipeline; an
+		// edit re-applies the user's files and is carried into the next context.
+		if t.config.Checkpoints != nil && i < len(plan.Steps)-1 {
+			toRole := plan.Steps[i+1].AgentRole
+			fromID, _ := t.agentFor(step.AgentRole)
+			toID, _ := t.agentFor(toRole)
+			progress(fmt.Sprintf("[%s] ⏸ Checkpoint — awaiting your review", step.AgentRole))
+			outcome, cperr := t.config.Checkpoints.Create(
+				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(stepResult.Files))
+			if cperr != nil {
+				// Rejected by the user.
+				res.Success = false
+				res.FailedAt = step.AgentRole + " (rejected by user)"
+				res.Error = cperr.Error()
+				res.Duration = time.Since(start)
+				res.Files = mapKeys(fileSet)
+				progress(fmt.Sprintf("[%s] ✗ REJECTED by user", step.AgentRole))
+				t.notify("✗ VORTEX team task rejected", res.Summary())
+				return res, nil
+			}
+			switch outcome.Status {
+			case a2a.CheckpointEdited:
+				for _, e := range outcome.EditedFiles {
+					_, _ = t.runToolWrite(ctx, e.Path, e.NewContent)
+					fileSet[e.Path] = true
+				}
+				prevContext += "\n" + a2a.FileEditsAsContext(outcome.EditedFiles)
+				progress(fmt.Sprintf("[%s] ✎ EDITED by user — %d file(s)", step.AgentRole, len(outcome.EditedFiles)))
+			default:
+				progress(fmt.Sprintf("[%s] ✓ APPROVED by user", step.AgentRole))
+			}
+		}
 	}
 
 	res.Success = true
@@ -257,6 +297,64 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 	t.notify("✓ VORTEX team task complete", res.Summary())
 	return res, nil
 }
+
+// filePreviews reads the modified files into checkpoint previews (best effort).
+func (t *AgentTeam) filePreviews(files []string) []a2a.FilePreview {
+	var out []a2a.FilePreview
+	for _, f := range files {
+		content := ""
+		if t.runTool != nil {
+			if res, err := t.runTool(contextTODO(), "read_file", map[string]any{"path": f}); err == nil {
+				content = specialists.ToolResultString(res)
+			}
+		}
+		out = append(out, a2a.FilePreview{
+			Path:     f,
+			Content:  content,
+			Language: languageOf(f),
+			Lines:    countLines(content),
+			IsNew:    true,
+		})
+	}
+	return out
+}
+
+// runToolWrite applies a user edit to a file via the write_file tool.
+func (t *AgentTeam) runToolWrite(ctx context.Context, path, content string) (any, error) {
+	if t.runTool == nil {
+		return nil, fmt.Errorf("agents: no tool executor for checkpoint edits")
+	}
+	return t.runTool(ctx, "write_file", map[string]any{"path": path, "content": content, "create_dirs": true})
+}
+
+// languageOf returns a syntax-hint language for a file path.
+func languageOf(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".go"):
+		return "go"
+	case strings.HasSuffix(path, ".py"):
+		return "python"
+	case strings.HasSuffix(path, ".js"):
+		return "javascript"
+	case strings.HasSuffix(path, ".ts"):
+		return "typescript"
+	case strings.HasSuffix(path, ".rs"):
+		return "rust"
+	default:
+		return ""
+	}
+}
+
+// countLines counts newline-separated lines in s.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+// contextTODO returns a background context for the best-effort preview read.
+func contextTODO() context.Context { return context.Background() }
 
 // agentFor returns the registered id + agent for a role.
 func (t *AgentTeam) agentFor(role string) (string, a2a.Agent) {

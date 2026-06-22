@@ -222,6 +222,10 @@ func stripFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// ToolResultString coerces a tool result into a string (exported for the team
+// package's checkpoint previews).
+func ToolResultString(res any) string { return toolString(res) }
+
 // toolString coerces a tool result into a string (tools return strings or maps
 // with an "output"/"content" field).
 func toolString(res any) string {
