@@ -69,9 +69,26 @@ type TelegramBot struct {
 	resolver CallbackResolver
 	hooks    CommandHooks
 
+	// mention routes an "@agent" message to a specialist (set by the team
+	// bridge). It returns true when it handled the message. Optional.
+	mention func(ctx context.Context, chatID int64, text string) bool
+	// teamCallback gets first refusal on inline-button callbacks (checkpoint
+	// approvals from the team bridge), before the approval resolver. Optional.
+	teamCallback CallbackResolver
+
 	clarifyMu sync.Mutex
 	clarify   map[string]*clarifySession // session → in-progress Q&A
 }
+
+// SetMentionHandler wires an "@agent" direct-chat router (the team bridge). The
+// handler is consulted in dispatch before the agent runtime.
+func (t *TelegramBot) SetMentionHandler(h func(ctx context.Context, chatID int64, text string) bool) {
+	t.mention = h
+}
+
+// SetTeamCallbackResolver wires a resolver (the team bridge) that gets first
+// refusal on inline-button callbacks, before the approval resolver.
+func (t *TelegramBot) SetTeamCallbackResolver(r CallbackResolver) { t.teamCallback = r }
 
 // ClarifyQuestion is a structured clarifying question for Telegram buttons.
 type ClarifyQuestion struct {
@@ -299,8 +316,12 @@ func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime
 		if !t.allowed(upd.CallbackQuery.From.ID) {
 			return
 		}
-		// Clarify option buttons first, then approval/other resolvers.
+		// Clarify option buttons first, then the team (checkpoint) resolver,
+		// then the approval/other resolver.
 		if t.handleClarifyCallback(upd.CallbackQuery.Data) {
+			return
+		}
+		if t.teamCallback != nil && t.teamCallback.Resolve(upd.CallbackQuery.Data) {
 			return
 		}
 		if t.resolver != nil {
@@ -384,6 +405,8 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			switch {
 			case t.handleClarifyCallback(upd.CallbackQuery.Data):
 				// consumed by the clarification collector
+			case t.teamCallback != nil && t.teamCallback.Resolve(upd.CallbackQuery.Data):
+				// consumed by the team (checkpoint) resolver
 			case t.resolver != nil && t.resolver.Resolve(upd.CallbackQuery.Data):
 				// consumed by the approval resolver
 			default:
@@ -415,6 +438,10 @@ func (t *TelegramBot) dispatch(ctx context.Context, runtime *agents.Runtime, cha
 		if reply != "" {
 			_ = t.SendMessage(ctx, chatID, reply)
 		}
+		return
+	}
+	// "@agent" messages are routed to a specialist via direct chat.
+	if t.mention != nil && t.mention(ctx, chatID, text) {
 		return
 	}
 	if runtime == nil {
