@@ -28,6 +28,7 @@ type KeySlot struct {
 	Provider    string    `json:"provider"` // deepseek|claude|openai|gemini|groq|ollama
 	APIKey      string    `json:"-"`        // encrypted in storage; never serialised
 	Model       string    `json:"model"`
+	Endpoint    string    `json:"endpoint"` // optional base URL override (Ollama/Azure/self-hosted)
 	Priority    int       `json:"priority"` // 1=highest .. 4=lowest
 	DailyBudget float64   `json:"daily_budget"`
 	Enabled     bool      `json:"enabled"`
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS key_slots (
   provider     TEXT NOT NULL,
   api_key_enc  TEXT NOT NULL,
   model        TEXT NOT NULL DEFAULT '',
+  endpoint     TEXT NOT NULL DEFAULT '',
   priority     INTEGER NOT NULL DEFAULT 4,
   daily_budget REAL NOT NULL DEFAULT 0,
   enabled      INTEGER NOT NULL DEFAULT 1,
@@ -226,13 +228,13 @@ func (s *KeyStore) Add(slot KeySlot) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(
-		`INSERT INTO key_slots(id, provider, api_key_enc, model, priority, daily_budget, enabled, label, added_at)
-		 VALUES(?,?,?,?,?,?,?,?,?)
+		`INSERT INTO key_slots(id, provider, api_key_enc, model, endpoint, priority, daily_budget, enabled, label, added_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   provider=excluded.provider, api_key_enc=excluded.api_key_enc, model=excluded.model,
-		   priority=excluded.priority, daily_budget=excluded.daily_budget,
+		   endpoint=excluded.endpoint, priority=excluded.priority, daily_budget=excluded.daily_budget,
 		   enabled=excluded.enabled, label=excluded.label`,
-		slot.ID, slot.Provider, enc, slot.Model, slot.Priority, slot.DailyBudget,
+		slot.ID, slot.Provider, enc, slot.Model, slot.Endpoint, slot.Priority, slot.DailyBudget,
 		boolToInt(slot.Enabled), slot.Label, slot.AddedAt.UnixMilli()); err != nil {
 		return fmt.Errorf("gateway: saving slot: %w", err)
 	}
@@ -271,7 +273,7 @@ func (s *KeyStore) Remove(id string) error {
 // encrypted (the APIKey field carries the ciphertext blob).
 func (s *KeyStore) List() ([]KeySlot, error) {
 	rows, err := s.db.Query(
-		`SELECT id, provider, api_key_enc, model, priority, daily_budget, enabled, label, added_at
+		`SELECT id, provider, api_key_enc, model, endpoint, priority, daily_budget, enabled, label, added_at
 		 FROM key_slots ORDER BY priority ASC, added_at ASC`)
 	if err != nil {
 		return nil, err
@@ -291,7 +293,7 @@ func (s *KeyStore) List() ([]KeySlot, error) {
 // Get returns one slot with its API key still encrypted.
 func (s *KeyStore) Get(id string) (*KeySlot, error) {
 	row := s.db.QueryRow(
-		`SELECT id, provider, api_key_enc, model, priority, daily_budget, enabled, label, added_at
+		`SELECT id, provider, api_key_enc, model, endpoint, priority, daily_budget, enabled, label, added_at
 		 FROM key_slots WHERE id=?`, id)
 	slot, err := scanSlot(row)
 	if err != nil {
@@ -425,7 +427,7 @@ func scanSlot(r rowScanner) (KeySlot, error) {
 	var slot KeySlot
 	var added int64
 	var enabled int
-	if err := r.Scan(&slot.ID, &slot.Provider, &slot.APIKey, &slot.Model,
+	if err := r.Scan(&slot.ID, &slot.Provider, &slot.APIKey, &slot.Model, &slot.Endpoint,
 		&slot.Priority, &slot.DailyBudget, &enabled, &slot.Label, &added); err != nil {
 		return KeySlot{}, err
 	}

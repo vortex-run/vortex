@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/gateway"
 )
 
 // Provider names.
@@ -47,7 +49,9 @@ type AIGatewayConfig struct {
 
 // AIGateway routes completion requests across providers in priority order,
 // implementing agents.AIGateway. It tracks token cost and enforces a daily
-// budget.
+// budget. When a key-rotation Router is wired (SetKeyRotation), Complete routes
+// through health-scored key slots with automatic failover and context handoff
+// instead of the static provider list.
 type AIGateway struct {
 	cfg    AIGatewayConfig
 	client *http.Client
@@ -57,6 +61,31 @@ type AIGateway struct {
 	costToday     float64
 	requestsToday int
 	dayStart      time.Time
+
+	// Key rotation (autonomous API key rotation). When router != nil, Complete
+	// selects slots from the key store, records outcomes, and fails over.
+	router   *gateway.Router
+	bridge   *gateway.ContextBridge
+	keyStore *gateway.KeyStore
+}
+
+// SetKeyRotation enables autonomous key rotation: Complete selects from
+// health-scored key slots with failover and context preservation instead of
+// the static provider list. Passing a nil router disables it (single-provider
+// mode).
+func (g *AIGateway) SetKeyRotation(router *gateway.Router, bridge *gateway.ContextBridge, store *gateway.KeyStore) {
+	g.mu.Lock()
+	g.router = router
+	g.bridge = bridge
+	g.keyStore = store
+	g.mu.Unlock()
+}
+
+// keyRotationEnabled reports whether a router is wired.
+func (g *AIGateway) keyRotationEnabled() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.router != nil
 }
 
 // CostSnapshot summarises AI usage for the current day (for /api/ai/cost).
@@ -123,8 +152,12 @@ func NewAIGateway(cfg AIGatewayConfig) (*AIGateway, error) {
 var ErrBudgetExceeded = fmt.Errorf("messaging: daily AI budget exceeded")
 
 // Complete tries each provider in priority order until one succeeds, returning
-// the response text. It enforces the daily budget before calling out.
+// the response text. It enforces the daily budget before calling out. When key
+// rotation is enabled it routes through health-scored slots instead.
 func (g *AIGateway) Complete(ctx context.Context, prompt, systemPrompt string) (string, error) {
+	if g.keyRotationEnabled() {
+		return g.completeRotating(ctx, prompt, systemPrompt, detectRequestType(prompt))
+	}
 	if g.budgetExceeded() {
 		return "", ErrBudgetExceeded
 	}
@@ -147,6 +180,111 @@ func (g *AIGateway) Complete(ctx context.Context, prompt, systemPrompt string) (
 		lastErr = fmt.Errorf("messaging: no providers available")
 	}
 	return "", lastErr
+}
+
+// maxSlotTries bounds how many distinct slots Complete will try before giving
+// up (one full rotation across 4 slots, with a retry budget).
+const maxSlotTries = 6
+
+// completeRotating routes a completion through the key-rotation router: select
+// a slot, call its provider, and on rate-limit/error fail over to the next
+// healthy slot. Success/error/cost are recorded so health scores stay current.
+func (g *AIGateway) completeRotating(ctx context.Context, prompt, systemPrompt, requestType string) (string, error) {
+	g.mu.Lock()
+	router, store := g.router, g.keyStore
+	g.mu.Unlock()
+
+	var lastErr error
+	tried := map[string]int{}
+	for i := 0; i < maxSlotTries; i++ {
+		slot, err := router.SelectSlot(ctx, requestType)
+		if err != nil {
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", err
+		}
+		// Avoid hammering the same slot more than 3 times for non-rate-limit errors.
+		if tried[slot.ID] >= 3 {
+			// All remaining selections keep returning an exhausted slot; stop.
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", fmt.Errorf("messaging: all key slots exhausted")
+		}
+		tried[slot.ID]++
+
+		full, derr := store.GetDecrypted(slot.ID)
+		if derr != nil {
+			lastErr = derr
+			router.RecordError(slot.ID, derr, false)
+			continue
+		}
+		p := providerFromSlot(full)
+
+		start := g.now()
+		text, tokens, cerr := g.callProvider(ctx, p, prompt, systemPrompt)
+		latency := g.now().Sub(start).Milliseconds()
+		if cerr != nil {
+			lastErr = cerr
+			isRL := isRateLimit(cerr)
+			router.RecordError(slot.ID, cerr, isRL)
+			continue
+		}
+		cost := g.costOf(g.modelOf(p), tokens)
+		router.RecordSuccess(slot.ID, latency, cost)
+		router.RecordCost(slot.ID, 0) // budget check (cost already added by RecordSuccess)
+		g.mu.Lock()
+		g.rolloverLocked()
+		g.requestsToday++
+		g.costToday += cost
+		g.mu.Unlock()
+		return text, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("messaging: all key slots failed")
+	}
+	return "", lastErr
+}
+
+// CompleteWithSession is like Complete but preserves conversation context
+// across slot switches: it stores the session's messages and, when the active
+// slot changes provider mid-session, builds a handoff so the new provider
+// receives the full context. The reply is prefixed with a switch notice when a
+// provider change occurred.
+func (g *AIGateway) CompleteWithSession(ctx context.Context, sessionID string, messages []gateway.ContextMessage, systemPrompt string) (string, error) {
+	g.mu.Lock()
+	router, bridge := g.router, g.bridge
+	g.mu.Unlock()
+	if router == nil || bridge == nil {
+		// Single-provider mode: flatten and use Complete.
+		return g.Complete(ctx, flattenMessages(messages), systemPrompt)
+	}
+
+	bridge.Store(sessionID, messages)
+	prev := router.ActiveSlotID()
+
+	slot, err := router.SelectSlot(ctx, detectRequestTypeMsgs(messages))
+	if err != nil {
+		return "", err
+	}
+	prompt := flattenMessages(messages)
+	notice := ""
+	// If the active slot's provider changed from the previous turn, hand off.
+	if prev != "" && prev != slot.ID {
+		if oldSlot, oerr := g.keyStore.Get(prev); oerr == nil && oldSlot.Provider != slot.Provider {
+			handoff, herr := bridge.BuildHandoff(ctx, sessionID, slot.Provider)
+			if herr == nil {
+				prompt = flattenMessages(handoff)
+				notice = bridge.NotifySwitch(oldSlot, slot, "previous key unavailable", len(handoff)) + "\n\n"
+			}
+		}
+	}
+	reply, err := g.completeRotating(ctx, prompt, systemPrompt, detectRequestTypeMsgs(messages))
+	if err != nil {
+		return "", err
+	}
+	return notice + reply, nil
 }
 
 // modelOf returns the default model for a provider.
@@ -429,6 +567,85 @@ func (g *AIGateway) recordCost(model string, tokens int) {
 	defer g.mu.Unlock()
 	g.rolloverLocked()
 	g.costToday += per * float64(tokens)
+}
+
+// costOf returns the estimated USD cost of tokens for model (0 when no rate is
+// configured). Used by the rotation path, which records cost per slot.
+func (g *AIGateway) costOf(model string, tokens int) float64 {
+	return g.cfg.CostPerToken[model] * float64(tokens)
+}
+
+// providerFromSlot builds an AIProvider from a decrypted key slot so the
+// existing per-provider call path can serve a rotated request.
+func providerFromSlot(slot *gateway.KeySlot) AIProvider {
+	p := AIProvider{Name: slot.Provider, APIKey: slot.APIKey, Endpoint: slot.Endpoint}
+	if slot.Model != "" {
+		p.Models = []string{slot.Model}
+	}
+	return p
+}
+
+// isRateLimit reports whether err is a provider rate-limit (HTTP 429).
+func isRateLimit(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "429") ||
+		strings.Contains(strings.ToLower(s), "rate limit") ||
+		strings.Contains(strings.ToLower(s), "too many requests")
+}
+
+// codingKeywords flag a coding request for request-type detection.
+var codingKeywords = []string{
+	"code", "function", "bug", "refactor", "compile", "implement", "class",
+	"def ", "func ", "import ", "api", "test", "debug", "python", "golang",
+	"javascript", "typescript", "rust", "java",
+}
+
+// visionKeywords flag a vision request.
+var visionKeywords = []string{"image", "screenshot", "photo", "picture", "diagram", "look at this"}
+
+// detectRequestType classifies a prompt for routing: short → simple,
+// vision refs → vision, coding keywords → coding, else complex.
+func detectRequestType(prompt string) string {
+	low := strings.ToLower(prompt)
+	for _, k := range visionKeywords {
+		if strings.Contains(low, k) {
+			return "vision"
+		}
+	}
+	if len(prompt) < 100 {
+		return "simple"
+	}
+	for _, k := range codingKeywords {
+		if strings.Contains(low, k) {
+			return "coding"
+		}
+	}
+	return "complex"
+}
+
+// detectRequestTypeMsgs classifies based on the last user message.
+func detectRequestTypeMsgs(messages []gateway.ContextMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" {
+			return detectRequestType(messages[i].Content)
+		}
+	}
+	if len(messages) > 0 {
+		return detectRequestType(messages[len(messages)-1].Content)
+	}
+	return "complex"
+}
+
+// flattenMessages renders a message list into a single prompt string.
+func flattenMessages(messages []gateway.ContextMessage) string {
+	var b strings.Builder
+	for _, m := range messages {
+		b.WriteString(m.Role + ": " + m.Content + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // budgetExceeded reports whether today's spend has reached the daily budget.
