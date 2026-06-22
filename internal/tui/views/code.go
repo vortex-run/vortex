@@ -91,6 +91,10 @@ type CodeModel struct {
 	inputHistory []string
 	histIdx      int
 
+	// selector is an active arrow-key option menu parsed from a coordinator
+	// QUESTION:/OPTIONS: reply (nil = none).
+	selector *OptionSelector
+
 	sessionID   string
 	project     string       // project dir shown in the header
 	model       string       // AI model override shown in the header
@@ -511,12 +515,19 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "system", Content: msg.content})
 			m.memOffline = true
 		default:
-			m.ingestReply(msg.content)
-			// Surface the coordinator's final summary in the CHAT panel (the right
-			// panel renders the chat, not the feed). Live step lines streamed in via
-			// streamCommsToChat precede this conclusion.
-			if c := strings.TrimSpace(msg.content); c != "" {
-				m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: c})
+			// A QUESTION:/OPTIONS: reply becomes an interactive arrow-key menu in
+			// the chat panel instead of plain text.
+			if sel := parseOptions(msg.content); sel != nil {
+				m.selector = sel
+				m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: sel.Question})
+			} else {
+				m.ingestReply(msg.content)
+				// Surface the coordinator's final summary in the CHAT panel (the
+				// right panel renders the chat, not the feed). Live step lines
+				// streamed in via streamCommsToChat precede this conclusion.
+				if c := strings.TrimSpace(msg.content); c != "" {
+					m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: c})
+				}
 			}
 			m.progress.Percent = 100
 		}
@@ -559,6 +570,34 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.helpOpen = false
 		}
 		return m, nil
+	}
+
+	// An active option selector owns ↑/↓/Enter/Esc.
+	if m.selector != nil && m.selector.Active {
+		switch key {
+		case "up", "k":
+			m.selector.moveCursor(-1)
+			return m, nil
+		case "down", "j":
+			m.selector.moveCursor(+1)
+			return m, nil
+		case "enter":
+			choice := m.selector.Selected()
+			m.selector = nil
+			if choice == "" {
+				return m, nil
+			}
+			// Submit the chosen option as the next message to the coordinator.
+			m.recordHistory(choice)
+			m.chat = append(m.chat, ChatLine{Role: "user", Content: choice})
+			m.working = true
+			m.workStart = time.Now()
+			return m, tea.Batch(m.submit(choice), m.spin.Tick)
+		case "esc":
+			// Dismiss the menu and fall back to free-text input.
+			m.selector = nil
+			return m, nil
+		}
 	}
 
 	switch key {

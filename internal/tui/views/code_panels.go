@@ -279,6 +279,10 @@ func (m CodeModel) renderChat() string {
 			b.WriteString(c.Render(line.Agent+": ") + line.Content + "\n")
 		}
 	}
+	// Active option selector (arrow-key menu) takes over the input affordance.
+	if m.selector != nil && m.selector.Active {
+		b.WriteString("\n" + renderSelector(m.selector, w) + "\n")
+	}
 	// Animated thinking indicator while a task is in flight (Claude-Code feel).
 	if m.working {
 		c := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor("coordinator")))
