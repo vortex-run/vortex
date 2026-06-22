@@ -273,6 +273,31 @@ func TestCode_InputHistoryRecall(t *testing.T) {
 	}
 }
 
+func TestCode_LiveCommsStreamIntoChat(t *testing.T) {
+	m := sizedCode(WithTeam())
+	m.working = true // a coordinator task is in flight
+	// A task hand-off and its result both surface as step lines in the chat.
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "coordinator", To: "code-agent", Kind: "task", Content: "write the app"})
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "code-agent", To: "coordinator", Kind: "result", Content: "created app.py"})
+
+	out := m.renderChat()
+	if !strings.Contains(out, "→ Code Agent") || !strings.Contains(out, "write the app") {
+		t.Errorf("chat should stream the task hand-off:\n%s", out)
+	}
+	if !strings.Contains(out, "✓ Code Agent") || !strings.Contains(out, "created app.py") {
+		t.Errorf("chat should stream the result:\n%s", out)
+	}
+}
+
+func TestCode_NoCommsStreamWhenIdle(t *testing.T) {
+	m := sizedCode(WithTeam()) // not working
+	before := len(m.Chat())
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "coordinator", To: "code-agent", Kind: "task", Content: "x"})
+	if len(m.Chat()) != before {
+		t.Error("comms should not stream into chat when no task is running")
+	}
+}
+
 func TestCode_ThinkingIndicatorWhileWorking(t *testing.T) {
 	m := sizedCode(WithTeam())
 	m.working = true

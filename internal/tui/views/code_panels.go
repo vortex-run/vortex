@@ -57,6 +57,34 @@ func (m *CodeModel) applyCommsStatus(e CommsEntry) {
 	}
 }
 
+// streamCommsToChat surfaces live bus traffic in the CHAT panel while a
+// coordinator task runs, so the conversation appears progressively. Only
+// substantive lines (task hand-offs, results) are shown; raw progress noise
+// stays in the comms panel. Sets streamedThisTurn so the final reply does not
+// duplicate the content.
+func (m *CodeModel) streamCommsToChat(e CommsEntry) {
+	if !m.working || m.selectedAgent != "coordinator" {
+		return
+	}
+	var line string
+	switch e.Kind {
+	case "task":
+		if name, ok := rosterNameByID[e.To]; ok && e.To != "user" {
+			line = "→ " + name + ": " + truncateStr(e.Content, 200)
+		}
+	case "result":
+		if name, ok := rosterNameByID[e.From]; ok && e.From != "user" {
+			line = "✓ " + name + ": " + truncateStr(e.Content, 200)
+		}
+	}
+	if line == "" {
+		return
+	}
+	// Append as a step line. The final codeReplyMsg still adds the coordinator's
+	// summary, so these read as the work log leading up to the conclusion.
+	m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: line})
+}
+
 // HandleAGUI processes the three-panel collaboration messages and keys (bus
 // comms, checkpoints, direct-chat replies, agent selection, checkpoint review).
 // It returns (handled) so the main Update can fall through when it does not
@@ -65,13 +93,18 @@ func (m *CodeModel) applyCommsStatus(e CommsEntry) {
 func (m CodeModel) HandleAGUI(msg tea.Msg) (CodeModel, bool) {
 	switch msg := msg.(type) {
 	case CommsMsg:
-		m.comms = append(m.comms, CommsEntry(msg))
+		e := CommsEntry(msg)
+		m.comms = append(m.comms, e)
 		if len(m.comms) > 500 {
 			m.comms = m.comms[len(m.comms)-500:]
 		}
 		// Drive the LEFT roster from live bus traffic: a task hand-off marks the
 		// recipient busy; a result marks the sender ready again.
-		m.applyCommsStatus(CommsEntry(msg))
+		m.applyCommsStatus(e)
+		// Stream the live conversation into the CHAT panel while a coordinator
+		// task is running, so the response builds up step-by-step (Claude-Code
+		// feel) instead of appearing all at once at the end.
+		m.streamCommsToChat(e)
 		return m, true
 	case CheckpointMsg:
 		cp := CheckpointUI(msg)
