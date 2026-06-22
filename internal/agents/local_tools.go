@@ -528,3 +528,40 @@ func NewLocalTools(cfg LocalFSConfig) []Tool {
 	tools = append(tools, UndoTool{cfg: cfg, RequireApproval: true})
 	return tools
 }
+
+// NewTrustedLocalTools returns the local FS + terminal tools for an autonomous
+// specialist agent: file writes/edits/creates run WITHOUT an approval gate
+// (the human already approved the overall team task), but RunTerminalTool
+// keeps its approval gate because arbitrary command execution stays dangerous
+// even mid-task. git_commit also keeps approval (it mutates history).
+func NewTrustedLocalTools(cfg LocalFSConfig) []Tool {
+	cfg.RequireApproval = false
+	tools := []Tool{
+		ListDirectoryTool{cfg: cfg},
+		ReadLocalFileTool{cfg: cfg},
+		WriteLocalFileTool{cfg: cfg, RequireApproval: false},
+		EditFileTool{cfg: cfg, RequireApproval: false},
+		RunTerminalTool{cfg: cfg, RequireApproval: true},
+		CreateProjectTool{cfg: cfg, RequireApproval: false},
+	}
+	tools = append(tools,
+		GitStatusTool{cfg: cfg},
+		GitDiffTool{cfg: cfg},
+		GitAddTool{cfg: cfg, RequireApproval: false},
+		GitCommitTool{cfg: cfg, RequireApproval: true},
+	)
+	tools = append(tools, searchTools(cfg)...)
+	return tools
+}
+
+// NewTrustedToolRegistry builds a ToolRegistry pre-loaded with the trusted
+// local tools for a specialist agent.
+func NewTrustedToolRegistry(cfg LocalFSConfig) (*ToolRegistry, error) {
+	reg := NewToolRegistry()
+	for _, t := range NewTrustedLocalTools(cfg) {
+		if err := reg.Register(t); err != nil {
+			return nil, err
+		}
+	}
+	return reg, nil
+}
