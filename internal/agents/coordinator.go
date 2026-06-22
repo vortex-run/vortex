@@ -197,6 +197,28 @@ type Coordinator struct {
 	// orchestration progress is persisted step by step so an interrupted goal
 	// is found by ListIncomplete and resumed on the next startup.
 	workflows *WorkflowStore
+
+	// team, when set with teamMode, routes complex coding tasks through the
+	// specialist agent pipeline (coder → tester → reviewer) over A2A instead of
+	// the single-agent path (agent teams).
+	team     *AgentTeam
+	teamMode bool
+}
+
+// SetTeam enables specialist-agent team mode: complex coding tasks are routed
+// through the coder → tester → reviewer pipeline. Passing nil disables it.
+func (c *Coordinator) SetTeam(team *AgentTeam) {
+	c.mu.Lock()
+	c.team = team
+	c.teamMode = team != nil
+	c.mu.Unlock()
+}
+
+// teamHandler returns the team + whether team mode is active under lock.
+func (c *Coordinator) teamHandler() (*AgentTeam, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.team, c.teamMode
 }
 
 // SetMemoryStore wires the SQLite conversation store, making it the persistence
@@ -875,6 +897,12 @@ func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string
 		return c.continueClarification(ctx, sessionID, userMsg)
 	}
 
+	// Specialist team mode (agent teams): a complex coding task is run through
+	// the coder → tester → reviewer pipeline instead of the single-agent path.
+	if team, on := c.teamHandler(); on && team != nil && shouldUseTeam(userMsg) {
+		return c.handleTeamTask(ctx, team, userMsg, sessionID, nil)
+	}
+
 	// Rule-based fast path FIRST: simple file/terminal operations and slash
 	// commands route to local tools directly — no AI call, instant. Only fall
 	// back to the AI classifier when the rules don't match.
@@ -1227,6 +1255,75 @@ func (c *Coordinator) handlePipeline(ctx context.Context, userMsg string) (strin
 
 // handleOrchestrate dispatches a multi-agent goal to the orchestration agent
 // (or stubs when not wired). It strips a leading /orchestrate or "orchestrate:".
+// teamKeywords trigger specialist-team mode for a coding task.
+var teamKeywords = []string{
+	"build", "create a", "implement", "write a", "develop", "make me a",
+	"add feature", "refactor", "fix the bug in", "add a test", "write tests",
+}
+
+// shouldUseTeam reports whether a message is a complex coding task worth the
+// specialist pipeline. (Team mode itself is gated separately by the caller.)
+func shouldUseTeam(msg string) bool {
+	low := strings.ToLower(msg)
+	if strings.HasPrefix(strings.TrimSpace(low), "/") {
+		return false // slash commands route to local tools, not the team
+	}
+	for _, k := range teamKeywords {
+		if strings.Contains(low, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// handleTeamTask plans and runs a task through the specialist agent pipeline,
+// streaming progress via progressFn (may be nil) and returning the summary.
+func (c *Coordinator) handleTeamTask(ctx context.Context, team *AgentTeam, msg, sessionID string, progressFn func(string)) (string, error) {
+	progress := func(s string) {
+		if progressFn != nil {
+			progressFn(s)
+		}
+	}
+	plan, err := team.Plan(ctx, msg, sessionID, c.cfg.AIGateway)
+	if err != nil {
+		return "", err
+	}
+	progress(formatPlan(plan))
+
+	result, err := team.Execute(ctx, plan, progress)
+	if err != nil {
+		return "", err
+	}
+	summary := result.Summary()
+	c.recordExchange(sessionID, msg, summary)
+	return summary, nil
+}
+
+// formatPlan renders a team plan for the user before execution.
+func formatPlan(plan *TeamPlan) string {
+	var b strings.Builder
+	b.WriteString("I'll work on this in steps:\n")
+	for i, s := range plan.Steps {
+		fmt.Fprintf(&b, "  %d. %s — %s\n", i+1, teamRoleName(s.AgentRole), s.Goal)
+	}
+	b.WriteString("\nI'll stream updates as each agent works. Starting now...")
+	return b.String()
+}
+
+// teamRoleName renders a role as a display name.
+func teamRoleName(role string) string {
+	switch role {
+	case "coder":
+		return "Code Agent"
+	case "tester":
+		return "Test Agent"
+	case "reviewer":
+		return "Review Agent"
+	default:
+		return role
+	}
+}
+
 func (c *Coordinator) handleOrchestrate(ctx context.Context, sessionID, userMsg string) (string, error) {
 	if c.cfg.Orchestrate == nil {
 		return c.modeStub("ORCHESTRATE"), nil
