@@ -481,6 +481,10 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.addEntry("user", text, "message")
+		// Mirror the user's message into the CHAT panel immediately so it is
+		// visible in team mode (where the right panel shows the chat, not the
+		// activity feed) before the coordinator replies.
+		m.chat = append(m.chat, ChatLine{Role: "user", Content: text})
 		m.input.Reset()
 		m.working = true
 		m.workStart = time.Now()

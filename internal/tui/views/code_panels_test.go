@@ -168,6 +168,25 @@ func TestCode_EnterToSelectedAgentChats(t *testing.T) {
 	}
 }
 
+func TestCode_CoordinatorSubmitShowsUserMessageInChat(t *testing.T) {
+	m := sizedCode(WithTeam())
+	// selectedAgent defaults to "coordinator" → Enter starts a task.
+	m.input.SetValue("create a python calculator")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(CodeModel)
+
+	if !m.Working() {
+		t.Error("coordinator submit should start a task (working)")
+	}
+	// The user message must appear immediately in the CHAT panel, not only the feed.
+	if len(m.Chat()) != 1 || m.Chat()[0].Role != "user" || m.Chat()[0].Content != "create a python calculator" {
+		t.Fatalf("chat = %+v, want one user line", m.Chat())
+	}
+	if !strings.Contains(m.renderChat(), "create a python calculator") {
+		t.Errorf("CHAT panel should show the user message:\n%s", m.renderChat())
+	}
+}
+
 // sizedCodeWithCheckpoint returns a team model with an active checkpoint.
 func sizedCodeWithCheckpoint(t *testing.T) CodeModel {
 	t.Helper()
