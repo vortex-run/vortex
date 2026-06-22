@@ -273,11 +273,22 @@ func envTrue(name string) bool {
 
 // wireAgentTeam builds the A2A server, registers the specialist agents, mounts
 // the A2A tree on the API server, enables team mode on the coordinator, and
-// exposes the /api/team/agents view (agent teams).
-func wireAgentTeam(_ context.Context, apiSrv *api.Server, rt *agents.Runtime, gateway agents.AIGateway, notifier *messaging.Router, workDir string, display *startup.Display, log *slog.Logger) {
+// exposes the /api/team/agents view (agent teams). It also wires the AG-UI
+// collaboration layer: a MessageBus for inter-agent visibility, a
+// CheckpointManager for human review between steps, the collaboration API
+// endpoints, and (when configured) the Telegram team bridge.
+func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, gateway agents.AIGateway, notifier *messaging.Router, telegram *messaging.TelegramBot, workDir string, display *startup.Display, log *slog.Logger) {
 	a2aServer := a2a.NewAgentServer()
 	baseURL := "http://localhost" + portSuffix(apiSrv.Addr())
 	a2aClient := a2a.NewAgentClient(baseURL, "coordinator")
+
+	// AG-UI collaboration layer: the bus carries all inter-agent traffic for the
+	// UI; the checkpoint manager pauses between steps for human review. The bus
+	// must be set on the server before Register so each agent's DirectChat
+	// publishes to it.
+	bus := a2a.NewMessageBus()
+	a2aServer.SetBus(bus)
+	checkpoints := a2a.NewCheckpointManager(bus, 0) // 0 = always wait for a human
 
 	// Trusted tool registry for the specialists (file ops without approval;
 	// terminal/commit still gated).
@@ -288,11 +299,13 @@ func wireAgentTeam(_ context.Context, apiSrv *api.Server, rt *agents.Runtime, ga
 	}
 
 	team := agents.NewAgentTeam(agents.TeamConfig{
-		Client:   a2aClient,
-		Server:   a2aServer,
-		Notifier: routerNotifierAdapter{router: notifier},
-		WorkDir:  workDir,
-		BaseURL:  baseURL,
+		Client:      a2aClient,
+		Server:      a2aServer,
+		Notifier:    routerNotifierAdapter{router: notifier},
+		WorkDir:     workDir,
+		BaseURL:     baseURL,
+		Bus:         bus,
+		Checkpoints: checkpoints,
 	}, gateway, tools)
 
 	rt.Coordinator().SetTeam(team)
@@ -311,8 +324,122 @@ func wireAgentTeam(_ context.Context, apiSrv *api.Server, rt *agents.Runtime, ga
 		return out
 	})
 
+	// Collaboration API: comms feed + SSE, direct chat, checkpoint review.
+	collab := &teamCollab{server: a2aServer, bus: bus, checkpoints: checkpoints}
+	apiSrv.SetCommsProvider(collab)
+	apiSrv.SetChatProvider(collab)
+	apiSrv.SetCheckpointProvider(collab)
+
+	// Telegram team bridge: live progress, checkpoint buttons, "@agent" chat.
+	if telegram != nil {
+		if chatID, ok := primaryTelegramChatID(); ok {
+			bridge := messaging.NewTeamBridge(telegram, chatID, "", checkpoints, collab)
+			telegram.SetTeamCallbackResolver(bridge)
+			telegram.SetMentionHandler(func(ctx context.Context, _ int64, text string) bool {
+				return bridge.HandleMention(ctx, text)
+			})
+			go bridge.Run(ctx, bus)
+			log.Info("telegram team bridge enabled", "chat_id", chatID)
+		}
+	}
+
 	log.Info("agent team enabled", "agents", []string{"coordinator", "code-agent", "test-agent", "review-agent"})
 	display.Step("Agent team", "coordinator, code-agent, test-agent, review-agent")
+}
+
+// teamCollab adapts the a2a bus / server / checkpoint manager to the api and
+// messaging provider interfaces (CommsProvider, ChatProvider,
+// CheckpointProvider, and the bridge's directChatter).
+type teamCollab struct {
+	server      *a2a.AgentServer
+	bus         *a2a.MessageBus
+	checkpoints *a2a.CheckpointManager
+}
+
+// History returns the recent comms feed as api.CommsRecord values.
+func (t *teamCollab) History(limit int) []api.CommsRecord {
+	msgs := t.bus.History("", limit)
+	out := make([]api.CommsRecord, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, busToRecord(m))
+	}
+	return out
+}
+
+// Subscribe bridges the bus subscription to api.CommsRecord values.
+func (t *teamCollab) Subscribe() (<-chan api.CommsRecord, func()) {
+	src, unsub := t.bus.Subscribe()
+	out := make(chan api.CommsRecord, 64)
+	go func() {
+		defer close(out)
+		for m := range src {
+			select {
+			case out <- busToRecord(m):
+			default: // drop to a slow consumer rather than stall the bus
+			}
+		}
+	}()
+	return out, unsub
+}
+
+// Chat routes a direct-chat message to a registered specialist.
+func (t *teamCollab) Chat(ctx context.Context, agentID, sessionID, message string) (string, error) {
+	dc := t.server.DirectChatFor(agentID)
+	if dc == nil {
+		return "", fmt.Errorf("unknown agent: %s", agentID)
+	}
+	return dc.Send(ctx, sessionID, message)
+}
+
+// List returns the pending checkpoints across all sessions.
+func (t *teamCollab) List() []api.CheckpointRecord {
+	pending := t.checkpoints.Pending("")
+	out := make([]api.CheckpointRecord, 0, len(pending))
+	for _, cp := range pending {
+		files := make([]api.CheckpointFileRecord, 0, len(cp.Files))
+		for _, f := range cp.Files {
+			files = append(files, api.CheckpointFileRecord{Path: f.Path, Lines: f.Lines, IsNew: f.IsNew})
+		}
+		out = append(out, api.CheckpointRecord{
+			ID: cp.ID, SessionID: cp.SessionID, FromAgent: cp.FromAgent, ToAgent: cp.ToAgent,
+			Title: cp.Title, Description: cp.Description, Status: cp.Status, Files: files,
+			CreatedAt: cp.CreatedAt,
+		})
+	}
+	return out
+}
+
+// Approve resolves a pending checkpoint, unblocking the pipeline.
+func (t *teamCollab) Approve(id string) error { return t.checkpoints.Approve(id) }
+
+// Reject stops the pipeline at a checkpoint.
+func (t *teamCollab) Reject(id, reason string) error { return t.checkpoints.Reject(id, reason) }
+
+// Get returns a checkpoint by ID (for the Telegram bridge's file preview).
+func (t *teamCollab) Get(id string) (*a2a.Checkpoint, error) { return t.checkpoints.Get(id) }
+
+// busToRecord converts an a2a bus message to the api comms record shape.
+func busToRecord(m a2a.BusMessage) api.CommsRecord {
+	return api.CommsRecord{
+		ID: m.ID, From: m.From, To: m.To, Type: m.Type, Content: m.Content,
+		SessionID: m.SessionID, Timestamp: m.Timestamp,
+	}
+}
+
+// primaryTelegramChatID returns the first allowed Telegram chat ID (the user's
+// own chat), used as the default target for the team bridge's proactive
+// messages. It reads VORTEX_TELEGRAM_ALLOWED_IDS (comma-separated).
+func primaryTelegramChatID() (int64, bool) {
+	raw := strings.TrimSpace(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS"))
+	if raw == "" {
+		return 0, false
+	}
+	first, _, _ := strings.Cut(raw, ",")
+	id, err := strconv.ParseInt(strings.TrimSpace(first), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // routeNames lists the configured route names for the startup display.
@@ -742,7 +869,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		// Specialist agent team (agent teams): coder → tester → reviewer over
 		// A2A. Enabled by --team or VORTEX_TEAM_MODE=true.
 		if teamMode || envTrue("VORTEX_TEAM_MODE") {
-			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, resolveWorkingDir(), display, log)
+			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, msg.telegram, resolveWorkingDir(), display, log)
 		}
 	}
 
