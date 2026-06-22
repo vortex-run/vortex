@@ -39,6 +39,7 @@ func NewCodeAgent(base *BaseAgent) *CodeAgent {
 	if base.card.Capabilities == nil {
 		base.card.Capabilities = []string{"write_code", "edit_file", "read_file", "search_files", "git_status", "git_diff"}
 	}
+	base.SetSystemPrompt(codeSystemPrompt)
 	return &CodeAgent{BaseAgent: base}
 }
 

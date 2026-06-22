@@ -27,8 +27,10 @@ type AgentServer struct {
 	subs     map[string]map[int]chan Progress // agentID → subscriber id → channel
 	results  map[string]TaskResult            // taskID → last result (for tasks/status)
 	tasks    map[string]string                // taskID → agentID
+	chats    map[string]*DirectChat           // agentID → direct chat
 	nextSub  int
 	mux      *http.ServeMux
+	bus      *MessageBus // optional; published to + given to direct chats
 }
 
 // NewAgentServer constructs an empty server with its routes installed.
@@ -39,6 +41,7 @@ func NewAgentServer() *AgentServer {
 		subs:     map[string]map[int]chan Progress{},
 		results:  map[string]TaskResult{},
 		tasks:    map[string]string{},
+		chats:    map[string]*DirectChat{},
 		mux:      http.NewServeMux(),
 	}
 	// Per-agent routes use a single catch-all so registration doesn't need to
@@ -49,12 +52,21 @@ func NewAgentServer() *AgentServer {
 	return s
 }
 
-// Register adds an agent, making its rpc/events/card routes live.
+// SetBus wires a MessageBus the server publishes to and gives to each agent's
+// DirectChat. Call before Register so chats are bus-aware.
+func (s *AgentServer) SetBus(bus *MessageBus) {
+	s.mu.Lock()
+	s.bus = bus
+	s.mu.Unlock()
+}
+
+// Register adds an agent, making its rpc/events/card/chat routes live.
 func (s *AgentServer) Register(agent Agent) {
 	id := agent.Card().ID
 	s.mu.Lock()
 	s.agents[id] = agent
 	s.subs[id] = map[int]chan Progress{}
+	s.chats[id] = NewDirectChat(agent, s.bus)
 	s.mu.Unlock()
 }
 
@@ -98,9 +110,52 @@ func (s *AgentServer) route(w http.ResponseWriter, r *http.Request) {
 		s.handleSSE(id, w, r)
 	case "card":
 		s.handleCard(id, w)
+	case "chat":
+		s.handleChat(id, w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// DirectChatFor returns an agent's DirectChat (nil when unknown).
+func (s *AgentServer) DirectChatFor(agentID string) *DirectChat {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.chats[agentID]
+}
+
+// handleChat serves POST /a2a/agents/<id>/chat: {session_id, message} → reply.
+func (s *AgentServer) handleChat(agentID string, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		http.Error(w, "session_id + message required", http.StatusBadRequest)
+		return
+	}
+	s.mu.RLock()
+	chat := s.chats[agentID]
+	s.mu.RUnlock()
+	if chat == nil {
+		http.Error(w, "agent has no direct chat", http.StatusNotFound)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	reply, err := chat.Send(ctx, req.SessionID, req.Message)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"response": reply, "agent_id": agentID, "timestamp": time.Now(),
+	})
 }
 
 // handleList serves GET /a2a/agents.

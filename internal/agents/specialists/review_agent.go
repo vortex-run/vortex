@@ -45,6 +45,7 @@ func NewReviewAgent(base *BaseAgent) *ReviewAgent {
 	if base.card.Capabilities == nil {
 		base.card.Capabilities = []string{"code_review", "security_check", "quality_score", "approve"}
 	}
+	base.SetSystemPrompt(reviewSystemPrompt)
 	return &ReviewAgent{BaseAgent: base}
 }
 

@@ -27,11 +27,12 @@ type ToolFunc func(ctx context.Context, name string, params map[string]any) (any
 // card, an AI gateway, a tool executor, an A2A client to call peers, and the
 // working directory.
 type BaseAgent struct {
-	card    a2a.AgentCard
-	gateway AIGateway
-	runTool ToolFunc
-	client  *a2a.AgentClient
-	workDir string
+	card      a2a.AgentCard
+	gateway   AIGateway
+	runTool   ToolFunc
+	client    *a2a.AgentClient
+	workDir   string
+	sysPrompt string // the agent's role system prompt (for direct chat)
 }
 
 // NewBaseAgent constructs a BaseAgent. runTool may be nil for agents that do
@@ -48,6 +49,23 @@ func (b *BaseAgent) Card() a2a.AgentCard { return b.card }
 
 // SetStatus updates the card's live status.
 func (b *BaseAgent) SetStatus(status string) { b.card.Status = status }
+
+// SetSystemPrompt records the agent's role system prompt so direct chat
+// answers in character.
+func (b *BaseAgent) SetSystemPrompt(p string) { b.sysPrompt = p }
+
+// Chat answers a user message directly (not as a task), using the agent's own
+// system prompt plus the supplied conversation context. Implements a2a.Chatter.
+func (b *BaseAgent) Chat(ctx context.Context, taskContext, userMessage string) (string, error) {
+	if b.gateway == nil {
+		return "", fmt.Errorf("specialists: no AI gateway for direct chat")
+	}
+	prompt := userMessage
+	if taskContext != "" {
+		prompt = "Conversation so far:\n" + taskContext + "\nUser: " + userMessage
+	}
+	return b.gateway.Complete(ctx, prompt, b.sysPrompt)
+}
 
 // WorkDir returns the agent's working directory.
 func (b *BaseAgent) WorkDir() string { return b.workDir }

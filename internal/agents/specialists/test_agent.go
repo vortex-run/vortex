@@ -42,6 +42,7 @@ func NewTestAgent(base *BaseAgent) *TestAgent {
 	if base.card.Capabilities == nil {
 		base.card.Capabilities = []string{"run_tests", "analyze_results", "write_tests"}
 	}
+	base.SetSystemPrompt(testSystemPrompt)
 	return &TestAgent{BaseAgent: base}
 }
 
