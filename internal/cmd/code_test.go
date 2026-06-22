@@ -25,7 +25,7 @@ func TestCode_CommandRegisters(t *testing.T) {
 
 func TestCode_Flags(t *testing.T) {
 	c := newCodeCommand()
-	for _, flag := range []string{"dir", "model", "no-team", "addr", "key"} {
+	for _, flag := range []string{"dir", "model", "no-team", "solo", "team", "init", "addr", "key"} {
 		if c.Flags().Lookup(flag) == nil {
 			t.Errorf("--%s flag missing", flag)
 		}
@@ -37,7 +37,7 @@ func TestCode_ExitsCleanlyWhenServerNotRunning(t *testing.T) {
 	// error, never hang or open the TUI.
 	done := make(chan error, 1)
 	go func() {
-		done <- runCode("http://127.0.0.1:1", "k", "", "", false)
+		done <- runCode("http://127.0.0.1:1", "k", "", "", false, false)
 	}()
 	select {
 	case err := <-done:

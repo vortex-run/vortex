@@ -82,10 +82,11 @@ type CodeModel struct {
 	cost     *tui.AICostData
 
 	sessionID   string
-	project     string // project dir shown in the header
-	model       string // AI model override shown in the header
-	team        bool   // multi-agent orchestration (default true)
-	working     bool   // a task is in flight
+	project     string       // project dir shown in the header
+	model       string       // AI model override shown in the header
+	projectInfo *ProjectInfo // AGENTS.md summary shown in the PROJECT panel
+	team        bool         // multi-agent orchestration (default true)
+	working     bool         // a task is in flight
 	workStart   time.Time
 	costAtStart float64
 	paused      bool
@@ -108,6 +109,21 @@ func WithModel(model string) CodeOption { return func(m *CodeModel) { m.model = 
 
 // WithoutTeam disables multi-agent orchestration (single-agent mode).
 func WithoutTeam() CodeOption { return func(m *CodeModel) { m.team = false } }
+
+// WithTeam forces multi-agent team mode on.
+func WithTeam() CodeOption { return func(m *CodeModel) { m.team = true } }
+
+// ProjectInfo is the AGENTS.md summary shown in the PROJECT panel.
+type ProjectInfo struct {
+	Name    string
+	Stack   []string
+	TestCmd string
+}
+
+// WithProjectInfo sets the AGENTS.md summary shown in the left panel.
+func WithProjectInfo(info *ProjectInfo) CodeOption {
+	return func(m *CodeModel) { m.projectInfo = info }
+}
 
 // Standalone marks the model as the root of its own program (`vortex code`):
 // q quits the program instead of being typed.
@@ -511,9 +527,14 @@ func (m CodeModel) quitHint() string {
 	return ""
 }
 
-// renderHeader renders the top bar: VORTEX CODE, project, provider, cost.
+// renderHeader renders the top bar: VORTEX CODE, team/solo, project, cost.
 func (m CodeModel) renderHeader() string {
 	parts := []string{brand.StyleTitle.Render("▲ VORTEX CODE")}
+	if m.team {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).Render("👥 Team"))
+	} else {
+		parts = append(parts, brand.StyleSubtitle.Render("👤 Solo"))
+	}
 	if m.project != "" {
 		parts = append(parts, brand.StyleSubtitle.Render(m.project))
 	}
@@ -544,10 +565,27 @@ func (m CodeModel) renderSidebar() string {
 	}
 
 	sec("AGENTS")
-	for _, a := range m.agents {
+	// Team mode shows the 4-agent roster; solo mode shows a single agent.
+	roster := m.agents
+	if !m.team {
+		roster = []CodeAgentStatus{{Name: "Agent", Role: "all", Status: m.agents[0].Status}}
+	}
+	for _, a := range roster {
 		b.WriteString(fmt.Sprintf("%s %-12s %s\n", agentIcon(a.Status), a.Name, brand.StyleSubtitle.Render(a.Status)))
 	}
 	div()
+
+	if m.projectInfo != nil {
+		sec("PROJECT")
+		b.WriteString(brand.IconFolder + " " + truncateStr(m.projectInfo.Name, codeSidebarWidth-4) + "\n")
+		if len(m.projectInfo.Stack) > 0 {
+			b.WriteString(brand.StyleSubtitle.Render(truncateStr(strings.Join(m.projectInfo.Stack, " · "), codeSidebarWidth-2)) + "\n")
+		}
+		if m.projectInfo.TestCmd != "" {
+			b.WriteString(brand.StyleSubtitle.Render("Tests: "+truncateStr(m.projectInfo.TestCmd, codeSidebarWidth-9)) + "\n")
+		}
+		div()
+	}
 
 	sec("MEMORY")
 	if m.stats != nil {
@@ -677,6 +715,8 @@ func (m CodeModel) HelpOpen() bool                 { return m.helpOpen }
 func (m CodeModel) Activity() []ActivityEntry      { return m.activity }
 func (m CodeModel) AgentRoster() []CodeAgentStatus { return m.agents }
 func (m CodeModel) Progress() TaskProgress         { return m.progress }
+func (m CodeModel) TeamMode() bool                 { return m.team }
+func (m CodeModel) ProjectInfo() *ProjectInfo      { return m.projectInfo }
 
 // maxInt2 returns the larger of a and b.
 func maxInt2(a, b int) int {

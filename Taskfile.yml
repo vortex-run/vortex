@@ -173,6 +173,18 @@ tasks:
     cmds:
       - '"{{.BIN}}" code'
 
+  code:init:
+    desc: "Generate AGENTS.md for the current project"
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" code --init'
+
+  code:team:
+    desc: "Start VORTEX coding with the specialist agent team"
+    deps: [build]
+    cmds:
+      - '"{{.BIN}}" code --team'
+
   tag:
     desc: "Create and push a release tag (usage: task tag VERSION=v0.1.0)"
     requires:
