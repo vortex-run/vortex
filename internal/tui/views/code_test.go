@@ -307,3 +307,68 @@ func TestCode_ElapsedShownWhileWorking(t *testing.T) {
 		t.Errorf("elapsed time missing:\n%s", out)
 	}
 }
+
+func TestCode_TeamModeHeader(t *testing.T) {
+	m := sizedCode(WithTeam(), WithProject(`S:\proj`))
+	out := m.View()
+	if !strings.Contains(out, "👥 Team") {
+		t.Errorf("team mode header should show 👥 Team:\n%s", out)
+	}
+	if !m.TeamMode() {
+		t.Error("WithTeam should enable team mode")
+	}
+}
+
+func TestCode_SoloModeHeader(t *testing.T) {
+	m := sizedCode(WithoutTeam(), WithProject(`S:\proj`))
+	out := m.View()
+	if !strings.Contains(out, "👤 Solo") {
+		t.Errorf("solo mode header should show 👤 Solo:\n%s", out)
+	}
+	if m.TeamMode() {
+		t.Error("WithoutTeam should disable team mode")
+	}
+}
+
+func TestCode_SoloShowsSingleAgent(t *testing.T) {
+	m := sizedCode(WithoutTeam())
+	side := m.renderSidebar()
+	// Solo mode collapses the roster to one "Agent" entry.
+	if !strings.Contains(side, "Agent") {
+		t.Errorf("solo roster should show a single Agent:\n%s", side)
+	}
+	if strings.Contains(side, "Test Agent") || strings.Contains(side, "Review") {
+		t.Errorf("solo mode should not list the specialist roster:\n%s", side)
+	}
+}
+
+func TestCode_TeamShowsFullRoster(t *testing.T) {
+	m := sizedCode(WithTeam())
+	side := m.renderSidebar()
+	for _, want := range []string{"Coordinator", "Code Agent", "Test Agent", "Review"} {
+		if !strings.Contains(side, want) {
+			t.Errorf("team roster missing %q:\n%s", want, side)
+		}
+	}
+}
+
+func TestCode_ProjectPanel(t *testing.T) {
+	info := &ProjectInfo{Name: "FastAPI Auth", Stack: []string{"Python", "FastAPI", "PG"}, TestCmd: "pytest tests/"}
+	m := sizedCode(WithProjectInfo(info))
+	if m.ProjectInfo() == nil || m.ProjectInfo().Name != "FastAPI Auth" {
+		t.Fatalf("project info not set: %+v", m.ProjectInfo())
+	}
+	side := m.renderSidebar()
+	for _, want := range []string{"PROJECT", "FastAPI Auth", "Python", "pytest tests/"} {
+		if !strings.Contains(side, want) {
+			t.Errorf("PROJECT panel missing %q:\n%s", want, side)
+		}
+	}
+}
+
+func TestCode_NoProjectPanelWhenAbsent(t *testing.T) {
+	m := sizedCode(WithTeam())
+	if strings.Contains(m.renderSidebar(), "PROJECT") {
+		t.Error("PROJECT panel should not render without AGENTS.md info")
+	}
+}
