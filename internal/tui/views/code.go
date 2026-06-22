@@ -94,8 +94,49 @@ type CodeModel struct {
 	helpOpen    bool
 	standalone  bool // running as `vortex code` (q quits the program)
 
+	// --- three-panel collaboration state (AG-UI) ---
+	comms         []CommsEntry  // middle panel: inter-agent messages
+	selectedAgent string        // which agent the right-panel chat targets
+	chat          []ChatLine    // right panel: conversation with selectedAgent
+	checkpoint    *CheckpointUI // active checkpoint review (nil = none)
+	viewingFile   int           // index into checkpoint.Files (-1 = none)
+
 	width  int
 	height int
+}
+
+// CommsEntry is one inter-agent message in the middle panel.
+type CommsEntry struct {
+	Time    time.Time
+	From    string
+	To      string
+	Kind    string // message|checkpoint|approved|rejected|edited
+	Content string
+}
+
+// ChatLine is one turn in the right-panel direct chat.
+type ChatLine struct {
+	Role    string // user|agent
+	Agent   string
+	Content string
+}
+
+// CheckpointUI is the active checkpoint shown in the right panel.
+type CheckpointUI struct {
+	ID          string
+	Title       string
+	Description string
+	FromAgent   string
+	ToAgent     string
+	Files       []CheckpointFile
+}
+
+// CheckpointFile is one file in a checkpoint review.
+type CheckpointFile struct {
+	Path    string
+	Content string
+	Lines   int
+	IsNew   bool
 }
 
 // CodeOption configures NewCode.
@@ -129,6 +170,18 @@ func WithProjectInfo(info *ProjectInfo) CodeOption {
 // q quits the program instead of being typed.
 func Standalone() CodeOption { return func(m *CodeModel) { m.standalone = true } }
 
+// CommsMsg feeds an inter-agent message into the middle panel.
+type CommsMsg CommsEntry
+
+// CheckpointMsg activates checkpoint review in the right panel.
+type CheckpointMsg CheckpointUI
+
+// DirectReplyMsg delivers an agent's direct-chat reply to the right panel.
+type DirectReplyMsg struct {
+	Agent   string
+	Content string
+}
+
 // NewCode constructs the coding interface model.
 func NewCode(client *tui.Client, opts ...CodeOption) CodeModel {
 	in := textinput.New()
@@ -137,12 +190,14 @@ func NewCode(client *tui.Client, opts ...CodeOption) CodeModel {
 	in.Focus()
 
 	m := CodeModel{
-		client:    client,
-		input:     in,
-		viewport:  viewport.New(0, 0),
-		spin:      tui.Spinner(),
-		team:      true,
-		sessionID: fmt.Sprintf("code-%d", time.Now().UnixMilli()),
+		client:        client,
+		input:         in,
+		viewport:      viewport.New(0, 0),
+		spin:          tui.Spinner(),
+		team:          true,
+		selectedAgent: "coordinator",
+		viewingFile:   -1,
+		sessionID:     fmt.Sprintf("code-%d", time.Now().UnixMilli()),
 		agents: []CodeAgentStatus{
 			{Name: "Coordinator", Role: "plans + routes", Status: "ready"},
 			{Name: "Code Agent", Role: "writes code", Status: "ready"},
@@ -156,6 +211,25 @@ func NewCode(client *tui.Client, opts ...CodeOption) CodeModel {
 	}
 	m.addEntry("system", "Session started", "message")
 	return m
+}
+
+// agentIDByIndex maps the 1-4 selection keys to agent ids.
+var agentIDByIndex = []string{"coordinator", "code-agent", "test-agent", "review-agent"}
+
+// selectAgentName returns the display name of the currently selected chat agent.
+func (m CodeModel) selectAgentName() string {
+	switch m.selectedAgent {
+	case "coordinator":
+		return "Coordinator"
+	case "code-agent":
+		return "Code Agent"
+	case "test-agent":
+		return "Test Agent"
+	case "review-agent":
+		return "Review Agent"
+	default:
+		return m.selectedAgent
+	}
 }
 
 // codeTick schedules the next stats refresh.
@@ -271,6 +345,12 @@ func appendUnique(list []string, s string) []string {
 
 // Update handles keys, replies, and refreshes.
 func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Three-panel collaboration messages + selection/checkpoint keys are handled
+	// first; if consumed, the standard handling is skipped.
+	if updated, handled := m.HandleAGUI(msg); handled {
+		return updated, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -372,7 +452,16 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		text := strings.TrimSpace(m.input.Value())
-		if text == "" || m.working {
+		if text == "" {
+			return m, nil
+		}
+		// Chatting with a specific agent → direct chat (does not start a task).
+		if m.team && m.selectedAgent != "coordinator" {
+			m.chat = append(m.chat, ChatLine{Role: "user", Content: text})
+			m.input.Reset()
+			return m, m.sendDirectChat(m.selectedAgent, text)
+		}
+		if m.working {
 			return m, nil
 		}
 		m.addEntry("user", text, "message")
@@ -496,25 +585,35 @@ func (m CodeModel) View() string {
 		return m.renderHelp()
 	}
 	header := m.renderHeader()
-	left := m.renderSidebar()
-	feed := m.viewport.View()
-	if feed == "" {
-		feed = m.renderFeed()
+	var body string
+	if m.team {
+		// Three-panel collaboration layout: roster | comms | chat/checkpoint.
+		body = m.renderThreePanel()
+	} else {
+		left := m.renderSidebar()
+		feed := m.viewport.View()
+		if feed == "" {
+			feed = m.renderFeed()
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, " "+brand.IconVSep+" ", feed)
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " "+brand.IconVSep+" ", feed)
+
+	// Bottom bar: who you're chatting with + the input.
+	chatting := brand.StyleSubtitle.Render("Chatting with: ") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor(m.selectedAgent))).Render(m.selectAgentName())
 	inputLine := m.input.View()
 	if m.working {
 		inputLine = m.spin.View() + " Working...  " + inputLine
 	}
-	footer := brand.StyleHelp.Render("[Enter] Send  [Esc] Toggle input  [P] Pause  [S] Stop  [T] Telegram  [?] Help" + m.quitHint())
+	footer := brand.StyleHelp.Render("[1-4] Switch agent  [C] Checkpoint  [P] Pause  [S] Stop  [T] Telegram  [?] Help" + m.quitHint())
 
 	var overlay string
 	if m.confirmStop {
 		overlay = m.renderStopConfirm()
 	}
-	parts := []string{header, body, inputLine, footer}
+	parts := []string{header, body, chatting, inputLine, footer}
 	if overlay != "" {
-		parts = []string{header, overlay, inputLine, footer}
+		parts = []string{header, overlay, chatting, inputLine, footer}
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }

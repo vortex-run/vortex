@@ -484,6 +484,35 @@ func (c *Client) Notify(title, body string) error {
 	return nil
 }
 
+// AgentChat sends a direct-chat message to a specific agent and returns its
+// reply (POST /api/agents/<id>/chat — the agent-teams collaboration layer).
+func (c *Client) AgentChat(agentID, sessionID, message string) (string, error) {
+	payload, _ := json.Marshal(map[string]string{"session_id": sessionID, "message": message})
+	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	defer cancel()
+	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/"+agentID+"/chat", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	chatClient := &http.Client{Timeout: submitTimeout}
+	resp, err := chatClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tui: agent chat returned %d", resp.StatusCode)
+	}
+	var out struct {
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Response, nil
+}
+
 // Reload triggers a config reload via the control plane.
 func (c *Client) Reload() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)
