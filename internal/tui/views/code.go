@@ -102,6 +102,9 @@ type CodeModel struct {
 
 	// editor is the active inline checkpoint-file editor (nil = none).
 	editor *checkpointEditor
+	// checkpointFlashUntil flashes the top bar amber until this time (set when a
+	// checkpoint fires).
+	checkpointFlashUntil time.Time
 	// pendingCmd carries a command produced by HandleAGUI (e.g. a checkpoint
 	// approve/reject/edit POST) back to the Update loop.
 	pendingCmd tea.Cmd
@@ -571,6 +574,14 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// A pending checkpoint blocks all input except its review keys (V/E/A/R/S),
+	// which are consumed earlier by handleAGUIKey. Anything reaching here while a
+	// checkpoint is active (and no editor is open) is swallowed, so the user must
+	// act on the checkpoint. ctrl+c still quits.
+	if m.checkpoint != nil && m.editor == nil && key != "ctrl+c" {
+		return m, nil
+	}
+
 	// Stop confirmation owns the keyboard while visible.
 	if m.confirmStop {
 		switch strings.ToLower(key) {
@@ -884,6 +895,21 @@ func (m CodeModel) quitHint() string {
 
 // renderHeader renders the top bar: VORTEX CODE, team/solo, project, cost.
 func (m CodeModel) renderHeader() string {
+	// Amber flash + REVIEW NEEDED banner while a checkpoint is pending (and for
+	// 2s after it fires, to catch the eye).
+	if m.checkpoint != nil {
+		amber := lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorWarning)).Bold(true)
+		title := "▲ VORTEX CODE"
+		if time.Now().Before(m.checkpointFlashUntil) {
+			title = amber.Render(title)
+		} else {
+			title = brand.StyleTitle.Render(title)
+		}
+		banner := amber.Render("⏸ REVIEW NEEDED") + " " +
+			brand.StyleSubtitle.Render(strings.Repeat(brand.IconSep, maxInt2(m.width-30, 4)))
+		return lipgloss.JoinHorizontal(lipgloss.Left, title, "  ", banner)
+	}
+
 	parts := []string{brand.StyleTitle.Render("▲ VORTEX CODE")}
 	if m.team {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).Render("👥 Team"))

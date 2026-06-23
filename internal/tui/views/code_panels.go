@@ -118,10 +118,14 @@ func (m CodeModel) HandleAGUI(msg tea.Msg) (CodeModel, bool) {
 		cp := CheckpointUI(msg)
 		m.checkpoint = &cp
 		m.viewingFile = -1
+		m.input.Blur()                                           // so the V/E/A/R/S review keys are immediately active
+		m.checkpointFlashUntil = time.Now().Add(2 * time.Second) // amber top-bar flash
 		m.comms = append(m.comms, CommsEntry{
 			Time: time.Now(), From: cp.FromAgent, To: "user", Kind: "checkpoint",
 			Content: cp.Description,
 		})
+		// Ring the terminal bell so an away-from-keyboard user is alerted.
+		m.pendingCmd = ringBell
 		return m, true
 	case DirectReplyMsg:
 		m.chat = append(m.chat, ChatLine{Role: "agent", Agent: msg.Agent, Content: msg.Content})
@@ -227,6 +231,13 @@ func (m *CodeModel) recordCheckpoint(status, label string) {
 	m.viewingFile = -1
 }
 
+// ringBell emits the terminal bell (\a) so the user is alerted to a checkpoint
+// even when away from the screen.
+func ringBell() tea.Msg {
+	fmt.Print("\a")
+	return nil
+}
+
 // renderThreePanel composes the LEFT (roster) | MIDDLE (comms) | RIGHT (chat
 // or checkpoint) layout.
 func (m CodeModel) renderThreePanel() string {
@@ -327,24 +338,48 @@ func (m CodeModel) renderChat() string {
 	return lipgloss.NewStyle().Width(w).Render(b.String())
 }
 
-// renderCheckpoint renders the right-panel checkpoint review box.
+// renderCheckpoint renders the right-panel checkpoint review as a bold,
+// unmissable boxed overlay.
 func (m CodeModel) renderCheckpoint() string {
 	cp := m.checkpoint
+	w := maxInt2(m.width-codeSidebarWidth-commsPanelWidth-10, 36)
+	amber := lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorWarning)).Bold(true)
+
 	var b strings.Builder
-	b.WriteString(brand.StyleWarn.Render("⏸ CHECKPOINT — Review before continuing") + "\n\n")
-	b.WriteString(cp.Description + "\n\n")
+	b.WriteString(amber.Render("⏸  CHECKPOINT — Your review is needed") + "\n")
+	b.WriteString(brand.StyleSubtitle.Render(strings.Repeat(brand.IconSep, minInt(w, 44))) + "\n\n")
+	if cp.Description != "" {
+		b.WriteString(cp.Description + "\n\n")
+	}
 	b.WriteString("Files produced:\n")
 	for _, f := range cp.Files {
-		tag := "MODIFIED"
-		if f.IsNew {
-			tag = "NEW"
+		tag := lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorSuccess)).Render("NEW")
+		if !f.IsNew {
+			tag = brand.StyleSubtitle.Render("MODIFIED")
 		}
-		fmt.Fprintf(&b, "%s %s (%s — %d lines)\n", brand.IconFile, f.Path, tag, f.Lines)
+		fmt.Fprintf(&b, "%s %-24s %s %s\n", brand.IconFile, f.Path,
+			brand.StyleSubtitle.Render(fmt.Sprintf("(%d lines)", f.Lines)), tag)
 	}
 	b.WriteString("\n")
-	b.WriteString(brand.StyleHelp.Render("[V] View  [E] Edit  [A] Approve  [R] Reject  [S] Skip"))
-	box := brand.StyleApproval.Padding(1, 2).Render(b.String())
-	return box
+	b.WriteString(brand.StyleHelp.Render("[V] View file") + "\n")
+	b.WriteString(brand.StyleHelp.Render("[E] Edit file") + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorSuccess)).Render("[A] Approve") +
+		brand.StyleSubtitle.Render(" — continue to "+agentDisplayName(cp.ToAgent)) + "\n")
+	b.WriteString(brand.StyleError.Render("[R] Reject") +
+		brand.StyleSubtitle.Render(" — stop the pipeline") + "\n")
+
+	return brand.StyleApproval.Padding(1, 2).Width(maxInt2(w-4, 30)).Render(b.String())
+}
+
+// agentDisplayName maps an agent id to a friendly name for the checkpoint box.
+func agentDisplayName(id string) string {
+	if name, ok := rosterNameByID[id]; ok {
+		return name
+	}
+	if id == "" {
+		return "the next agent"
+	}
+	return id
 }
 
 // renderFileViewer renders a scrollable file content overlay (line-numbered).

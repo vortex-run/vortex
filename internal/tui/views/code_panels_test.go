@@ -343,6 +343,44 @@ func TestCode_CoordinatorReplyShownInChat(t *testing.T) {
 	}
 }
 
+func TestCode_CheckpointOverlayAndFlash(t *testing.T) {
+	m := sizedCode(WithTeam())
+	m, _ = m.HandleAGUI(CheckpointMsg{
+		ID: "cp-1", Description: "Code Agent finished. Test Agent is next.",
+		FromAgent: "code-agent", ToAgent: "test-agent",
+		Files: []CheckpointFile{{Path: "app.py", Lines: 124, IsNew: true}},
+	})
+	// Amber REVIEW NEEDED banner in the header, full overlay in the right panel.
+	out := m.View()
+	for _, want := range []string{"REVIEW NEEDED", "CHECKPOINT — Your review is needed", "app.py", "[A] Approve", "[E] Edit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("checkpoint UI missing %q", want)
+		}
+	}
+	// The flash window is set ~2s ahead.
+	if m.checkpointFlashUntil.IsZero() {
+		t.Error("checkpoint should set the amber flash window")
+	}
+}
+
+func TestCode_CheckpointBlocksInput(t *testing.T) {
+	m := sizedCodeWithCheckpoint(t)
+	m.input.SetValue("")
+	// A non-review key (e.g. 'x') must be swallowed while a checkpoint is pending.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = updated.(CodeModel)
+	if m.input.Value() != "" {
+		t.Errorf("input should be blocked during a checkpoint, got %q", m.input.Value())
+	}
+	// The checkpoint review keys still work (A approves).
+	m = blurred(m)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = updated.(CodeModel)
+	if m.CheckpointActive() {
+		t.Error("A should still resolve the checkpoint while input is blocked")
+	}
+}
+
 func TestCode_CheckpointEditOpensEditor(t *testing.T) {
 	m := blurred(sizedCodeWithCheckpoint(t))
 	// E opens the inline editor for the checkpoint file.
