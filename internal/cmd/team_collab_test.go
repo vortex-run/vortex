@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/vortex-run/vortex/internal/agents"
 )
 
 // newCollab builds a teamCollab over a real bus + checkpoint manager (no agents
@@ -56,6 +57,35 @@ func TestTeamCollab_ChatUnknownAgent(t *testing.T) {
 	c := newCollab()
 	if _, err := c.Chat(context.Background(), "ghost", "s", "hi"); err == nil {
 		t.Error("Chat to an unregistered agent should error")
+	}
+}
+
+func TestTeamCollab_ChatCoordinatorRoutesToCoordinator(t *testing.T) {
+	// With a real coordinator wired, "coordinator" must NOT fall through to the
+	// A2A DirectChatFor lookup (which would 502) — it routes to HandleMessage.
+	c := newCollab()
+	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
+		Bus:       agents.NewBus(),
+		AIGateway: agents.StubAIGateway{AnswerReply: "I coordinate the team."},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.coordinator = coord
+
+	reply, err := c.Chat(context.Background(), "coordinator", "s1", "what can you do?")
+	if err != nil {
+		t.Fatalf("coordinator chat errored (the 502 bug): %v", err)
+	}
+	if reply == "" {
+		t.Error("coordinator chat returned an empty reply")
+	}
+}
+
+func TestTeamCollab_ChatCoordinatorNilErrors(t *testing.T) {
+	c := newCollab() // no coordinator wired
+	if _, err := c.Chat(context.Background(), "coordinator", "s", "hi"); err == nil {
+		t.Error("coordinator chat with no coordinator should error cleanly, not panic")
 	}
 }
 

@@ -334,7 +334,7 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 	})
 
 	// Collaboration API: comms feed + SSE, direct chat, checkpoint review.
-	collab := &teamCollab{server: a2aServer, bus: bus, checkpoints: checkpoints}
+	collab := &teamCollab{server: a2aServer, bus: bus, checkpoints: checkpoints, coordinator: rt.Coordinator()}
 	apiSrv.SetCommsProvider(collab)
 	apiSrv.SetChatProvider(collab)
 	apiSrv.SetCheckpointProvider(collab)
@@ -363,6 +363,7 @@ type teamCollab struct {
 	server      *a2a.AgentServer
 	bus         *a2a.MessageBus
 	checkpoints *a2a.CheckpointManager
+	coordinator *agents.Coordinator // for "coordinator" direct chat (not an A2A agent)
 }
 
 // History returns the recent comms feed as api.CommsRecord values.
@@ -391,8 +392,15 @@ func (t *teamCollab) Subscribe() (<-chan api.CommsRecord, func()) {
 	return out, unsub
 }
 
-// Chat routes a direct-chat message to a registered specialist.
+// Chat routes a direct-chat message to a registered specialist, or to the
+// coordinator (which is not an A2A agent) via its HandleMessage entry point.
 func (t *teamCollab) Chat(ctx context.Context, agentID, sessionID, message string) (string, error) {
+	if agentID == "coordinator" {
+		if t.coordinator == nil {
+			return "", fmt.Errorf("coordinator chat not available")
+		}
+		return t.coordinator.HandleMessage(ctx, message, sessionID)
+	}
 	dc := t.server.DirectChatFor(agentID)
 	if dc == nil {
 		return "", fmt.Errorf("unknown agent: %s", agentID)
