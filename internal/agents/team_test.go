@@ -23,7 +23,7 @@ func (g *scriptedGateway) Complete(_ context.Context, _, system string) (string,
 	defer g.mu.Unlock()
 	low := strings.ToLower(system)
 	switch {
-	case strings.Contains(low, "step-by-step plan"):
+	case strings.Contains(low, "task planner"):
 		return g.planReply, nil
 	case strings.Contains(low, "code reviewer"):
 		return g.reviewRpl, nil
@@ -108,14 +108,54 @@ func TestTeam_DefaultPlan(t *testing.T) {
 }
 
 func TestTeam_AIPlan(t *testing.T) {
+	// A non-coding goal accepts the AI plan verbatim (even a single step).
 	gw := &scriptedGateway{planReply: `{"steps":[{"agent_role":"coder","goal":"do it"}]}`}
 	team := newTestTeam(t, gw, map[string]string{}, "")
-	plan, err := team.Plan(context.Background(), "build x", "s1", gw)
+	plan, err := team.Plan(context.Background(), "explain x", "s1", gw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plan.Steps) != 1 || plan.Steps[0].Goal != "do it" {
 		t.Errorf("AI plan = %+v", plan.Steps)
+	}
+}
+
+func TestTeam_CodingPlanAlwaysThreeSteps(t *testing.T) {
+	// A coding goal must always yield the full coder→tester→reviewer pipeline so
+	// checkpoints fire between steps — even when the AI collapses to one step.
+	gw := &scriptedGateway{planReply: `{"steps":[{"agent_role":"coder","goal":"just code it"}]}`}
+	team := newTestTeam(t, gw, map[string]string{}, "")
+	plan, err := team.Plan(context.Background(), "build a flask calculator", "s1", gw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 3 {
+		t.Fatalf("coding plan = %d steps, want 3: %+v", len(plan.Steps), plan.Steps)
+	}
+	roles := []string{plan.Steps[0].AgentRole, plan.Steps[1].AgentRole, plan.Steps[2].AgentRole}
+	if roles[0] != "coder" || roles[1] != "tester" || roles[2] != "reviewer" {
+		t.Errorf("roles = %v, want [coder tester reviewer]", roles)
+	}
+}
+
+func TestTeam_CodingPlanFallbackNoGateway(t *testing.T) {
+	team := newTestTeam(t, &scriptedGateway{}, map[string]string{}, "")
+	plan, _ := team.Plan(context.Background(), "create a web scraper", "s1", nil)
+	if len(plan.Steps) != 3 {
+		t.Errorf("coding fallback = %d steps, want 3", len(plan.Steps))
+	}
+}
+
+func TestIsCodingGoal(t *testing.T) {
+	for _, g := range []string{"build a server", "create x", "fix the bug", "implement auth", "refactor main.go"} {
+		if !isCodingGoal(g) {
+			t.Errorf("isCodingGoal(%q) = false, want true", g)
+		}
+	}
+	for _, g := range []string{"what is 2+2", "explain this code", "how does http work"} {
+		if isCodingGoal(g) {
+			t.Errorf("isCodingGoal(%q) = true, want false", g)
+		}
 	}
 }
 

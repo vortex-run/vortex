@@ -147,15 +147,51 @@ type TeamPlan struct {
 	Steps     []TeamStep `json:"steps"`
 }
 
-// planSystemPrompt asks the AI to plan using the available specialist roles.
-const planSystemPrompt = `Create a step-by-step plan using these specialist agents: coder, tester, reviewer.
-Return ONLY JSON, no prose:
-{"steps":[{"agent_role":"coder","goal":"...","depends_on":[]}]}`
+// planSystemPrompt asks the AI to plan using the available specialist roles. It
+// mandates the full coder → tester → reviewer pipeline for any file-touching
+// task so checkpoints fire between steps (collapsing to one step would skip
+// them).
+const planSystemPrompt = `You are a task planner for VORTEX. Break EVERY coding request into exactly these three steps unless the request is trivially simple (e.g. "what is 2+2"):
 
-// Plan asks the AI for a pipeline, falling back to the default coder→tester→
-// reviewer plan when the AI is unavailable or returns nothing usable.
+Step 1: coder — write the implementation
+Step 2: tester — run tests and verify it works
+Step 3: reviewer — review code quality and security
+
+ALWAYS use all 3 steps for any request that creates or modifies files. NEVER collapse to 1 step for a coding task.
+
+Return ONLY JSON, no prose:
+{"steps":[
+  {"agent_role":"coder","goal":"...","depends_on":[]},
+  {"agent_role":"tester","goal":"...","depends_on":["coder"]},
+  {"agent_role":"reviewer","goal":"...","depends_on":["tester"]}
+]}`
+
+// codingKeywords mark a goal as a file-touching coding task that must run the
+// full 3-step pipeline (so checkpoints fire).
+var codingKeywords = []string{
+	"build", "create", "write", "make", "implement", "develop", "add", "fix",
+	"refactor", "edit", "update", "generate", "scaffold",
+}
+
+// isCodingGoal reports whether the goal is a coding/file-touching request.
+func isCodingGoal(goal string) bool {
+	low := strings.ToLower(goal)
+	for _, k := range codingKeywords {
+		if strings.Contains(low, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// Plan asks the AI for a pipeline. For coding requests it guarantees the full
+// coder→tester→reviewer plan (falling back to a hardcoded 3-step plan when the
+// AI is unavailable or returns fewer than 2 steps), so checkpoints always fire
+// between steps for real builds.
 func (t *AgentTeam) Plan(ctx context.Context, goal, sessionID string, gateway AIGateway) (*TeamPlan, error) {
 	plan := &TeamPlan{Goal: goal, SessionID: sessionID}
+	coding := isCodingGoal(goal)
+
 	if gateway != nil {
 		reply, err := gateway.Complete(ctx, goal, planSystemPrompt)
 		if err == nil {
@@ -163,13 +199,34 @@ func (t *AgentTeam) Plan(ctx context.Context, goal, sessionID string, gateway AI
 				Steps []TeamStep `json:"steps"`
 			}
 			if json.Unmarshal([]byte(stripJSONFences(reply)), &parsed) == nil && len(parsed.Steps) > 0 {
-				plan.Steps = parsed.Steps
-				return plan, nil
+				// For a coding task, reject a collapsed (<2 step) AI plan — it would
+				// skip the checkpoints. Fall through to the hardcoded 3-step plan.
+				if !coding || len(parsed.Steps) >= 2 {
+					plan.Steps = parsed.Steps
+					return plan, nil
+				}
 			}
 		}
 	}
-	plan.Steps = defaultSteps(goal)
+
+	// Hardcoded fallback: always a 3-step plan for coding requests; the generic
+	// default otherwise.
+	if coding {
+		plan.Steps = defaultCodingPlan(goal)
+	} else {
+		plan.Steps = defaultSteps(goal)
+	}
 	return plan, nil
+}
+
+// defaultCodingPlan returns the guaranteed 3-step coder→tester→reviewer plan for
+// a coding goal, used whenever the AI plan is missing or collapsed.
+func defaultCodingPlan(goal string) []TeamStep {
+	return []TeamStep{
+		{AgentRole: "coder", Goal: goal},
+		{AgentRole: "tester", Goal: "Test the implementation and verify it works", DependsOn: []string{"coder"}},
+		{AgentRole: "reviewer", Goal: "Review code quality and security", DependsOn: []string{"tester"}},
+	}
 }
 
 // defaultSteps is the standard coder → tester → reviewer pipeline.
