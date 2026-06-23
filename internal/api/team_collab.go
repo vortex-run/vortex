@@ -62,12 +62,19 @@ type ChatProvider interface {
 	Chat(ctx context.Context, agentID, sessionID, message string) (string, error)
 }
 
+// CheckpointFileEdit is one file edited by the user at a checkpoint.
+type CheckpointFileEdit struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // CheckpointProvider lists and resolves human checkpoints. Implemented by an
 // adapter over *a2a.CheckpointManager.
 type CheckpointProvider interface {
 	List() []CheckpointRecord
 	Approve(id string) error
 	Reject(id, reason string) error
+	Edit(id string, edits []CheckpointFileEdit) error
 }
 
 // SetCommsProvider wires the agent-communication feed (GET /api/agents/comms,
@@ -91,6 +98,7 @@ func (s *Server) registerTeamCollab(mux *http.ServeMux) {
 	mux.Handle("GET /api/checkpoints", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointsList)))
 	mux.Handle("POST /api/checkpoints/{id}/approve", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointApprove)))
 	mux.Handle("POST /api/checkpoints/{id}/reject", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointReject)))
+	mux.Handle("POST /api/checkpoints/{id}/edit", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointEdit)))
 }
 
 // handleComms returns the recent agent-communication feed as JSON.
@@ -219,6 +227,29 @@ func (s *Server) handleCheckpointReject(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "rejected"})
+}
+
+// handleCheckpointEdit applies user file edits and resolves the checkpoint as
+// edited, unblocking the pipeline with the edited content.
+func (s *Server) handleCheckpointEdit(w http.ResponseWriter, r *http.Request) {
+	if s.checkpoints == nil {
+		http.Error(w, "checkpoints not configured", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	var req struct {
+		Files []CheckpointFileEdit `json:"files"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Files) == 0 {
+		http.Error(w, "files required", http.StatusBadRequest)
+		return
+	}
+	if err := s.checkpoints.Edit(id, req.Files); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "edited"})
 }
 
 // parseLimit parses a positive integer query parameter, falling back to def.

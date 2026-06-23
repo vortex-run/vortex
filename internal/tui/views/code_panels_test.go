@@ -343,6 +343,51 @@ func TestCode_CoordinatorReplyShownInChat(t *testing.T) {
 	}
 }
 
+func TestCode_CheckpointEditOpensEditor(t *testing.T) {
+	m := blurred(sizedCodeWithCheckpoint(t))
+	// E opens the inline editor for the checkpoint file.
+	m, handled := m.HandleAGUI(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	if !handled || m.editor == nil {
+		t.Fatal("E should open the inline checkpoint editor")
+	}
+	if m.editor.path != "main.py" {
+		t.Errorf("editor path = %q, want main.py", m.editor.path)
+	}
+	out := m.View()
+	if !strings.Contains(out, "Editing: main.py") || !strings.Contains(out, "[Ctrl+S] Save") {
+		t.Errorf("editor view missing:\n%s", out)
+	}
+}
+
+func TestCode_CheckpointEditorEscCancels(t *testing.T) {
+	m := blurred(sizedCodeWithCheckpoint(t))
+	m, _ = m.HandleAGUI(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m, _ = m.HandleAGUI(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.editor != nil {
+		t.Error("Esc should close the editor")
+	}
+	// The checkpoint is still pending (cancel didn't resolve it).
+	if !m.CheckpointActive() {
+		t.Error("cancelling the editor should keep the checkpoint pending")
+	}
+}
+
+func TestCode_CheckpointEditorCtrlSProducesCommand(t *testing.T) {
+	m := blurred(sizedCodeWithCheckpoint(t))
+	m, _ = m.HandleAGUI(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m, _ = m.HandleAGUI(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if m.editor != nil {
+		t.Error("Ctrl+S should close the editor")
+	}
+	if m.pendingCmd == nil {
+		t.Error("Ctrl+S should queue a checkpoint-edit command")
+	}
+	// The checkpoint review is resolved locally (edited).
+	if m.CheckpointActive() {
+		t.Error("Ctrl+S should resolve the checkpoint")
+	}
+}
+
 // sizedCodeWithCheckpoint returns a team model with an active checkpoint.
 func sizedCodeWithCheckpoint(t *testing.T) CodeModel {
 	t.Helper()

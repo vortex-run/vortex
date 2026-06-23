@@ -596,6 +596,53 @@ func (c *Client) StreamComms(ctx context.Context) (<-chan CommsRecord, error) {
 	return out, nil
 }
 
+// ApproveCheckpoint approves a pending checkpoint, unblocking the pipeline.
+func (c *Client) ApproveCheckpoint(id string) error {
+	return c.checkpointAction(id, "approve", nil)
+}
+
+// RejectCheckpoint rejects a pending checkpoint, stopping the pipeline.
+func (c *Client) RejectCheckpoint(id, reason string) error {
+	return c.checkpointAction(id, "reject", map[string]any{"reason": reason})
+}
+
+// CheckpointFileEdit is one user-edited file submitted to EditCheckpoint.
+type CheckpointFileEdit struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+// EditCheckpoint submits edited file content for a checkpoint; the pipeline
+// continues with the edited files.
+func (c *Client) EditCheckpoint(id string, files []CheckpointFileEdit) error {
+	return c.checkpointAction(id, "edit", map[string]any{"files": files})
+}
+
+// checkpointAction POSTs a checkpoint decision to /api/checkpoints/<id>/<action>.
+func (c *Client) checkpointAction(id, action string, body map[string]any) error {
+	var reader io.Reader
+	if body != nil {
+		data, _ := json.Marshal(body)
+		reader = bytes.NewReader(data)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)
+	defer cancel()
+	req, err := c.newReq(ctx, http.MethodPost, "/api/checkpoints/"+id+"/"+action, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("tui: checkpoint %s returned %d", action, resp.StatusCode)
+	}
+	return nil
+}
+
 // Reload triggers a config reload via the control plane.
 func (c *Client) Reload() error {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.Timeout)

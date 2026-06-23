@@ -146,6 +146,11 @@ func (m CodeModel) handleAGUIKey(msg tea.KeyMsg) (CodeModel, bool) {
 		return m, true // swallow other keys while viewing
 	}
 
+	// Inline checkpoint-file editor owns the keyboard while open.
+	if m.editor != nil {
+		return m.handleEditorKey(msg)
+	}
+
 	// Checkpoint review mode.
 	if m.checkpoint != nil && !m.input.Focused() {
 		switch strings.ToLower(key) {
@@ -154,11 +159,19 @@ func (m CodeModel) handleAGUIKey(msg tea.KeyMsg) (CodeModel, bool) {
 				m.viewingFile = 0
 			}
 			return m, true
+		case "e":
+			// Open the inline editor (file picker first when multiple files).
+			m.openCheckpointEditor()
+			return m, true
 		case "a":
+			id := m.checkpoint.ID
 			m.recordCheckpoint("approved", "✓ APPROVED by user")
+			m.pendingCmd = m.checkpointActionCmd(id, "approve", nil)
 			return m, true
 		case "r":
+			id := m.checkpoint.ID
 			m.recordCheckpoint("rejected", "✗ REJECTED by user")
+			m.pendingCmd = m.checkpointActionCmd(id, "reject", nil)
 			return m, true
 		case "s":
 			m.recordCheckpoint("skipped", "⏭ Checkpoint skipped")
@@ -220,11 +233,14 @@ func (m CodeModel) renderThreePanel() string {
 	left := m.renderSidebar()
 	middle := m.renderComms()
 	var right string
-	if m.viewingFile >= 0 {
+	switch {
+	case m.editor != nil:
+		right = m.renderEditor()
+	case m.viewingFile >= 0:
 		right = m.renderFileViewer()
-	} else if m.checkpoint != nil {
+	case m.checkpoint != nil:
 		right = m.renderCheckpoint()
-	} else {
+	default:
 		right = m.renderChat()
 	}
 	sep := " " + brand.StyleSubtitle.Render(brand.IconVSep) + " "
@@ -326,7 +342,7 @@ func (m CodeModel) renderCheckpoint() string {
 		fmt.Fprintf(&b, "%s %s (%s — %d lines)\n", brand.IconFile, f.Path, tag, f.Lines)
 	}
 	b.WriteString("\n")
-	b.WriteString(brand.StyleHelp.Render("[V] View file  [A] Approve  [R] Reject  [S] Skip"))
+	b.WriteString(brand.StyleHelp.Render("[V] View  [E] Edit  [A] Approve  [R] Reject  [S] Skip"))
 	box := brand.StyleApproval.Padding(1, 2).Render(b.String())
 	return box
 }

@@ -432,6 +432,15 @@ func (t *teamCollab) Approve(id string) error { return t.checkpoints.Approve(id)
 // Reject stops the pipeline at a checkpoint.
 func (t *teamCollab) Reject(id, reason string) error { return t.checkpoints.Reject(id, reason) }
 
+// Edit applies user file edits to a checkpoint and resolves it as edited.
+func (t *teamCollab) Edit(id string, edits []api.CheckpointFileEdit) error {
+	fe := make([]a2a.FileEdit, 0, len(edits))
+	for _, e := range edits {
+		fe = append(fe, a2a.FileEdit{Path: e.Path, NewContent: e.Content})
+	}
+	return t.checkpoints.Edit(id, fe)
+}
+
 // Get returns a checkpoint by ID (for the Telegram bridge's file preview).
 func (t *teamCollab) Get(id string) (*a2a.Checkpoint, error) { return t.checkpoints.Get(id) }
 

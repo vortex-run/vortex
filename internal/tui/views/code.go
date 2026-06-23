@@ -100,6 +100,12 @@ type CodeModel struct {
 	toolResults []ToolResult
 	toolCursor  int
 
+	// editor is the active inline checkpoint-file editor (nil = none).
+	editor *checkpointEditor
+	// pendingCmd carries a command produced by HandleAGUI (e.g. a checkpoint
+	// approve/reject/edit POST) back to the Update loop.
+	pendingCmd tea.Cmd
+
 	sessionID   string
 	project     string       // project dir shown in the header
 	model       string       // AI model override shown in the header
@@ -452,6 +458,11 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case commsClosedMsg:
 		m.commsCh = nil
 		return m, nil // a later codeTick reopens the stream
+	case checkpointResolvedMsg:
+		// The server accepted the decision; clear the local checkpoint review.
+		m.checkpoint = nil
+		m.viewingFile = -1
+		return m, nil
 	}
 
 	// Three-panel collaboration messages + selection/checkpoint keys are handled
@@ -460,6 +471,11 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if updated, handled := m.HandleAGUI(msg); handled {
 		if _, isComms := msg.(CommsMsg); isComms {
 			return updated, updated.listenComms()
+		}
+		// A checkpoint key (A/R/E) may have queued a server command.
+		if cmd := updated.pendingCmd; cmd != nil {
+			updated.pendingCmd = nil
+			return updated, cmd
 		}
 		return updated, nil
 	}

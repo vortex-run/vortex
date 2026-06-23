@@ -53,6 +53,7 @@ type fakeCheckpointProvider struct {
 	list     []CheckpointRecord
 	approved []string
 	rejected []string
+	edited   map[string][]CheckpointFileEdit
 	err      error
 }
 
@@ -69,6 +70,16 @@ func (c *fakeCheckpointProvider) Reject(id, _ string) error {
 		return c.err
 	}
 	c.rejected = append(c.rejected, id)
+	return nil
+}
+func (c *fakeCheckpointProvider) Edit(id string, edits []CheckpointFileEdit) error {
+	if c.err != nil {
+		return c.err
+	}
+	if c.edited == nil {
+		c.edited = map[string][]CheckpointFileEdit{}
+	}
+	c.edited[id] = edits
 	return nil
 }
 
@@ -281,6 +292,30 @@ func TestCheckpoints_Reject(t *testing.T) {
 	}
 	if len(cp.rejected) != 1 || cp.rejected[0] != "cp-2" {
 		t.Errorf("rejected = %v", cp.rejected)
+	}
+}
+
+func TestCheckpoints_Edit(t *testing.T) {
+	s, secret := newCollabServer(t)
+	cp := &fakeCheckpointProvider{}
+	s.SetCheckpointProvider(cp)
+	body := `{"files":[{"path":"calc.py","content":"def add(a,b): return a+b"}]}`
+	rec := serve(s, authedReq(http.MethodPost, "/api/checkpoints/cp-3/edit", secret, body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit = %d (%s)", rec.Code, rec.Body)
+	}
+	edits := cp.edited["cp-3"]
+	if len(edits) != 1 || edits[0].Path != "calc.py" || edits[0].Content != "def add(a,b): return a+b" {
+		t.Errorf("edited = %+v", edits)
+	}
+}
+
+func TestCheckpoints_EditRequiresFiles(t *testing.T) {
+	s, secret := newCollabServer(t)
+	s.SetCheckpointProvider(&fakeCheckpointProvider{})
+	rec := serve(s, authedReq(http.MethodPost, "/api/checkpoints/cp-3/edit", secret, `{"files":[]}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("empty edit = %d, want 400", rec.Code)
 	}
 }
 
