@@ -332,7 +332,7 @@ type commsClosedMsg struct{}
 // as a normal message line.
 func commsKind(busType string) string {
 	switch busType {
-	case "checkpoint", "task", "result", "progress", "tool_result":
+	case "checkpoint", "task", "result", "progress", "tool_result", "plan":
 		return busType
 	default:
 		return "message"

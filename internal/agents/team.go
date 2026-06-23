@@ -229,6 +229,27 @@ func defaultCodingPlan(goal string) []TeamStep {
 	}
 }
 
+// formatPlanSteps renders the plan as a Claude-Code-style "here's my plan"
+// block, shown in the chat panel before execution begins.
+func formatPlanSteps(plan *TeamPlan) string {
+	var b strings.Builder
+	b.WriteString("Here's my plan:\n")
+	for i, s := range plan.Steps {
+		name := s.AgentRole
+		switch s.AgentRole {
+		case "coder":
+			name = "Code Agent"
+		case "tester":
+			name = "Test Agent"
+		case "reviewer":
+			name = "Review Agent"
+		}
+		fmt.Fprintf(&b, "\nStep %d → %s\n  %s", i+1, name, s.Goal)
+	}
+	b.WriteString("\n\nStarting now...")
+	return b.String()
+}
+
 // defaultSteps is the standard coder → tester → reviewer pipeline.
 func defaultSteps(goal string) []TeamStep {
 	return []TeamStep{
@@ -271,6 +292,10 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 		}
 		t.publish(a2a.MsgProgress, "coordinator", "user", s, plan.SessionID)
 	}
+
+	// Publish the plan up front so the UI can show what's about to happen before
+	// any agent runs (Claude-Code-style "here's my plan").
+	t.publish(a2a.MsgPlan, "coordinator", "user", formatPlanSteps(plan), plan.SessionID)
 
 	fileSet := map[string]bool{}
 	prevContext := ""

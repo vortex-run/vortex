@@ -102,6 +102,11 @@ func (m CodeModel) HandleAGUI(msg tea.Msg) (CodeModel, bool) {
 			}
 			return m, true
 		}
+		// The plan is shown prominently in the chat panel before execution.
+		if e.Kind == "plan" {
+			m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: e.Content})
+			return m, true
+		}
 		m.comms = append(m.comms, e)
 		if len(m.comms) > 500 {
 			m.comms = m.comms[len(m.comms)-500:]

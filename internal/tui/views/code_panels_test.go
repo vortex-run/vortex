@@ -343,6 +343,18 @@ func TestCode_CoordinatorReplyShownInChat(t *testing.T) {
 	}
 }
 
+func TestCode_PlanShownInChat(t *testing.T) {
+	m := sizedCode(WithTeam())
+	plan := "Here's my plan:\n\nStep 1 → Code Agent\n  Write the app\n\nStarting now..."
+	m, _ = m.HandleAGUI(CommsMsg{Time: time.Now(), From: "coordinator", To: "user", Kind: "plan", Content: plan})
+	if len(m.Chat()) != 1 || m.Chat()[0].Agent != "coordinator" {
+		t.Fatalf("plan should be a coordinator chat line: %+v", m.Chat())
+	}
+	if !strings.Contains(m.renderChat(), "Here's my plan") || !strings.Contains(m.renderChat(), "Step 1 → Code Agent") {
+		t.Errorf("CHAT panel should show the plan:\n%s", m.renderChat())
+	}
+}
+
 func TestCode_CheckpointOverlayAndFlash(t *testing.T) {
 	m := sizedCode(WithTeam())
 	m, _ = m.HandleAGUI(CheckpointMsg{

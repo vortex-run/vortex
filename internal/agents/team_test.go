@@ -248,6 +248,23 @@ func TestTeam_PublishesToolResults(t *testing.T) {
 	}
 }
 
+func TestTeam_PublishesPlanBeforeExecution(t *testing.T) {
+	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
+	bus := a2a.NewMessageBus()
+	team := NewAgentTeam(TeamConfig{WorkDir: t.TempDir(), Bus: bus}, gw, teamRegistry(t, map[string]string{}, "--- PASS: TestX (0.00s)\nok"))
+	plan := &TeamPlan{Goal: "build hello", SessionID: "s1", Steps: defaultCodingPlan("build hello")}
+	if _, err := team.Execute(context.Background(), plan, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	msgs := bus.History("s1", 0)
+	if len(msgs) == 0 || msgs[0].Type != a2a.MsgPlan {
+		t.Fatalf("first bus message should be the plan, got %+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Content, "Here's my plan") || !strings.Contains(msgs[0].Content, "Code Agent") {
+		t.Errorf("plan content = %q", msgs[0].Content)
+	}
+}
+
 func TestToolResultLine(t *testing.T) {
 	if got := toolResultLine("write_file", map[string]any{"path": "calc.py", "content": "x\ny"}, nil); got != "write_file|calc.py|x\ny" {
 		t.Errorf("write_file line = %q", got)
