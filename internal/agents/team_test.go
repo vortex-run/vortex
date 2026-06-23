@@ -180,6 +180,46 @@ func TestTeam_PublishesToBus(t *testing.T) {
 	}
 }
 
+func TestTeam_PublishesToolResults(t *testing.T) {
+	written := map[string]string{}
+	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
+	bus := a2a.NewMessageBus()
+	team := NewAgentTeam(
+		TeamConfig{WorkDir: t.TempDir(), Bus: bus},
+		gw, teamRegistry(t, written, "--- PASS: TestX (0.00s)\nok"),
+	)
+	plan := &TeamPlan{Goal: "build hello", SessionID: "s1", Steps: defaultSteps("build hello")}
+	if _, err := team.Execute(context.Background(), plan, nil); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// The coder's write_file should have produced a tool_result bus message
+	// encoded as "tool|target|content".
+	var toolMsgs []a2a.BusMessage
+	for _, m := range bus.History("", 0) {
+		if m.Type == a2a.MsgToolResult {
+			toolMsgs = append(toolMsgs, m)
+		}
+	}
+	if len(toolMsgs) == 0 {
+		t.Fatal("expected at least one tool_result bus message from write_file")
+	}
+	if !strings.HasPrefix(toolMsgs[0].Content, "write_file|") {
+		t.Errorf("tool_result content = %q, want write_file|... ", toolMsgs[0].Content)
+	}
+}
+
+func TestToolResultLine(t *testing.T) {
+	if got := toolResultLine("write_file", map[string]any{"path": "calc.py", "content": "x\ny"}, nil); got != "write_file|calc.py|x\ny" {
+		t.Errorf("write_file line = %q", got)
+	}
+	if got := toolResultLine("run_terminal", map[string]any{"command": "pytest"}, "exit 0"); got != "run_terminal|pytest|exit 0" {
+		t.Errorf("run_terminal line = %q", got)
+	}
+	if got := toolResultLine("read_file", map[string]any{"path": "x"}, "data"); got != "" {
+		t.Errorf("read_file should not produce a tool card, got %q", got)
+	}
+}
+
 func TestTeam_PassesContextForward(t *testing.T) {
 	written := map[string]string{}
 	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}

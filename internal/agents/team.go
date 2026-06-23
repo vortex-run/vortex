@@ -56,7 +56,7 @@ const (
 // gateway + a trusted tool executor + the A2A client, and registers them with
 // the A2A server.
 func NewAgentTeam(cfg TeamConfig, gateway AIGateway, tools *ToolRegistry) *AgentTeam {
-	runTool := toolFunc(tools)
+	runTool := toolFuncWithBus(tools, cfg.Bus)
 	model := ""
 
 	mkCard := func(id, name, role string) a2a.AgentCard {
@@ -81,8 +81,11 @@ func NewAgentTeam(cfg TeamConfig, gateway AIGateway, tools *ToolRegistry) *Agent
 	return t
 }
 
-// toolFunc adapts a *ToolRegistry into the specialists.ToolFunc closure.
-func toolFunc(tools *ToolRegistry) specialists.ToolFunc {
+// toolFuncWithBus adapts a *ToolRegistry into the specialists.ToolFunc closure,
+// additionally publishing a "tool_result" bus message after a mutating tool
+// (write_file/edit_file/run_terminal) succeeds, so the UI can render collapsible
+// tool-use rows like Claude Code.
+func toolFuncWithBus(tools *ToolRegistry, bus *a2a.MessageBus) specialists.ToolFunc {
 	if tools == nil {
 		return nil
 	}
@@ -91,7 +94,35 @@ func toolFunc(tools *ToolRegistry) specialists.ToolFunc {
 		if err != nil {
 			return nil, err
 		}
-		return tool.Execute(ctx, params)
+		res, err := tool.Execute(ctx, params)
+		if err == nil && bus != nil {
+			if content := toolResultLine(name, params, res); content != "" {
+				bus.Publish(a2a.BusMessage{
+					From: codeAgentID, To: "user", Type: a2a.MsgToolResult, Content: content,
+				})
+			}
+		}
+		return res, err
+	}
+}
+
+// toolResultLine encodes a mutating tool call as "tool|target|detail" for the
+// tool_result bus message (parsed by the TUI into a collapsible row). Returns ""
+// for non-mutating tools (reads/lists) that should not appear as tool cards.
+func toolResultLine(name string, params map[string]any, res any) string {
+	target, _ := params["path"].(string)
+	switch name {
+	case "write_file", "edit_file":
+		content, _ := params["content"].(string)
+		if content == "" { // edit_file may carry new content under a different key
+			content = specialists.ToolResultString(res)
+		}
+		return name + "|" + target + "|" + content
+	case "run_terminal":
+		cmd, _ := params["command"].(string)
+		return name + "|" + cmd + "|" + specialists.ToolResultString(res)
+	default:
+		return ""
 	}
 }
 

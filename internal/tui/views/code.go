@@ -95,6 +95,11 @@ type CodeModel struct {
 	// QUESTION:/OPTIONS: reply (nil = none).
 	selector *OptionSelector
 
+	// toolResults are collapsible tool-use rows (write_file/run_terminal) shown
+	// in the chat panel; toolCursor is the row Enter toggles (-1 = none focused).
+	toolResults []ToolResult
+	toolCursor  int
+
 	sessionID   string
 	project     string       // project dir shown in the header
 	model       string       // AI model override shown in the header
@@ -215,6 +220,7 @@ func NewCode(client *tui.Client, opts ...CodeOption) CodeModel {
 		team:          true,
 		selectedAgent: "coordinator",
 		viewingFile:   -1,
+		toolCursor:    -1,
 		sessionID:     fmt.Sprintf("code-%d", time.Now().UnixMilli()),
 		agents: []CodeAgentStatus{
 			{Name: "Coordinator", Role: "plans + routes", Status: "ready"},
@@ -317,7 +323,7 @@ type commsClosedMsg struct{}
 // as a normal message line.
 func commsKind(busType string) string {
 	switch busType {
-	case "checkpoint", "task", "result", "progress":
+	case "checkpoint", "task", "result", "progress", "tool_result":
 		return busType
 	default:
 		return "message"
@@ -596,6 +602,29 @@ func (m CodeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc":
 			// Dismiss the menu and fall back to free-text input.
 			m.selector = nil
+			return m, nil
+		}
+	}
+
+	// Tool-result navigation/expansion (Claude-Code style) when the input is not
+	// focused: ↑↓/jk move between rows, Enter toggles the focused row. Handled
+	// before the generic enter/submit case below.
+	if !m.input.Focused() && len(m.toolResults) > 0 {
+		switch key {
+		case "up", "k":
+			if m.toolCursor > 0 {
+				m.toolCursor--
+			}
+			return m, nil
+		case "down", "j":
+			if m.toolCursor < len(m.toolResults)-1 {
+				m.toolCursor++
+			}
+			return m, nil
+		case "enter":
+			if m.toolCursor >= 0 && m.toolCursor < len(m.toolResults) {
+				m.toolResults[m.toolCursor].Collapsed = !m.toolResults[m.toolCursor].Collapsed
+			}
 			return m, nil
 		}
 	}

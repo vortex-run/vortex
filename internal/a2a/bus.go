@@ -29,6 +29,7 @@ const (
 	MsgAgent      = "agent-msg"
 	MsgCheckpoint = "checkpoint"
 	MsgDirectChat = "direct-chat"
+	MsgToolResult = "tool_result"
 )
 
 // busHistoryCap bounds the append-only history so a long session cannot grow

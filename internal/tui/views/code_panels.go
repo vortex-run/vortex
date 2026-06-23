@@ -94,6 +94,14 @@ func (m CodeModel) HandleAGUI(msg tea.Msg) (CodeModel, bool) {
 	switch msg := msg.(type) {
 	case CommsMsg:
 		e := CommsEntry(msg)
+		// tool_result messages become collapsible tool-use rows, not feed lines.
+		if e.Kind == "tool_result" {
+			if tr := parseToolResult(e.Content); tr != nil {
+				m.toolResults = append(m.toolResults, *tr)
+				m.toolCursor = len(m.toolResults) - 1 // focus the newest row
+			}
+			return m, true
+		}
 		m.comms = append(m.comms, e)
 		if len(m.comms) > 500 {
 			m.comms = m.comms[len(m.comms)-500:]
@@ -278,6 +286,17 @@ func (m CodeModel) renderChat() string {
 			c := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor(m.selectedAgent)))
 			b.WriteString(c.Render(line.Agent+": ") + line.Content + "\n")
 		}
+	}
+	// Collapsible tool-use rows (write_file/run_terminal), newest last. The
+	// focused row (toolCursor) is highlighted; Enter toggles it.
+	for i := range m.toolResults {
+		row := m.toolResults[i].render(w)
+		if i == m.toolCursor {
+			row = lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).Render("› ") + row
+		} else {
+			row = "  " + row
+		}
+		b.WriteString(row)
 	}
 	// Active option selector (arrow-key menu) takes over the input affordance.
 	if m.selector != nil && m.selector.Active {
