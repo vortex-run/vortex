@@ -17,20 +17,29 @@ type Agent interface {
 	HandleTask(ctx context.Context, task Task, progressFn func(Progress)) TaskResult
 }
 
+// maxTrackedTasks caps how many finished task results/mappings the server
+// retains for tasks/status lookups. Each submitted task adds a permanent entry
+// to results+tasks; without a bound a long-running server exposed to the A2A
+// RPC surface grows memory without limit (the production audit's H5 class,
+// which the /a2a path had not been retrofitted for). Oldest entries are
+// evicted FIFO once the cap is exceeded — recent tasks remain queryable.
+const maxTrackedTasks = 4096
+
 // AgentServer hosts the A2A surface for a set of agents on one HTTP mux. All
 // agents share the path space /a2a/agents/<id>/{rpc,events,card}; /a2a/agents
 // lists them. Safe for concurrent use.
 type AgentServer struct {
-	mu       sync.RWMutex
-	agents   map[string]Agent
-	statuses map[string]string                // live status override (busy while running)
-	subs     map[string]map[int]chan Progress // agentID → subscriber id → channel
-	results  map[string]TaskResult            // taskID → last result (for tasks/status)
-	tasks    map[string]string                // taskID → agentID
-	chats    map[string]*DirectChat           // agentID → direct chat
-	nextSub  int
-	mux      *http.ServeMux
-	bus      *MessageBus // optional; published to + given to direct chats
+	mu        sync.RWMutex
+	agents    map[string]Agent
+	statuses  map[string]string                // live status override (busy while running)
+	subs      map[string]map[int]chan Progress // agentID → subscriber id → channel
+	results   map[string]TaskResult            // taskID → last result (for tasks/status)
+	tasks     map[string]string                // taskID → agentID
+	taskOrder []string                         // insertion order of taskIDs, for FIFO eviction
+	chats     map[string]*DirectChat           // agentID → direct chat
+	nextSub   int
+	mux       *http.ServeMux
+	bus       *MessageBus // optional; published to + given to direct chats
 }
 
 // NewAgentServer constructs an empty server with its routes installed.
@@ -224,12 +233,28 @@ func (s *AgentServer) submitTask(agentID string, req JSONRPCRequest, w http.Resp
 		task.ID = "task-" + randomID()
 	}
 	s.statuses[agentID] = StatusBusy
-	s.tasks[task.ID] = agentID
+	s.trackTaskLocked(task.ID, agentID)
 	s.mu.Unlock()
 
 	go s.runTask(agentID, agent, *task)
 
 	writeJSON(w, http.StatusOK, OKResponse(req.ID, map[string]string{"task_id": task.ID}))
+}
+
+// trackTaskLocked records a taskID→agentID mapping and evicts the oldest
+// tracked task (its mapping and any stored result) once maxTrackedTasks is
+// exceeded, keeping results+tasks bounded. Caller must hold s.mu.
+func (s *AgentServer) trackTaskLocked(taskID, agentID string) {
+	if _, exists := s.tasks[taskID]; !exists {
+		s.taskOrder = append(s.taskOrder, taskID)
+	}
+	s.tasks[taskID] = agentID
+	for len(s.taskOrder) > maxTrackedTasks {
+		oldest := s.taskOrder[0]
+		s.taskOrder = s.taskOrder[1:]
+		delete(s.tasks, oldest)
+		delete(s.results, oldest)
+	}
 }
 
 // runTask executes the agent and broadcasts progress + a terminal result event.
@@ -265,7 +290,12 @@ func (s *AgentServer) runTask(agentID string, agent Agent, task Task) {
 func (s *AgentServer) finish(agentID string, result TaskResult) {
 	s.mu.Lock()
 	s.statuses[agentID] = StatusIdle
-	s.results[result.TaskID] = result
+	// Only store the result if the task is still tracked; a task evicted by
+	// the FIFO cap while running must not silently re-populate results (which
+	// would leave an untracked entry and re-leak).
+	if _, tracked := s.tasks[result.TaskID]; tracked {
+		s.results[result.TaskID] = result
+	}
 	s.mu.Unlock()
 	final := Progress{
 		TaskID: result.TaskID, AgentID: agentID, Message: "task complete",

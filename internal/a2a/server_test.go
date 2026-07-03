@@ -268,3 +268,46 @@ func waitUntil(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met within timeout")
 }
+
+// TestAgentServer_TrackedTasksBounded verifies results/tasks stay bounded by
+// maxTrackedTasks under a churn of task IDs, and that FIFO eviction drops the
+// oldest entries (production audit follow-up: unbounded a2a task maps).
+func TestAgentServer_TrackedTasksBounded(t *testing.T) {
+	s := NewAgentServer()
+	total := maxTrackedTasks + 500
+	for i := 0; i < total; i++ {
+		id := "task-" + strings.Repeat("x", 0) + itoa(i)
+		s.mu.Lock()
+		s.trackTaskLocked(id, "agent")
+		s.results[id] = TaskResult{TaskID: id}
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	nTasks, nResults, nOrder := len(s.tasks), len(s.results), len(s.taskOrder)
+	_, oldestPresent := s.tasks["task-"+itoa(0)]
+	_, newestPresent := s.tasks["task-"+itoa(total-1)]
+	s.mu.Unlock()
+
+	if nTasks > maxTrackedTasks || nResults > maxTrackedTasks || nOrder > maxTrackedTasks {
+		t.Fatalf("maps not bounded: tasks=%d results=%d order=%d cap=%d", nTasks, nResults, nOrder, maxTrackedTasks)
+	}
+	if oldestPresent {
+		t.Error("oldest task should have been evicted")
+	}
+	if !newestPresent {
+		t.Error("newest task should be retained")
+	}
+}
+
+// itoa is a tiny int→string helper so the test avoids importing strconv.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}
