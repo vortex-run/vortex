@@ -31,6 +31,7 @@ type OrchestrationAgent struct {
 	planner  *Planner
 	router   AgentRouter
 	notifier Notifier
+	metrics  Metrics // optional; wired via SetMetrics (production audit M8)
 }
 
 // Notifier delivers orchestration results. Satisfied by *messaging.Router via an
@@ -48,6 +49,10 @@ func NewOrchestrationAgent(gateway agents.AIGateway, router AgentRouter, notifie
 		notifier: notifier,
 	}
 }
+
+// SetMetrics wires the orchestration metrics sink (production audit M8). Pass
+// nil to disable emission. Safe to call once at setup before any Run.
+func (a *OrchestrationAgent) SetMetrics(m Metrics) { a.metrics = m }
 
 // Run decomposes goal into tasks and executes them, streaming progress. It
 // returns a human-readable summary.
@@ -72,6 +77,7 @@ func (a *OrchestrationAgent) Run(ctx context.Context, goal string, progressFn fu
 		Executor:    a.executor(),
 		MaxParallel: 4,
 		Progress:    progressFn,
+		Metrics:     a.metrics,
 	})
 	if err != nil {
 		return "", err

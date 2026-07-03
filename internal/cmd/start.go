@@ -873,7 +873,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- data pipeline agent (M17) ------------------------------------------
 	pipelineFn := buildPipeline(gateway, msg, resolveWorkingDir(), apiSrv, log)
 	// --- multi-agent orchestration (M18) ------------------------------------
-	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn)
+	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics)
 	// Durable workflow store (upgrade 4 — crash recovery): opened here so the
 	// startup resume below can notify via the messaging router.
 	var workflowStore *agents.WorkflowStore
@@ -1918,7 +1918,8 @@ func (a *orchestrateNotifyAdapter) Notify(ctx context.Context, title, body strin
 // (general). Registers the API and returns an OrchestrateFunc. Returns nil when
 // no AI gateway is configured (planning needs it).
 func buildOrchestration(gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger,
-	research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc) agents.OrchestrateFunc {
+	research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc,
+	metrics *observability.Metrics) agents.OrchestrateFunc {
 	if gateway == nil {
 		apiSrv.SetOrchestrateProvider(nil)
 		return nil
@@ -1949,6 +1950,11 @@ func buildOrchestration(gateway agents.AIGateway, msg messagingComponents, apiSr
 		notifier = &orchestrateNotifyAdapter{router: msg.router}
 	}
 	agent := orchestration.NewOrchestrationAgent(gateway, router, notifier)
+	// Emit orchestration-plane metrics (production audit M8). Guard against a
+	// typed-nil *Metrics becoming a non-nil interface inside the agent.
+	if metrics != nil {
+		agent.SetMetrics(metrics)
+	}
 
 	apiSrv.SetOrchestrateProvider(func(ctx context.Context, goal string) (string, error) {
 		return agent.Run(ctx, goal, nil)

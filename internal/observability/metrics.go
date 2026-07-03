@@ -21,6 +21,13 @@ type Metrics struct {
 	clusterMembers  prometheus.Gauge
 	policyEvals     *prometheus.CounterVec
 	secretOps       *prometheus.CounterVec
+
+	// Agent/orchestration plane (production audit M8): the most failure-prone
+	// subsystem was previously unobservable.
+	orchTasksTotal   *prometheus.CounterVec // by agent_type + outcome (complete/failed)
+	orchTaskDuration *prometheus.HistogramVec
+	orchRunsTotal    prometheus.Counter
+	orchTasksActive  prometheus.Gauge // in-flight orchestration tasks (queue depth)
 }
 
 // NewMetrics creates a Metrics with a private registry under the given namespace
@@ -78,10 +85,32 @@ func NewMetrics(namespace string) *Metrics {
 		Help: "Total secret operations, labelled by operation.",
 	}, []string{"operation"})
 
+	m.orchTasksTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Name: "orchestration_tasks_total",
+		Help: "Total orchestration tasks that reached a terminal state, labelled by agent type and outcome (complete/failed).",
+	}, []string{"agent_type", "outcome"})
+
+	m.orchTaskDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Name: "orchestration_task_duration_seconds",
+		Help:    "Orchestration task execution duration in seconds, labelled by agent type.",
+		Buckets: []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+	}, []string{"agent_type"})
+
+	m.orchRunsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Name: "orchestration_runs_total",
+		Help: "Total orchestration runs started.",
+	})
+
+	m.orchTasksActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Name: "orchestration_tasks_active",
+		Help: "Orchestration tasks currently executing (in-flight queue depth).",
+	})
+
 	reg.MustRegister(
 		m.requestsTotal, m.requestDuration, m.activeConns,
 		m.bytesIn, m.bytesOut, m.routeErrors,
 		m.clusterMembers, m.policyEvals, m.secretOps,
+		m.orchTasksTotal, m.orchTaskDuration, m.orchRunsTotal, m.orchTasksActive,
 	)
 	return m
 }
@@ -132,6 +161,32 @@ func (m *Metrics) RecordPolicyEval(result string) {
 // RecordSecretOp increments the secret-operation counter by operation.
 func (m *Metrics) RecordSecretOp(operation string) {
 	m.secretOps.WithLabelValues(operation).Inc()
+}
+
+// --- Agent/orchestration plane (production audit M8) ------------------------
+
+// RecordOrchestrationRun increments the run counter (one per Orchestrator.Run).
+func (m *Metrics) RecordOrchestrationRun() {
+	m.orchRunsTotal.Inc()
+}
+
+// TaskStarted marks one orchestration task as in-flight (raises the active
+// gauge). Pair with TaskFinished.
+func (m *Metrics) TaskStarted() {
+	m.orchTasksActive.Inc()
+}
+
+// TaskFinished records a terminal task: it lowers the active gauge, increments
+// orchestration_tasks_total by agent type and outcome ("complete"/"failed"),
+// and observes the duration histogram. agentType is normalised to "unknown"
+// when empty to keep the metric label populated.
+func (m *Metrics) TaskFinished(agentType, outcome string, duration time.Duration) {
+	if agentType == "" {
+		agentType = "unknown"
+	}
+	m.orchTasksActive.Dec()
+	m.orchTasksTotal.WithLabelValues(agentType, outcome).Inc()
+	m.orchTaskDuration.WithLabelValues(agentType).Observe(duration.Seconds())
 }
 
 // statusLabel reduces an HTTP status code to a class label (2xx, 3xx, …) to keep

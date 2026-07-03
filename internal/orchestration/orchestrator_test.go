@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -219,3 +220,107 @@ func TestRun_MemoryAccessible(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// fakeMetrics is a test sink for orchestration metrics. It records every event
+// so tests can assert the run counter fires once and TaskStarted/TaskFinished
+// stay balanced (the active gauge cannot drift).
+type fakeMetrics struct {
+	mu       sync.Mutex
+	runs     int
+	started  int
+	finished int
+	outcomes map[string]int // "agentType/outcome" -> count
+}
+
+func newFakeMetrics() *fakeMetrics { return &fakeMetrics{outcomes: map[string]int{}} }
+
+func (f *fakeMetrics) RecordOrchestrationRun() {
+	f.mu.Lock()
+	f.runs++
+	f.mu.Unlock()
+}
+
+func (f *fakeMetrics) TaskStarted() {
+	f.mu.Lock()
+	f.started++
+	f.mu.Unlock()
+}
+
+func (f *fakeMetrics) TaskFinished(agentType, outcome string, _ time.Duration) {
+	f.mu.Lock()
+	f.finished++
+	f.outcomes[agentType+"/"+outcome]++
+	f.mu.Unlock()
+}
+
+func TestRun_EmitsMetrics(t *testing.T) {
+	exec := ExecutorFunc(func(_ context.Context, tk *Task, _ *SharedMemory) (string, error) {
+		if tk.ID == "b" {
+			return "", errors.New("boom")
+		}
+		return "ok", nil
+	})
+	fm := newFakeMetrics()
+	o := newOrch(t, exec, func(c *OrchestratorConfig) { c.Metrics = fm })
+	_, err := o.Run(context.Background(), "goal", []*Task{
+		{ID: "a", AgentType: "research"},
+		{ID: "b", AgentType: "devops"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.runs != 1 {
+		t.Errorf("runs = %d, want 1", fm.runs)
+	}
+	// Every started task must finish — otherwise the in-flight gauge drifts.
+	if fm.started != 2 || fm.finished != 2 {
+		t.Errorf("started/finished = %d/%d, want 2/2 (gauge would drift)", fm.started, fm.finished)
+	}
+	if fm.outcomes["research/complete"] != 1 {
+		t.Errorf("research/complete = %d, want 1", fm.outcomes["research/complete"])
+	}
+	if fm.outcomes["devops/failed"] != 1 {
+		t.Errorf("devops/failed = %d, want 1", fm.outcomes["devops/failed"])
+	}
+}
+
+func TestRun_NilMetricsIsSafe(t *testing.T) {
+	exec := ExecutorFunc(func(_ context.Context, _ *Task, _ *SharedMemory) (string, error) {
+		return "ok", nil
+	})
+	o := newOrch(t, exec) // no Metrics set
+	if _, err := o.Run(context.Background(), "g", []*Task{{ID: "a"}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRun_MetricsBalanceOnPanic verifies a panicking executor is recovered
+// (does not crash the process), is counted as a "failed" task, and does not
+// leak the in-flight gauge — TaskStarted stays balanced by TaskFinished.
+func TestRun_MetricsBalanceOnPanic(t *testing.T) {
+	exec := ExecutorFunc(func(_ context.Context, _ *Task, _ *SharedMemory) (string, error) {
+		panic("executor blew up")
+	})
+	fm := newFakeMetrics()
+	o := newOrch(t, exec, func(c *OrchestratorConfig) { c.Metrics = fm })
+
+	res, err := o.Run(context.Background(), "g", []*Task{{ID: "a", AgentType: "devops"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Failed != 1 || res.Completed != 0 {
+		t.Errorf("panicking task should be failed: %+v", res)
+	}
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if fm.started != 1 || fm.finished != 1 {
+		t.Errorf("started/finished = %d/%d, want 1/1 (gauge leaked on panic)", fm.started, fm.finished)
+	}
+	if fm.outcomes["devops/failed"] != 1 {
+		t.Errorf("panic outcome = %v, want devops/failed=1", fm.outcomes)
+	}
+}
