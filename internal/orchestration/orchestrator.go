@@ -23,12 +23,27 @@ func (f ExecutorFunc) Execute(ctx context.Context, task *Task, mem *SharedMemory
 	return f(ctx, task, mem)
 }
 
+// Metrics receives orchestration lifecycle events for observability (production
+// audit M8). It is optional; a nil Metrics disables emission. It is satisfied
+// by *observability.Metrics, declared here so the orchestration package stays
+// free of an observability import (mirroring the Progress callback pattern).
+type Metrics interface {
+	// RecordOrchestrationRun is called once when a run starts.
+	RecordOrchestrationRun()
+	// TaskStarted is called as a task begins executing (raises in-flight count).
+	TaskStarted()
+	// TaskFinished is called when a task reaches a terminal state; outcome is
+	// "complete" or "failed".
+	TaskFinished(agentType, outcome string, duration time.Duration)
+}
+
 // OrchestratorConfig configures a run.
 type OrchestratorConfig struct {
 	Executor    Executor      // runs each task (required)
 	MaxParallel int           // concurrent tasks (default 4)
 	TaskTimeout time.Duration // per-task timeout (default 5m; 0 = none)
 	Progress    func(string)  // optional step progress
+	Metrics     Metrics       // optional orchestration metrics sink (nil = off)
 }
 
 // RunResult summarises a completed orchestration.
@@ -82,6 +97,9 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 	}
 
 	start := time.Now()
+	if o.cfg.Metrics != nil {
+		o.cfg.Metrics.RecordOrchestrationRun()
+	}
 	o.emit(fmt.Sprintf("🎯 Orchestrating %d tasks for: %s", len(tasks), goal))
 
 	sem := make(chan struct{}, o.cfg.MaxParallel)
@@ -138,6 +156,28 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 	o.emit(fmt.Sprintf("▶️  %s (%s)", t.Name, t.AgentType))
 
+	taskStart := time.Now()
+	if o.cfg.Metrics != nil {
+		o.cfg.Metrics.TaskStarted()
+	}
+	// outcome is reported to the metrics sink on return; it starts "failed" so
+	// an executor panic (recovered below) is counted as a failure rather than
+	// dropped, and the happy path overwrites it to "complete".
+	outcome := "failed"
+	// Recover a panicking executor: fail the task instead of crashing the whole
+	// process, and — via this deferred close — balance TaskStarted with exactly
+	// one TaskFinished so the in-flight gauge cannot leak a phantom task. This
+	// mirrors the A2A server's runTask recovery.
+	defer func() {
+		if rec := recover(); rec != nil {
+			_ = q.Fail(t.ID, fmt.Sprintf("executor panic: %v", rec))
+			o.emit(fmt.Sprintf("❌ %s: panic: %v", t.Name, rec))
+		}
+		if o.cfg.Metrics != nil {
+			o.cfg.Metrics.TaskFinished(t.AgentType, outcome, time.Since(taskStart))
+		}
+	}()
+
 	runCtx := ctx
 	if o.cfg.TaskTimeout > 0 {
 		var cancel context.CancelFunc
@@ -153,6 +193,7 @@ func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 	}
 	o.mem.Set("task:"+t.ID, result, t.ID)
 	_ = q.Complete(t.ID, result)
+	outcome = "complete"
 	o.emit(fmt.Sprintf("✅ %s", t.Name))
 }
 
