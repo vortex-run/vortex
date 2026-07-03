@@ -54,7 +54,9 @@ C. **True per-token streaming.** We stream *events* (task/result), not AI tokens
 D. **MINOR — Direct-chatting the coordinator 502s.** `/api/agents/coordinator/chat`
    → `DirectChatFor("coordinator")` is nil (coordinator isn't a registered A2A
    specialist). Not reachable from the TUI; the endpoint is just misleading.
-E. **MINOR — `MessageBus.AgentMessages` is test-only.** No production caller;
-   expose it (per-agent history endpoint) or remove.
+E. **FIXED — `MessageBus.AgentMessages` was test-only.** Now exposed via
+   `GET /api/agents/team/{id}/messages` (auth-gated), returning the per-agent
+   slice of the comms feed for dashboard/TUI drill-down. Wired through the
+   `CommsProvider` interface + `teamCollab` adapter over `*a2a.MessageBus`.
 
 All FIXED items are committed, tested, and CI-green on `8fa868c`.
