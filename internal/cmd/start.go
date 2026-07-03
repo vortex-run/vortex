@@ -692,9 +692,8 @@ func runStart(ctx context.Context, pidfile string) error {
 		mgr.OnShutdown("plugins", func(c context.Context) error { return pluginRuntime.Close(c) })
 	}
 
-	// --- performance: OS tuning + optional autoscaler -----------------------
+	// --- performance: OS tuning -------------------------------------------
 	applyTuning(log)
-	startAutoscaler(ctx, log)
 
 	// --- tenancy: namespace registry + quota enforcer -----------------------
 	tenantRegistry, tenantEnforcer := buildTenancy(log)
@@ -705,6 +704,18 @@ func runStart(ctx context.Context, pidfile string) error {
 		display.StepFail("Cluster", err.Error())
 		return fmt.Errorf("initialising cluster: %w", err)
 	}
+
+	// --- optional autoscaler (after cluster, so node count is real) ---------
+	nodeCount := func() int { return 1 }
+	if clusterMgr != nil {
+		nodeCount = func() int {
+			if n := len(clusterMgr.Members()); n > 0 {
+				return n
+			}
+			return 1
+		}
+	}
+	startAutoscaler(ctx, log, nodeCount)
 	if len(cfg.Cluster.Nodes) > 1 {
 		display.Step("Cluster", fmt.Sprintf("%s, %d members", cfg.Cluster.Name, len(cfg.Cluster.Nodes)))
 	} else {
@@ -1483,7 +1494,10 @@ func applyTuning(log *slog.Logger) {
 
 // startAutoscaler creates and starts the horizontal autoscaler when
 // VORTEX_AUTOSCALE_PROVIDER is set; otherwise it logs that autoscaling is off.
-func startAutoscaler(ctx context.Context, log *slog.Logger) {
+// CPU comes from a runtime/metrics sampler and the node count from live
+// cluster membership (1 in single-node mode) — real signals, not the
+// hardwired placeholders the production audit flagged (M4).
+func startAutoscaler(ctx context.Context, log *slog.Logger, nodes func() int) {
 	provider := os.Getenv("VORTEX_AUTOSCALE_PROVIDER")
 	if provider == "" {
 		log.Info("autoscaler disabled")
@@ -1502,10 +1516,9 @@ func startAutoscaler(ctx context.Context, log *slog.Logger) {
 		return
 	}
 	log.Info("autoscaler enabled", "provider", cfg.Provider, "min", cfg.MinNodes, "max", cfg.MaxNodes)
-	// CPU and node-count providers are placeholders until cluster metrics are
-	// wired; the loop runs but evaluates conservatively (0% CPU, 1 node).
+	cpu := perf.NewCPUSampler()
 	go func() {
-		_ = as.Start(ctx, func() float64 { return 0 }, func() int { return 1 })
+		_ = as.Start(ctx, cpu.Utilization, nodes)
 	}()
 }
 

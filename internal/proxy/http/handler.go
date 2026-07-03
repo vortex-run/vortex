@@ -115,8 +115,13 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 // configured 5xx statuses up to the retry budget.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if isWebSocketUpgrade(req) {
-		// Full WebSocket proxying lands in M2.6; until then, signal clearly.
-		writeJSONError(w, http.StatusNotImplemented, "websocket support coming in M2.6")
+		// WebSocket upgrades are tunnelled by the protocol gateway (M2.6,
+		// internal/proxy/gateway), which wraps this handler on every managed
+		// HTTP route. Reaching this branch means the handler was mounted
+		// without the gateway, so refuse the upgrade explicitly rather than
+		// forwarding it through the buffered HTTP path (which would break the
+		// handshake).
+		writeJSONError(w, http.StatusNotImplemented, "websocket upgrades are handled by the protocol gateway; this handler does not proxy websocket connections")
 		return
 	}
 
