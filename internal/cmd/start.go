@@ -376,6 +376,17 @@ func (t *teamCollab) History(limit int) []api.CommsRecord {
 	return out
 }
 
+// AgentMessages returns the recent messages to or from agentID as
+// api.CommsRecord values (the per-agent slice of the comms feed).
+func (t *teamCollab) AgentMessages(agentID string, limit int) []api.CommsRecord {
+	msgs := t.bus.AgentMessages(agentID, limit)
+	out := make([]api.CommsRecord, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, busToRecord(m))
+	}
+	return out
+}
+
 // Subscribe bridges the bus subscription to api.CommsRecord values.
 func (t *teamCollab) Subscribe() (<-chan api.CommsRecord, func()) {
 	src, unsub := t.bus.Subscribe()

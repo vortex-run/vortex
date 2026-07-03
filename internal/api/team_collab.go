@@ -49,11 +49,14 @@ type CheckpointFileRecord struct {
 	IsNew bool   `json:"is_new"`
 }
 
-// CommsProvider supplies the agent-communication feed: recent history plus a
-// live subscription for SSE. Implemented by an adapter over *a2a.MessageBus.
+// CommsProvider supplies the agent-communication feed: recent history, a live
+// subscription for SSE, and per-agent history. Implemented by an adapter over
+// *a2a.MessageBus.
 type CommsProvider interface {
 	History(limit int) []CommsRecord
 	Subscribe() (<-chan CommsRecord, func())
+	// AgentMessages returns up to limit recent messages to or from agentID.
+	AgentMessages(agentID string, limit int) []CommsRecord
 }
 
 // ChatProvider routes a direct-chat message to a named specialist and returns
@@ -94,6 +97,7 @@ func (s *Server) registerTeamCollab(mux *http.ServeMux) {
 	mux.Handle("GET /api/agents/team/status", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
 	mux.Handle("GET /api/agents/comms", s.requireAPIKey(http.HandlerFunc(s.handleComms)))
 	mux.Handle("GET /api/agents/comms/stream", s.requireAPIKey(http.HandlerFunc(s.handleCommsStream)))
+	mux.Handle("GET /api/agents/team/{id}/messages", s.requireAPIKey(http.HandlerFunc(s.handleAgentMessages)))
 	mux.Handle("POST /api/agents/{id}/chat", s.requireAPIKey(http.HandlerFunc(s.handleAgentDirectChat)))
 	mux.Handle("GET /api/checkpoints", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointsList)))
 	mux.Handle("POST /api/checkpoints/{id}/approve", s.requireAPIKey(http.HandlerFunc(s.handleCheckpointApprove)))
@@ -109,6 +113,23 @@ func (s *Server) handleComms(w http.ResponseWriter, r *http.Request) {
 		feed = s.comms.History(limit)
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"messages": feed})
+}
+
+// handleAgentMessages returns the recent messages to or from one agent — the
+// per-agent slice of the comms feed (e.g. a dashboard/TUI drill-down on a
+// single specialist). The id path segment names the agent.
+func (s *Server) handleAgentMessages(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("id")
+	if agentID == "" {
+		http.Error(w, "agent id required", http.StatusBadRequest)
+		return
+	}
+	limit := parseLimit(r.URL.Query().Get("limit"), 100)
+	msgs := []CommsRecord{}
+	if s.comms != nil {
+		msgs = s.comms.AgentMessages(agentID, limit)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"agent_id": agentID, "messages": msgs})
 }
 
 // handleCommsStream streams agent-communication messages as Server-Sent Events.

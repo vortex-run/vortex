@@ -16,8 +16,9 @@ import (
 // --- fakes -----------------------------------------------------------------
 
 type fakeComms struct {
-	history []CommsRecord
-	ch      chan CommsRecord
+	history  []CommsRecord
+	ch       chan CommsRecord
+	perAgent map[string][]CommsRecord // agentID → messages for AgentMessages
 }
 
 func (f *fakeComms) History(limit int) []CommsRecord {
@@ -32,6 +33,14 @@ func (f *fakeComms) Subscribe() (<-chan CommsRecord, func()) {
 		f.ch = make(chan CommsRecord, 8)
 	}
 	return f.ch, func() {}
+}
+
+func (f *fakeComms) AgentMessages(agentID string, limit int) []CommsRecord {
+	msgs := f.perAgent[agentID]
+	if limit < len(msgs) {
+		return msgs[len(msgs)-limit:]
+	}
+	return msgs
 }
 
 type fakeChatProvider struct {
@@ -164,6 +173,54 @@ func TestComms_LimitParam(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Messages) != 1 || resp.Messages[0].Content != "c" {
 		t.Errorf("limit=1 returned %+v", resp.Messages)
+	}
+}
+
+func TestAgentMessages_ReturnsPerAgentSlice(t *testing.T) {
+	s, secret := newCollabServer(t)
+	s.SetCommsProvider(&fakeComms{perAgent: map[string][]CommsRecord{
+		"code-agent": {
+			{From: "coordinator", To: "code-agent", Type: "task", Content: "build"},
+			{From: "code-agent", To: "coordinator", Type: "result", Content: "built"},
+		},
+		"tester": {{From: "coordinator", To: "tester", Content: "test it"}},
+	}})
+	rec := serve(s, authedReq(http.MethodGet, "/api/agents/team/code-agent/messages", secret, ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent messages = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var resp struct {
+		AgentID  string        `json:"agent_id"`
+		Messages []CommsRecord `json:"messages"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.AgentID != "code-agent" || len(resp.Messages) != 2 || resp.Messages[0].Content != "build" {
+		t.Errorf("agent_id=%q messages=%+v", resp.AgentID, resp.Messages)
+	}
+}
+
+func TestAgentMessages_LimitParam(t *testing.T) {
+	s, secret := newCollabServer(t)
+	s.SetCommsProvider(&fakeComms{perAgent: map[string][]CommsRecord{
+		"code-agent": {{Content: "a"}, {Content: "b"}, {Content: "c"}},
+	}})
+	rec := serve(s, authedReq(http.MethodGet, "/api/agents/team/code-agent/messages?limit=1", secret, ""))
+	var resp struct {
+		Messages []CommsRecord `json:"messages"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Messages) != 1 || resp.Messages[0].Content != "c" {
+		t.Errorf("limit=1 returned %+v", resp.Messages)
+	}
+}
+
+func TestAgentMessages_EmptyWhenUnconfigured(t *testing.T) {
+	s, secret := newCollabServer(t)
+	rec := serve(s, authedReq(http.MethodGet, "/api/agents/team/code-agent/messages", secret, ""))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"messages":[]`) {
+		t.Errorf("unconfigured agent messages = %d body=%s", rec.Code, rec.Body)
 	}
 }
 
