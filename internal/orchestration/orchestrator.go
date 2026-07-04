@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,12 @@ type OrchestratorConfig struct {
 	TaskTimeout time.Duration // per-task timeout (default 5m; 0 = none)
 	Progress    func(string)  // optional step progress
 	Metrics     Metrics       // optional orchestration metrics sink (nil = off)
+	// Store + RunID enable durable execution (production audit H3): task
+	// state transitions and shared memory are persisted best-effort so a crash
+	// can resume the run. Both optional; persistence is off when either is
+	// unset (mirroring the Progress/Metrics hook pattern).
+	Store *RunStore
+	RunID string
 }
 
 // RunResult summarises a completed orchestration.
@@ -149,7 +156,38 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 	}
 	wg.Wait()
 
+	// Reconcile every task's final state in one transaction (H3): dep-failure
+	// transitions happen inside Claim/drainBlocked and never pass through
+	// runTask, and any dropped best-effort write self-corrects here.
+	if o.cfg.Store != nil && o.cfg.RunID != "" {
+		if err := o.cfg.Store.SyncTasks(o.cfg.RunID, q.Tasks()); err != nil {
+			slog.Default().Warn("orchestration: reconciling run state", "run", o.cfg.RunID, "err", err)
+		}
+	}
+
 	return o.summarize(goal, q, time.Since(start)), nil
+}
+
+// persistTask writes one task's state to the run store when durability is
+// enabled. Failures are logged, never fatal — the run outranks the disk.
+func (o *Orchestrator) persistTask(t *Task) {
+	if o.cfg.Store == nil || o.cfg.RunID == "" || t == nil {
+		return
+	}
+	if err := o.cfg.Store.SaveTask(o.cfg.RunID, t); err != nil {
+		slog.Default().Warn("orchestration: persisting task", "run", o.cfg.RunID, "task", t.ID, "err", err)
+	}
+}
+
+// persistMemory snapshots the shared memory to the run store when durability
+// is enabled. Failures are logged, never fatal.
+func (o *Orchestrator) persistMemory() {
+	if o.cfg.Store == nil || o.cfg.RunID == "" {
+		return
+	}
+	if err := o.cfg.Store.SyncMemory(o.cfg.RunID, o.mem.Snapshot()); err != nil {
+		slog.Default().Warn("orchestration: persisting memory", "run", o.cfg.RunID, "err", err)
+	}
 }
 
 // runTask executes one task and records its result + memory.
@@ -160,6 +198,9 @@ func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 	if o.cfg.Metrics != nil {
 		o.cfg.Metrics.TaskStarted()
 	}
+	// Persist the running transition (t is the claimed copy: state running,
+	// StartedAt set) so a crash mid-execution leaves a resumable record (H3).
+	o.persistTask(t)
 	// outcome is reported to the metrics sink on return; it starts "failed" so
 	// an executor panic (recovered below) is counted as a failure rather than
 	// dropped, and the happy path overwrites it to "complete".
@@ -172,6 +213,16 @@ func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 		if rec := recover(); rec != nil {
 			_ = q.Fail(t.ID, fmt.Sprintf("executor panic: %v", rec))
 			o.emit(fmt.Sprintf("❌ %s: panic: %v", t.Name, rec))
+		}
+		// Persist the authoritative terminal state (complete, failed, or
+		// panic-failed) from the queue — the local t is a stale claim copy.
+		if final, ok := q.Get(t.ID); ok {
+			o.persistTask(final)
+		}
+		// A completed task's result just entered shared memory; snapshot it so
+		// resumed dependents keep their upstream context.
+		if outcome == "complete" {
+			o.persistMemory()
 		}
 		if o.cfg.Metrics != nil {
 			o.cfg.Metrics.TaskFinished(t.AgentType, outcome, time.Since(taskStart))

@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 )
@@ -188,86 +187,8 @@ func TestWorkflowAppendCompletedStep(t *testing.T) {
 	}
 }
 
-// TestCoordinatorOrchestrationRecordsWorkflow exercises the integration: an
-// orchestrated goal creates a workflow, persists each progress line as a
-// completed step, and reaches a terminal state — so a crash mid-run would
-// leave a resumable record (the startup-resume path lists exactly these).
-func TestCoordinatorOrchestrationRecordsWorkflow(t *testing.T) {
-	gw := &skillCapturingGateway{}
-	c := newTestCoordinator(t, gw)
-	store := newTestWorkflowStore(t)
-	c.SetWorkflowStore(store)
-
-	c.cfg.Orchestrate = func(_ context.Context, _ string, progressFn func(string)) (string, error) {
-		progressFn("step one")
-		progressFn("step two")
-		// Mid-run the workflow must already be durable and incomplete — this is
-		// exactly the state a crash would leave for startup resume to find.
-		if incomplete, _ := store.ListIncomplete(); len(incomplete) != 1 {
-			t.Errorf("mid-run ListIncomplete = %d, want 1", len(incomplete))
-		}
-		return "finished", nil
-	}
-
-	if _, err := c.HandleMessage(context.Background(), "/orchestrate ship the release", "s9"); err != nil {
-		t.Fatalf("HandleMessage: %v", err)
-	}
-
-	// After completion: exactly one workflow, done, with both steps recorded.
-	incomplete, _ := store.ListIncomplete()
-	if len(incomplete) != 0 {
-		t.Errorf("completed orchestration still incomplete: %d", len(incomplete))
-	}
-	all := mustLoadOnly(t, store)
-	if all.Goal != "ship the release" || all.Status != WorkflowDone || all.Result != "finished" {
-		t.Errorf("workflow = %+v", all)
-	}
-	if len(all.Steps) != 2 || all.Steps[0].Description != "step one" {
-		t.Errorf("steps = %+v", all.Steps)
-	}
-}
-
-func TestCoordinatorFailedOrchestrationMarksWorkflowFailed(t *testing.T) {
-	gw := &skillCapturingGateway{}
-	c := newTestCoordinator(t, gw)
-	store := newTestWorkflowStore(t)
-	c.SetWorkflowStore(store)
-
-	c.cfg.Orchestrate = func(_ context.Context, _ string, progressFn func(string)) (string, error) {
-		progressFn("step one")
-		return "", context.DeadlineExceeded
-	}
-	_, _ = c.HandleMessage(context.Background(), "/orchestrate doomed goal", "s9")
-
-	wf := mustLoadOnly(t, store)
-	if wf.Status != WorkflowFailed {
-		t.Errorf("status = %q, want failed", wf.Status)
-	}
-	if incomplete, _ := store.ListIncomplete(); len(incomplete) != 0 {
-		t.Errorf("failed workflow listed incomplete (would resume a failed goal forever)")
-	}
-}
-
-// mustLoadOnly returns the single workflow in the store.
-func mustLoadOnly(t *testing.T, store *WorkflowStore) *WorkflowState {
-	t.Helper()
-	rows, err := store.db.Query(`SELECT id FROM workflows`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	var ids []string
-	for rows.Next() {
-		var id string
-		_ = rows.Scan(&id)
-		ids = append(ids, id)
-	}
-	if len(ids) != 1 {
-		t.Fatalf("store holds %d workflows, want 1", len(ids))
-	}
-	wf, err := store.load(ids[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	return wf
-}
+// NOTE: the coordinator no longer records orchestrations in the WorkflowStore
+// — durability moved to the orchestration package's RunStore, which persists
+// the real task DAG and resumes at task granularity (production audit H3). See
+// internal/orchestration/resume_test.go for the recovery coverage that
+// replaced the coordinator-integration tests here.

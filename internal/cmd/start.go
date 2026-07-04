@@ -884,7 +884,20 @@ func runStart(ctx context.Context, pidfile string) error {
 	// --- data pipeline agent (M17) ------------------------------------------
 	pipelineFn := buildPipeline(gateway, msg, resolveWorkingDir(), apiSrv, log)
 	// --- multi-agent orchestration (M18) ------------------------------------
-	orchestrateFn := buildOrchestration(gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics)
+	// Durable run store (production audit H3): the planned DAG and every task
+	// transition persist so interrupted runs resume at task granularity on the
+	// next boot — completed tasks keep their results and never re-execute.
+	var orchStore *orchestration.RunStore
+	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
+		orchDB := filepath.Join(cacheDir, "vortex", "memory", "orchestration.db")
+		if rs, rerr := orchestration.NewRunStore(orchDB); rerr != nil {
+			log.Warn("orchestration run store unavailable, crash recovery disabled", "err", rerr)
+		} else {
+			orchStore = rs
+			mgr.OnShutdown("orchestration-store", func(context.Context) error { return rs.Close() })
+		}
+	}
+	orchestrateFn := buildOrchestration(ctx, gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics, orchStore)
 	// Durable workflow store (upgrade 4 — crash recovery): opened here so the
 	// startup resume below can notify via the messaging router.
 	var workflowStore *agents.WorkflowStore
@@ -896,7 +909,7 @@ func runStart(ctx context.Context, pidfile string) error {
 			workflowStore = ws
 		}
 	}
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn, workflowStore)
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
 		apiSrv.SetAgentRuntime(adapter)
@@ -1592,7 +1605,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc, workflows *agents.WorkflowStore) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -1679,11 +1692,6 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		log.Info("episodic memory loaded", "db", episodesDB)
 	}
 
-	// Durable workflows (upgrade 4): orchestration progress persists step by
-	// step so interrupted goals are resumed on the next startup.
-	if workflows != nil {
-		coord.SetWorkflowStore(workflows)
-	}
 	rt, err := agents.NewRuntime(agents.RuntimeConfig{
 		Bus: bus, Coordinator: coord, MaxAgents: 8,
 		SandboxBase: sandboxBase, Logger: log,
@@ -1926,11 +1934,12 @@ func (a *orchestrateNotifyAdapter) Notify(ctx context.Context, title, body strin
 // buildOrchestration constructs the M18 multi-agent orchestration agent: a
 // planner-driven runner whose AgentRouter dispatches each task to the right
 // specialized agent handler (research/devops/data_pipeline) or the gateway
-// (general). Registers the API and returns an OrchestrateFunc. Returns nil when
-// no AI gateway is configured (planning needs it).
-func buildOrchestration(gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger,
+// (general). Registers the API, kicks off crash-recovery resume when a run
+// store is provided (production audit H3), and returns an OrchestrateFunc.
+// Returns nil when no AI gateway is configured (planning needs it).
+func buildOrchestration(ctx context.Context, gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger,
 	research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc,
-	metrics *observability.Metrics) agents.OrchestrateFunc {
+	metrics *observability.Metrics, store *orchestration.RunStore) agents.OrchestrateFunc {
 	if gateway == nil {
 		apiSrv.SetOrchestrateProvider(nil)
 		return nil
@@ -1965,6 +1974,15 @@ func buildOrchestration(gateway agents.AIGateway, msg messagingComponents, apiSr
 	// typed-nil *Metrics becoming a non-nil interface inside the agent.
 	if metrics != nil {
 		agent.SetMetrics(metrics)
+	}
+	if store != nil {
+		agent.SetStore(store)
+		// Resume runs the previous process left mid-flight (crash or hard
+		// stop), sequentially in the background (production audit H3).
+		// Completion is announced through the agent's notifier.
+		go agent.ResumeIncomplete(ctx, func(s string) {
+			log.Info("orchestration resume", "progress", s)
+		})
 	}
 
 	apiSrv.SetOrchestrateProvider(func(ctx context.Context, goal string) (string, error) {
