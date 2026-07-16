@@ -58,6 +58,20 @@ type codeReplyMsg struct {
 	err     error
 }
 
+// codeStreamMsg carries an opened reply stream for a submitted task (AGUI
+// item C — token streaming). err is set when the stream could not be opened.
+type codeStreamMsg struct {
+	ch  <-chan string
+	err error
+}
+
+// codeChunkMsg carries one streamed reply fragment, or the end of the stream.
+type codeChunkMsg struct {
+	ch    <-chan string
+	chunk string
+	done  bool
+}
+
 // codeTickMsg drives the periodic panel refresh.
 type codeTickMsg time.Time
 
@@ -94,6 +108,10 @@ type CodeModel struct {
 	// selector is an active arrow-key option menu parsed from a coordinator
 	// QUESTION:/OPTIONS: reply (nil = none).
 	selector *OptionSelector
+
+	// streamText accumulates the in-flight streamed reply; the chat panel
+	// renders it as a live growing line until the final codeReplyMsg lands.
+	streamText string
 
 	// toolResults are collapsible tool-use rows (write_file/run_terminal) shown
 	// in the chat panel; toolCursor is the row Enter toggles (-1 = none focused).
@@ -376,8 +394,24 @@ func (m CodeModel) submit(text string) tea.Cmd {
 		if c == nil {
 			return codeReplyMsg{err: fmt.Errorf("not connected — run: vortex start")}
 		}
-		resp, err := c.Submit(goal, sid)
-		return codeReplyMsg{content: resp, err: err}
+		// Stream the reply (AGUI item C): fragments render live in the chat
+		// panel; the final codeReplyMsg with the full text follows at the end.
+		ch, err := c.SubmitStream(goal, sid)
+		if err != nil {
+			return codeReplyMsg{err: err}
+		}
+		return codeStreamMsg{ch: ch}
+	}
+}
+
+// readStream waits for the next streamed reply fragment (one per Update).
+func readStream(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		chunk, ok := <-ch
+		if !ok {
+			return codeChunkMsg{ch: ch, done: true}
+		}
+		return codeChunkMsg{ch: ch, chunk: chunk}
 	}
 }
 
@@ -524,6 +558,25 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 		return m, cmd
+
+	case codeStreamMsg:
+		if msg.err != nil {
+			return m.Update(codeReplyMsg{err: msg.err})
+		}
+		m.streamText = ""
+		return m, readStream(msg.ch)
+
+	case codeChunkMsg:
+		if msg.done {
+			// Replay the accumulated text through the normal reply path so
+			// selector parsing, feed ingestion, and error rendering behave
+			// exactly as the buffered flow.
+			full := m.streamText
+			m.streamText = ""
+			return m.Update(codeReplyMsg{content: full})
+		}
+		m.streamText += msg.chunk
+		return m, readStream(msg.ch)
 
 	case codeReplyMsg:
 		m.working = false

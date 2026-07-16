@@ -52,18 +52,22 @@ B. **FIXED — Collapsible tool results (BUG 3.2) not built.** Team tool executo
    publishes `tool_result` bus messages; the chat panel renders them as
    collapsible `▶ write_file calc.py` rows (Enter toggles, ▼ expands to a
    line-numbered body). (`26aab99`)
-C. **True per-token streaming.** *Server side done; TUI rendering remaining.*
-   `CompleteStreamForModel`/`CompleteStream` stream natively from claude /
-   openai / deepseek / groq / azure-openai / openrouter (SSE), ollama (NDJSON),
-   and gemini (SSE), with a buffered single-delta fallback for bedrock;
-   `POST /v1/chat/completions` (`stream:true`) and `POST /api/agents/submit`
-   (`Accept: text/event-stream`) forward real deltas as they arrive.
-   Coordinator replies stream at line granularity through a state machine
-   shared with `filterCoordinatorResponse`, so internal artifacts never reach
-   the stream (verified live: an injected `Goal:` line was stripped mid-stream).
-   Remaining: the TUI chat panel still renders replies whole — `tui.Client.Submit`
-   is buffered JSON; it needs an SSE variant plus incremental chat-panel
-   rendering to show tokens as they arrive.
+C. **FIXED — True per-token streaming.** End to end:
+   - *Gateway:* `CompleteStreamForModel`/`CompleteStream` stream natively from
+     claude / openai / deepseek / groq / azure-openai / openrouter (SSE),
+     ollama (NDJSON), and gemini (SSE), with a buffered single-delta fallback
+     for bedrock. Provider/slot failover applies only until the first delta.
+   - *API:* `POST /v1/chat/completions` (`stream:true`) and
+     `POST /api/agents/submit` (`Accept: text/event-stream`) forward real
+     deltas as they arrive. Coordinator replies stream at line granularity
+     through a state machine shared with `filterCoordinatorResponse`, so
+     internal artifacts never reach the stream (verified live: an injected
+     `Goal:` line was stripped mid-stream).
+   - *TUI:* `Client.SubmitStream` consumes the SSE chunks; the `vortex code`
+     chat panel renders the reply as a live growing line with the spinner as
+     its cursor, replacing the static "thinking..." wait.
+   (The legacy dashboard agents tab still uses buffered `Submit` — cosmetic,
+   it renders replies whole.)
 D. **FIXED — Direct-chatting the coordinator 502s.** `teamCollab.Chat` now routes
    `agentID=="coordinator"` to the coordinator's `HandleMessage` entry point
    (own system prompt + response filtering) instead of the nil A2A
@@ -73,5 +77,4 @@ E. **FIXED — `MessageBus.AgentMessages` was test-only.** Now exposed via
    slice of the comms feed for dashboard/TUI drill-down. Wired through the
    `CommsProvider` interface + `teamCollab` adapter over `*a2a.MessageBus`.
 
-Item C (TUI token plumbing) is the only remaining open item. All FIXED items
-are committed and tested.
+All items are FIXED, committed, and tested.

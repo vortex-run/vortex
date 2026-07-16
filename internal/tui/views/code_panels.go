@@ -334,11 +334,17 @@ func (m CodeModel) renderChat() string {
 	if m.selector != nil && m.selector.Active {
 		b.WriteString("\n" + renderSelector(m.selector, w) + "\n")
 	}
-	// Animated thinking indicator while a task is in flight (Claude-Code feel).
+	// While a task is in flight: once tokens arrive the reply streams in live
+	// with the spinner as its cursor (AGUI item C); before the first token,
+	// the animated "thinking..." indicator (Claude-Code feel).
 	if m.working {
 		c := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor("coordinator")))
-		b.WriteString(c.Render(brand.IconAgent+" "+m.selectAgentName()) + " " +
-			m.spin.View() + brand.StyleSubtitle.Render(" thinking...") + "\n")
+		if m.streamText != "" {
+			b.WriteString(c.Render(m.selectAgentName()+": ") + m.streamText + " " + m.spin.View() + "\n")
+		} else {
+			b.WriteString(c.Render(brand.IconAgent+" "+m.selectAgentName()) + " " +
+				m.spin.View() + brand.StyleSubtitle.Render(" thinking...") + "\n")
+		}
 	}
 	return lipgloss.NewStyle().Width(w).Render(b.String())
 }
