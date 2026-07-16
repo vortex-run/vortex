@@ -1041,8 +1041,11 @@ func strParamOr(params map[string]any, key, def string) string {
 // HandleMessage is the main entry point for a user message. It classifies the
 // intent via the AI gateway and routes to the matching handler. For M10, the
 // BUILD_APP/RESEARCH/DEVOPS/DATA handlers are stubs; GENERAL_QUESTION is
-// answered directly and UNKNOWN returns a clarifying question.
-func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID string) (string, error) {
+// answered directly and UNKNOWN returns a clarifying question. The context is
+// accepted for interface stability but deliberately unused: routing decouples
+// onto its own 120s deadline so a short-lived caller (the TUI cancels on nav)
+// cannot abort work mid-flight (see handleMessageInner).
+func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string) (string, error) {
 	reply, err := c.handleMessageInner(userMsg, sessionID, nil)
 	if err != nil {
 		return reply, err
