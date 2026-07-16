@@ -19,6 +19,14 @@ type AIGateway interface {
 	Complete(ctx context.Context, prompt string, systemPrompt string) (string, error)
 }
 
+// StreamingAIGateway is optionally implemented by gateways that can stream
+// tokens (AGUI audit item C). onDelta receives text fragments as the model
+// produces them; the full text is returned as well. The coordinator upgrades
+// to streaming via type assertion, so non-streaming gateways keep working.
+type StreamingAIGateway interface {
+	CompleteStream(ctx context.Context, prompt, systemPrompt string, onDelta func(string)) (string, error)
+}
+
 // StubAIGateway is a fixed-response AIGateway used until the real gateway is
 // wired in (M11). It echoes a canned reply and, for intent classification,
 // returns GENERAL_QUESTION so the coordinator answers directly.
@@ -412,43 +420,122 @@ func skillPromptBlock(sk *Skill) string {
 // the primary fix is to not generate this text, but models and legacy paths can
 // still leak it, so every coordinator reply is filtered before display.
 func filterCoordinatorResponse(raw string) string {
-	lines := strings.Split(raw, "\n")
-	clean := make([]string, 0, len(lines))
-	skip := false // skip a multi-line internal block until a blank line
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		low := strings.ToLower(trimmed)
-
-		// A blank line ends any block we were skipping.
-		if trimmed == "" {
-			skip = false
-			clean = append(clean, line)
-			continue
-		}
-
-		// Start of a multi-line internal block: skip it and the lines that follow.
-		if strings.Contains(low, "proven skill") ||
-			strings.HasPrefix(low, "steps:") ||
-			strings.Contains(low, "use this procedure") {
-			skip = true
-			continue
-		}
-
-		// Single-line internal artifacts: drop the line outright.
-		if strings.HasPrefix(low, "coordinator: goal:") ||
-			strings.HasPrefix(low, "goal:") ||
-			strings.Contains(low, "(tool:") ||
-			(strings.Contains(low, "tasks:") && strings.Contains(low, "completed")) ||
-			isInternalStepLine(trimmed) {
-			continue
-		}
-
-		if skip {
-			continue
-		}
-		clean = append(clean, line)
+	var f respFilter
+	var clean []string
+	for _, line := range strings.Split(raw, "\n") {
+		clean = append(clean, f.feedLine(line)...)
 	}
 	return strings.TrimSpace(strings.Join(clean, "\n"))
+}
+
+// respFilter is the line-state machine behind filterCoordinatorResponse. It is
+// shared by the batch path and the token-streaming path (streamFilter) so the
+// two can never diverge on what counts as an internal artifact.
+type respFilter struct {
+	skip       bool     // inside a multi-line internal block (ends at a blank line)
+	startedOut bool     // a non-blank line has been emitted (leading blanks dropped)
+	pendingWS  []string // interior blank lines held until a later line survives
+}
+
+// feedLine consumes one input line and returns the lines to emit for it (nil
+// when the line is internal or withheld). Blank lines are buffered and emitted
+// only when a later non-blank line survives, so trailing blanks never appear —
+// the streaming equivalent of the batch path's final TrimSpace.
+func (f *respFilter) feedLine(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	low := strings.ToLower(trimmed)
+
+	// A blank line ends any block we were skipping.
+	if trimmed == "" {
+		f.skip = false
+		if f.startedOut {
+			f.pendingWS = append(f.pendingWS, line)
+		}
+		return nil
+	}
+
+	// Start of a multi-line internal block: skip it and the lines that follow.
+	if strings.Contains(low, "proven skill") ||
+		strings.HasPrefix(low, "steps:") ||
+		strings.Contains(low, "use this procedure") {
+		f.skip = true
+		return nil
+	}
+
+	// Single-line internal artifacts: drop the line outright.
+	if strings.HasPrefix(low, "coordinator: goal:") ||
+		strings.HasPrefix(low, "goal:") ||
+		strings.Contains(low, "(tool:") ||
+		(strings.Contains(low, "tasks:") && strings.Contains(low, "completed")) ||
+		isInternalStepLine(trimmed) {
+		return nil
+	}
+
+	if f.skip {
+		return nil
+	}
+	out := append(f.pendingWS, line)
+	f.pendingWS = nil
+	f.startedOut = true
+	return out
+}
+
+// streamFilter applies the coordinator response filter to a token stream
+// incrementally: deltas are buffered until a full line is available, complete
+// lines run through the same respFilter state machine as the batch path, and
+// surviving lines are emitted with their joining newlines. The granularity is
+// one line — a fragment is never emitted before its line completes, because
+// the artifact predicates (e.g. "(tool:") can match anywhere in a line.
+// Close flushes the final unterminated line.
+type streamFilter struct {
+	f          respFilter
+	buf        strings.Builder // current partial line
+	emit       func(string)
+	emittedAny bool // something has been emitted (controls newline joining)
+	wroteAny   bool // Write was called at least once (streaming actually ran)
+}
+
+// newStreamFilter builds a streamFilter that forwards surviving text to emit.
+func newStreamFilter(emit func(string)) *streamFilter {
+	return &streamFilter{emit: emit}
+}
+
+// Write consumes one raw delta from the model stream.
+func (s *streamFilter) Write(delta string) {
+	s.wroteAny = true
+	for {
+		i := strings.IndexByte(delta, '\n')
+		if i < 0 {
+			s.buf.WriteString(delta)
+			return
+		}
+		line := s.buf.String() + delta[:i]
+		s.buf.Reset()
+		s.emitLines(s.f.feedLine(line))
+		delta = delta[i+1:]
+	}
+}
+
+// Close flushes the final partial line through the filter.
+func (s *streamFilter) Close() {
+	if s.buf.Len() == 0 {
+		return
+	}
+	line := s.buf.String()
+	s.buf.Reset()
+	s.emitLines(s.f.feedLine(line))
+}
+
+// emitLines forwards surviving lines, reconstructing join("\n") semantics.
+func (s *streamFilter) emitLines(lines []string) {
+	for _, ln := range lines {
+		if s.emittedAny {
+			s.emit("\n" + ln)
+		} else {
+			s.emit(ln)
+			s.emittedAny = true
+		}
+	}
 }
 
 // isInternalStepLine reports whether a line is a numbered internal step that
@@ -956,7 +1043,7 @@ func strParamOr(params map[string]any, key, def string) string {
 // BUILD_APP/RESEARCH/DEVOPS/DATA handlers are stubs; GENERAL_QUESTION is
 // answered directly and UNKNOWN returns a clarifying question.
 func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID string) (string, error) {
-	reply, err := c.handleMessageInner(ctx, userMsg, sessionID)
+	reply, err := c.handleMessageInner(userMsg, sessionID, nil)
 	if err != nil {
 		return reply, err
 	}
@@ -964,9 +1051,36 @@ func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID stri
 	return filterCoordinatorResponse(reply), nil
 }
 
+// HandleMessageStream is HandleMessage's streaming variant: onDelta receives
+// the reply incrementally as the model produces it. Fragments are emitted at
+// line granularity, each having passed the same internal-artifact filter as
+// the buffered path, so nothing reaches the stream that HandleMessage would
+// have stripped. Only the direct-answer path streams tokens; routed branches
+// (team, build, research, ...) emit their whole filtered reply as one delta,
+// so consumers see uniform delta-then-close behavior either way. The returned
+// string is the complete filtered reply.
+func (c *Coordinator) HandleMessageStream(ctx context.Context, userMsg, sessionID string, onDelta func(string)) (string, error) {
+	if onDelta == nil {
+		return c.HandleMessage(ctx, userMsg, sessionID)
+	}
+	sf := newStreamFilter(onDelta)
+	reply, err := c.handleMessageInner(userMsg, sessionID, sf)
+	if err != nil {
+		return reply, err
+	}
+	filtered := filterCoordinatorResponse(reply)
+	if sf.wroteAny {
+		sf.Close() // flush the final unterminated line to the stream
+	} else if filtered != "" {
+		onDelta(filtered) // non-streamed branch: single filtered delta
+	}
+	return filtered, nil
+}
+
 // handleMessageInner is the routing core of HandleMessage (filtering applied by
-// the public wrapper).
-func (c *Coordinator) handleMessageInner(_ context.Context, userMsg, sessionID string) (string, error) {
+// the public wrappers). When sf is non-nil and the gateway supports streaming,
+// the direct-answer path streams its reply through sf as it is generated.
+func (c *Coordinator) handleMessageInner(userMsg, sessionID string, sf *streamFilter) (string, error) {
 	if strings.TrimSpace(userMsg) == "" {
 		return "", fmt.Errorf("agents: empty user message")
 	}
@@ -1034,7 +1148,18 @@ func (c *Coordinator) handleMessageInner(_ context.Context, userMsg, sessionID s
 			sysPrompt += skillPromptBlock(skill)
 		}
 		sysPrompt += c.recallMemoriesBlock(userMsg)
-		reply, err := c.cfg.AIGateway.Complete(ctx, c.contextPrompt(sessionID, userMsg), sysPrompt)
+		prompt := c.contextPrompt(sessionID, userMsg)
+		var (
+			reply string
+			err   error
+		)
+		if sg, ok := c.cfg.AIGateway.(StreamingAIGateway); ok && sf != nil {
+			// Token streaming (AGUI item C): deltas pass through the shared
+			// line filter, so internal artifacts never reach the stream.
+			reply, err = sg.CompleteStream(ctx, prompt, sysPrompt, sf.Write)
+		} else {
+			reply, err = c.cfg.AIGateway.Complete(ctx, prompt, sysPrompt)
+		}
 		if skill != nil {
 			c.markSkillUsed(skill.ID, err == nil)
 		}

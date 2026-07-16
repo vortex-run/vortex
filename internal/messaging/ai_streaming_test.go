@@ -232,6 +232,81 @@ func TestCompleteStreamForModel_Budget(t *testing.T) {
 	}
 }
 
+func TestCompleteStream_FailoverBeforeFirstDelta(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusInternalServerError)
+	}))
+	defer failing.Close()
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"recovered"}}]}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer ok.Close()
+
+	g, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderOpenAI, APIKey: "k", Endpoint: failing.URL, Models: []string{"a"}, Priority: 0},
+			{Name: ProviderDeepSeek, APIKey: "k", Endpoint: ok.URL, Models: []string{"b"}, Priority: 1},
+		},
+		Client: ok.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	text, serr := g.CompleteStream(context.Background(), "hi", "sys", func(d string) { deltas = append(deltas, d) })
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if text != "recovered" || len(deltas) != 1 || deltas[0] != "recovered" {
+		t.Errorf("text=%q deltas=%q, want failover to second provider", text, deltas)
+	}
+}
+
+func TestCompleteStream_NoFailoverAfterFirstDelta(t *testing.T) {
+	// First provider emits a delta and then dies mid-stream; failing over
+	// would duplicate the emitted output, so the stream must error instead.
+	var secondCalled bool
+	dying := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"partial"}}]}`+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		panic(http.ErrAbortHandler) // slam the connection mid-stream
+	}))
+	defer dying.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalled = true
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer second.Close()
+
+	g, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{
+			{Name: ProviderOpenAI, APIKey: "k", Endpoint: dying.URL, Models: []string{"a"}, Priority: 0},
+			{Name: ProviderDeepSeek, APIKey: "k", Endpoint: second.URL, Models: []string{"b"}, Priority: 1},
+		},
+		Client: dying.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deltas []string
+	_, serr := g.CompleteStream(context.Background(), "hi", "sys", func(d string) { deltas = append(deltas, d) })
+	if serr == nil {
+		t.Fatal("want error after mid-stream death, got nil")
+	}
+	if secondCalled {
+		t.Error("second provider was tried after output had been emitted")
+	}
+	if len(deltas) != 1 || deltas[0] != "partial" {
+		t.Errorf("deltas = %q, want the partial output only", deltas)
+	}
+}
+
 func TestStreamUnknownModelFallsBackToPrimary(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

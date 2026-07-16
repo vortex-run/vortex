@@ -52,15 +52,18 @@ B. **FIXED — Collapsible tool results (BUG 3.2) not built.** Team tool executo
    publishes `tool_result` bus messages; the chat panel renders them as
    collapsible `▶ write_file calc.py` rows (Enter toggles, ▼ expands to a
    line-numbered body). (`26aab99`)
-C. **True per-token streaming.** *Gateway + OpenAI-compat surface done;
-   TUI chat plumbing remaining.* `CompleteStreamForModel` streams natively from
-   claude / openai / deepseek / groq / azure-openai / openrouter (SSE), ollama
-   (NDJSON), and gemini (SSE), with a buffered single-delta fallback for
-   bedrock; `POST /v1/chat/completions` with `stream:true` now forwards real
-   provider deltas as they arrive instead of compute-then-chunk. Remaining: the
-   TUI chat panel still streams *events* (task/result), not tokens — plumbing
-   deltas through `Coordinator.HandleMessage`/`Runtime.Submit` needs a design
-   for response filtering on partial output.
+C. **True per-token streaming.** *Server side done; TUI rendering remaining.*
+   `CompleteStreamForModel`/`CompleteStream` stream natively from claude /
+   openai / deepseek / groq / azure-openai / openrouter (SSE), ollama (NDJSON),
+   and gemini (SSE), with a buffered single-delta fallback for bedrock;
+   `POST /v1/chat/completions` (`stream:true`) and `POST /api/agents/submit`
+   (`Accept: text/event-stream`) forward real deltas as they arrive.
+   Coordinator replies stream at line granularity through a state machine
+   shared with `filterCoordinatorResponse`, so internal artifacts never reach
+   the stream (verified live: an injected `Goal:` line was stripped mid-stream).
+   Remaining: the TUI chat panel still renders replies whole — `tui.Client.Submit`
+   is buffered JSON; it needs an SSE variant plus incremental chat-panel
+   rendering to show tokens as they arrive.
 D. **FIXED — Direct-chatting the coordinator 502s.** `teamCollab.Chat` now routes
    `agentID=="coordinator"` to the coordinator's `HandleMessage` entry point
    (own system prompt + response filtering) instead of the nil A2A

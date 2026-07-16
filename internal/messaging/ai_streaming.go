@@ -69,6 +69,119 @@ func (g *AIGateway) CompleteStreamForModel(ctx context.Context, model, prompt, s
 	return text, tokens, nil
 }
 
+// CompleteStream is Complete's streaming variant: it tries providers in
+// priority order (or, when key rotation is enabled, health-scored slots),
+// invoking onDelta with each text fragment the active provider produces.
+// Failover happens only until the first delta — once output has reached the
+// caller, a retry would duplicate it, so the stream fails instead.
+func (g *AIGateway) CompleteStream(ctx context.Context, prompt, systemPrompt string, onDelta func(string)) (string, error) {
+	if onDelta == nil {
+		onDelta = func(string) {}
+	}
+	if g.keyRotationEnabled() {
+		return g.completeStreamRotating(ctx, prompt, systemPrompt, detectRequestType(prompt), onDelta)
+	}
+	if g.budgetExceeded() {
+		return "", ErrBudgetExceeded
+	}
+	var lastErr error
+	for _, p := range g.cfg.Providers {
+		emitted := false
+		text, tokens, err := g.streamProvider(ctx, p, prompt, systemPrompt, func(d string) {
+			emitted = true
+			onDelta(d)
+		})
+		if err != nil {
+			lastErr = err
+			if emitted {
+				return "", err
+			}
+			continue
+		}
+		if tokens <= 0 {
+			tokens = estimateTokens(prompt, text)
+		}
+		g.recordCost(g.modelOf(p), tokens)
+		g.mu.Lock()
+		g.rolloverLocked()
+		g.requestsToday++
+		g.mu.Unlock()
+		return text, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("messaging: no providers available")
+	}
+	return "", lastErr
+}
+
+// completeStreamRotating mirrors completeRotating for streams: select a slot,
+// stream from its provider, record outcomes for health scoring, and fail over
+// to the next healthy slot only while nothing has been emitted yet.
+func (g *AIGateway) completeStreamRotating(ctx context.Context, prompt, systemPrompt, requestType string, onDelta func(string)) (string, error) {
+	g.mu.Lock()
+	router, store := g.router, g.keyStore
+	g.mu.Unlock()
+
+	var lastErr error
+	tried := map[string]int{}
+	for i := 0; i < maxSlotTries; i++ {
+		slot, err := router.SelectSlot(ctx, requestType)
+		if err != nil {
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", err
+		}
+		if tried[slot.ID] >= 3 {
+			if lastErr != nil {
+				return "", lastErr
+			}
+			return "", fmt.Errorf("messaging: all key slots exhausted")
+		}
+		tried[slot.ID]++
+
+		full, derr := store.GetDecrypted(slot.ID)
+		if derr != nil {
+			lastErr = derr
+			router.RecordError(slot.ID, derr, false)
+			continue
+		}
+		p := providerFromSlot(full)
+
+		emitted := false
+		start := g.now()
+		text, tokens, cerr := g.streamProvider(ctx, p, prompt, systemPrompt, func(d string) {
+			emitted = true
+			onDelta(d)
+		})
+		latency := g.now().Sub(start).Milliseconds()
+		if cerr != nil {
+			lastErr = cerr
+			router.RecordError(slot.ID, cerr, isRateLimit(cerr))
+			if emitted {
+				return "", cerr
+			}
+			continue
+		}
+		if tokens <= 0 {
+			tokens = estimateTokens(prompt, text)
+		}
+		cost := g.costOf(g.modelOf(p), tokens)
+		router.RecordSuccess(slot.ID, latency, cost)
+		router.RecordCost(slot.ID, 0) // budget check (cost already added by RecordSuccess)
+		g.mu.Lock()
+		g.rolloverLocked()
+		g.requestsToday++
+		g.costToday += cost
+		g.mu.Unlock()
+		return text, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("messaging: all key slots failed")
+	}
+	return "", lastErr
+}
+
 // estimateTokens approximates a token count from text length (~4 chars per
 // token, the same heuristic as the API layer's splitUsage) for providers whose
 // stream reports no usage.
