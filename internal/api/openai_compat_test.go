@@ -32,7 +32,7 @@ func newOpenAITestServer(t *testing.T, models []string, c *recordingCompleter) *
 	t.Helper()
 	holder := config.NewHolder(&config.Config{})
 	s := New("127.0.0.1:0", holder, "test", discardLogger())
-	s.SetOpenAIGateway(func() []string { return models }, c.complete)
+	s.SetOpenAIGateway(func() []string { return models }, c.complete, nil)
 	return s
 }
 
@@ -193,6 +193,132 @@ func TestChatCompletions_StreamingSSE(t *testing.T) {
 	}
 }
 
+// recordingStreamer is an OpenAIStreamFunc test double: it emits scripted
+// deltas and records what the handler passed to it.
+type recordingStreamer struct {
+	model, prompt, system string
+	deltas                []string
+	tokens                int
+	err                   error
+}
+
+func (r *recordingStreamer) stream(_ context.Context, model, prompt, system string, onDelta func(string)) (string, int, error) {
+	r.model, r.prompt, r.system = model, prompt, system
+	for _, d := range r.deltas {
+		onDelta(d)
+	}
+	if r.err != nil {
+		return "", 0, r.err
+	}
+	return strings.Join(r.deltas, ""), r.tokens, nil
+}
+
+func TestChatCompletions_StreamLiveForwardsDeltas(t *testing.T) {
+	c := &recordingCompleter{reply: "buffered — must not be used"}
+	st := &recordingStreamer{deltas: []string{"He", "llo", " world"}, tokens: 40}
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	s.SetOpenAIGateway(func() []string { return nil }, c.complete, st.stream)
+
+	body := `{"model":"m","stream":true,"messages":[{"role":"system","content":"sys"},{"role":"user","content":"go"}]}`
+	rec := serve(s, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	if c.model != "" {
+		t.Errorf("buffered complete was called (model=%q); live path must bypass it", c.model)
+	}
+	if st.model != "m" || st.prompt != "go" || st.system != "sys" {
+		t.Errorf("stream func got (%q, %q, %q)", st.model, st.prompt, st.system)
+	}
+
+	frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n")
+	if frames[len(frames)-1] != "data: [DONE]" {
+		t.Fatalf("last frame = %q, want [DONE]", frames[len(frames)-1])
+	}
+	var contents []string
+	var sawRole, sawStop, sawUsage bool
+	for _, ln := range frames[:len(frames)-1] {
+		payload := strings.TrimPrefix(ln, "data: ")
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+			Usage *struct {
+				TotalTokens int `json:"total_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			t.Fatalf("invalid SSE JSON %q: %v", payload, err)
+		}
+		if len(chunk.Choices) == 0 {
+			if chunk.Usage != nil && chunk.Usage.TotalTokens == 40 {
+				sawUsage = true
+			}
+			continue
+		}
+		if chunk.Choices[0].Delta.Role == "assistant" {
+			sawRole = true
+		}
+		if chunk.Choices[0].Delta.Content != "" {
+			contents = append(contents, chunk.Choices[0].Delta.Content)
+		}
+		if fr := chunk.Choices[0].FinishReason; fr != nil && *fr == "stop" {
+			sawStop = true
+		}
+	}
+	if !sawRole || !sawStop || !sawUsage {
+		t.Errorf("sawRole=%v sawStop=%v sawUsage=%v, want all", sawRole, sawStop, sawUsage)
+	}
+	// Deltas must arrive individually and in order — not concatenated by the
+	// handler into one frame (that would be buffering, the bug this fixes).
+	if len(contents) != 3 || contents[0] != "He" || contents[1] != "llo" || contents[2] != " world" {
+		t.Errorf("delta frames = %q, want [He llo \" world\"]", contents)
+	}
+}
+
+func TestChatCompletions_StreamLiveErrorMidStream(t *testing.T) {
+	st := &recordingStreamer{err: context.DeadlineExceeded}
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	s.SetOpenAIGateway(func() []string { return nil }, (&recordingCompleter{}).complete, st.stream)
+
+	body := `{"model":"m","stream":true,"messages":[{"role":"user","content":"go"}]}`
+	rec := serve(s, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+	// The 200 is committed once streaming starts; the error travels in-band.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"error"`) || !strings.Contains(out, "deadline") {
+		t.Errorf("stream error not reported in-band: %q", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "data: [DONE]") {
+		t.Errorf("stream not terminated with [DONE]: %q", out)
+	}
+}
+
+func TestChatCompletions_StreamFallsBackWhenNoStreamFunc(t *testing.T) {
+	// stream:true with a nil stream func must still work (compute-then-chunk).
+	c := &recordingCompleter{reply: "fallback reply", tokens: 5}
+	s := newOpenAITestServer(t, nil, c)
+	body := `{"model":"m","stream":true,"messages":[{"role":"user","content":"go"}]}`
+	rec := serve(s, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if out := rec.Body.String(); !strings.Contains(out, "fallback reply") || !strings.Contains(out, "data: [DONE]") {
+		t.Errorf("buffered fallback stream malformed: %q", out)
+	}
+}
+
 func TestChatCompletions_Validation(t *testing.T) {
 	s := newOpenAITestServer(t, nil, &recordingCompleter{reply: "x"})
 	cases := map[string]string{
@@ -252,7 +378,7 @@ func TestOpenAIEndpoints_AuthBearerAndMissing(t *testing.T) {
 	}
 	s.SetAuth(auth.NewAuthMiddleware(keys, nil, rbac), keys, rbac)
 	s.SetOpenAIGateway(func() []string { return []string{"m"} },
-		(&recordingCompleter{reply: "ok"}).complete)
+		(&recordingCompleter{reply: "ok"}).complete, nil)
 
 	// No credential — 401 even from localhost (data plane).
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)

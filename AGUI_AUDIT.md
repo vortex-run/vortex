@@ -52,9 +52,15 @@ B. **FIXED — Collapsible tool results (BUG 3.2) not built.** Team tool executo
    publishes `tool_result` bus messages; the chat panel renders them as
    collapsible `▶ write_file calc.py` rows (Enter toggles, ▼ expands to a
    line-numbered body). (`26aab99`)
-C. **True per-token streaming.** We stream *events* (task/result), not AI tokens.
-   Real token streaming needs `CompleteStream` plumbed through every provider in
-   the AI gateway — a large, provider-by-provider change.
+C. **True per-token streaming.** *Gateway + OpenAI-compat surface done;
+   TUI chat plumbing remaining.* `CompleteStreamForModel` streams natively from
+   claude / openai / deepseek / groq / azure-openai / openrouter (SSE), ollama
+   (NDJSON), and gemini (SSE), with a buffered single-delta fallback for
+   bedrock; `POST /v1/chat/completions` with `stream:true` now forwards real
+   provider deltas as they arrive instead of compute-then-chunk. Remaining: the
+   TUI chat panel still streams *events* (task/result), not tokens — plumbing
+   deltas through `Coordinator.HandleMessage`/`Runtime.Submit` needs a design
+   for response filtering on partial output.
 D. **FIXED — Direct-chatting the coordinator 502s.** `teamCollab.Chat` now routes
    `agentID=="coordinator"` to the coordinator's `HandleMessage` entry point
    (own system prompt + response filtering) instead of the nil A2A
@@ -64,4 +70,5 @@ E. **FIXED — `MessageBus.AgentMessages` was test-only.** Now exposed via
    slice of the comms feed for dashboard/TUI drill-down. Wired through the
    `CommsProvider` interface + `teamCollab` adapter over `*a2a.MessageBus`.
 
-Item C is the only remaining open item. All FIXED items are committed and tested.
+Item C (TUI token plumbing) is the only remaining open item. All FIXED items
+are committed and tested.

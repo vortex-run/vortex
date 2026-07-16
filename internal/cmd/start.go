@@ -847,7 +847,8 @@ func runStart(ctx context.Context, pidfile string) error {
 		})
 		// OpenAI-compatible /v1/* surface (upgrade 3): any OpenAI-speaking tool
 		// can use VORTEX as its AI backend with provider routing + cost tracking.
-		apiSrv.SetOpenAIGateway(gw.ModelIDs, gw.CompleteForModel)
+		// CompleteStreamForModel serves stream:true with true token streaming.
+		apiSrv.SetOpenAIGateway(gw.ModelIDs, gw.CompleteForModel, gw.CompleteStreamForModel)
 		log.Info("OpenAI-compatible server enabled", "endpoint", "/v1/chat/completions", "models", gw.ModelIDs())
 
 		// Autonomous API key rotation: when key slots are configured, route
