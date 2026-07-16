@@ -1584,7 +1584,11 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 				log.Warn("workflow resume submit failed", "goal", wf.Goal, "err", serr)
 				return
 			}
-			<-ch // drain the (buffered) response so the runtime can finish it
+			// Drain the full response (which may now arrive as multiple
+			// streamed chunks) so the producer goroutine can finish and
+			// release its concurrency slot.
+			for range ch { //nolint:revive // intentional drain
+			}
 		}()
 	}
 }

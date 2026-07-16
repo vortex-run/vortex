@@ -64,6 +64,74 @@ func TestCodeStream_ChunksRenderLiveThenFinalize(t *testing.T) {
 	}
 }
 
+func TestCodeStream_SecondSubmitSupersedesFirst(t *testing.T) {
+	m := sizedCode()
+	m.working = true
+
+	first := make(chan string, 2)
+	first <- "first partial"
+	updated, cmd1 := m.Update(codeStreamMsg{ch: first})
+	m = updated.(CodeModel)
+	updated, cmd1 = m.Update(cmd1()) // consume "first partial"
+	m = updated.(CodeModel)
+
+	// The user submits again before the first reply completes.
+	second := make(chan string, 2)
+	second <- "second reply"
+	close(second)
+	updated, cmd2 := m.Update(codeStreamMsg{ch: second})
+	m = updated.(CodeModel)
+
+	// The first stream's partial text is preserved as a chat line, not lost
+	// or interleaved into the new stream's buffer.
+	if m.streamText != "" {
+		t.Fatalf("streamText = %q, want reset for the new stream", m.streamText)
+	}
+	var partialKept bool
+	for _, line := range m.chat {
+		if line.Content == "first partial" {
+			partialKept = true
+		}
+	}
+	if !partialKept {
+		t.Error("superseded stream's partial text should land as a chat line")
+	}
+
+	// Late chunks from the first stream are drained silently.
+	first <- " late chunk"
+	close(first)
+	updated, cmd1 = m.Update(cmd1()) // " late chunk" — stale, must not render
+	m = updated.(CodeModel)
+	if strings.Contains(m.streamText, "late chunk") {
+		t.Errorf("stale chunk leaked into live buffer: %q", m.streamText)
+	}
+	updated, _ = m.Update(cmd1()) // stale done — must not replay as a reply
+	m = updated.(CodeModel)
+	for _, line := range m.chat {
+		if strings.Contains(line.Content, "late chunk") {
+			t.Errorf("stale stream replayed into chat: %q", line.Content)
+		}
+	}
+
+	// The second stream proceeds normally.
+	updated, cmd2 = m.Update(cmd2()) // "second reply"
+	m = updated.(CodeModel)
+	if m.streamText != "second reply" {
+		t.Fatalf("streamText = %q, want second stream's text", m.streamText)
+	}
+	updated, _ = m.Update(cmd2()) // done
+	m = updated.(CodeModel)
+	var finalKept bool
+	for _, line := range m.chat {
+		if line.Content == "second reply" {
+			finalKept = true
+		}
+	}
+	if !finalKept {
+		t.Errorf("second reply missing from chat; chat = %+v", m.chat)
+	}
+}
+
 func TestCodeStream_ConnectionNoticeRoutesToErrorPath(t *testing.T) {
 	m := sizedCode()
 	m.working = true

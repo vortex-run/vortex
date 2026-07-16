@@ -501,31 +501,44 @@ func (c *Client) SubmitStream(msg, sessionID string) (<-chan string, error) {
 		defer close(out)
 		defer cancel()
 		defer func() { _ = resp.Body.Close() }()
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
-			line := sc.Text()
-			if !strings.HasPrefix(line, "data:") {
-				continue // skip event:/comment/blank lines
-			}
-			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if payload == "" || payload == "{}" {
-				continue // the terminal done event carries {}
-			}
+		ssePayloads(resp.Body, func(payload string) bool {
 			var rec struct {
 				Chunk string `json:"chunk"`
 			}
 			if json.Unmarshal([]byte(payload), &rec) != nil || rec.Chunk == "" {
-				continue
+				return true
 			}
 			select {
 			case out <- rec.Chunk:
+				return true
 			case <-ctx.Done():
-				return
+				return false
 			}
-		}
+		})
 	}()
 	return out, nil
+}
+
+// ssePayloads scans a Server-Sent-Events response body, invoking fn with each
+// non-empty "data:" payload; event:/comment/blank lines and the empty/{}
+// terminal frames are skipped. fn returns false to stop early. Shared by
+// StreamComms and SubmitStream so the SSE wire handling lives in one place.
+func ssePayloads(body io.Reader, fn func(payload string) bool) {
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "{}" {
+			continue
+		}
+		if !fn(payload) {
+			return
+		}
+	}
 }
 
 // Approve posts an approve/reject decision for a pending agent tool action and
@@ -637,27 +650,18 @@ func (c *Client) StreamComms(ctx context.Context) (<-chan CommsRecord, error) {
 	go func() {
 		defer close(out)
 		defer func() { _ = resp.Body.Close() }()
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
-			line := sc.Text()
-			if !strings.HasPrefix(line, "data:") {
-				continue // skip event:/comment/blank lines
-			}
-			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if payload == "" || payload == "{}" {
-				continue
-			}
+		ssePayloads(resp.Body, func(payload string) bool {
 			var rec CommsRecord
 			if json.Unmarshal([]byte(payload), &rec) != nil {
-				continue
+				return true
 			}
 			select {
 			case out <- rec:
+				return true
 			case <-ctx.Done():
-				return
+				return false
 			}
-		}
+		})
 	}()
 	return out, nil
 }

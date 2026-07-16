@@ -111,7 +111,11 @@ type CodeModel struct {
 
 	// streamText accumulates the in-flight streamed reply; the chat panel
 	// renders it as a live growing line until the final codeReplyMsg lands.
+	// streamCh identifies the active stream: chunks from a superseded stream
+	// (the user submitted again mid-reply) are drained silently so two
+	// streams can never interleave in streamText.
 	streamText string
+	streamCh   <-chan string
 
 	// toolResults are collapsible tool-use rows (write_file/run_terminal) shown
 	// in the chat panel; toolCursor is the row Enter toggles (-1 = none focused).
@@ -563,16 +567,33 @@ func (m CodeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m.Update(codeReplyMsg{err: msg.err})
 		}
+		// A new submit while a reply was still streaming: materialize the
+		// superseded stream's partial text as a chat line (best effort) so it
+		// isn't lost, then switch to the new stream. The old stream's later
+		// chunks are drained silently below via the streamCh identity check.
+		if m.streamCh != nil && m.streamText != "" {
+			m.chat = append(m.chat, ChatLine{Role: "agent", Agent: "coordinator", Content: m.streamText})
+		}
 		m.streamText = ""
+		m.streamCh = msg.ch
 		return m, readStream(msg.ch)
 
 	case codeChunkMsg:
+		if msg.ch != m.streamCh {
+			// Superseded stream: keep draining so its client goroutine can
+			// finish, but never touch the live buffer or replay its reply.
+			if msg.done {
+				return m, nil
+			}
+			return m, readStream(msg.ch)
+		}
 		if msg.done {
 			// Replay the accumulated text through the normal reply path so
 			// selector parsing, feed ingestion, and error rendering behave
 			// exactly as the buffered flow.
 			full := m.streamText
 			m.streamText = ""
+			m.streamCh = nil
 			return m.Update(codeReplyMsg{content: full})
 		}
 		m.streamText += msg.chunk
