@@ -22,10 +22,10 @@ import (
 //	azure-openai / openrouter           SSE chat-completions chunks
 //	ollama                              NDJSON generate chunks
 //	gemini                              SSE streamGenerateContent
+//	bedrock                             AWS binary event-stream (ai_bedrock_stream.go)
 //
-// Bedrock's response stream is AWS's binary event-stream protocol (not line
-// based); it falls back to the buffered call and emits the full text as one
-// delta, so callers need no per-provider special casing.
+// Unknown providers fall back to the buffered call and emit the full text as
+// one delta, so callers need no per-provider special casing.
 
 // maxStreamDuration caps one streaming completion end to end. Streams run on
 // the caller's context — a disconnected consumer should abort the upstream
@@ -206,7 +206,9 @@ func (g *AIGateway) streamProvider(ctx context.Context, p AIProvider, prompt, sy
 		return g.streamOllama(ctx, p, prompt, systemPrompt, onDelta)
 	case ProviderGemini:
 		return g.streamGemini(ctx, p, prompt, systemPrompt, onDelta)
-	default: // bedrock (binary event-stream) and unknown providers
+	case ProviderBedrock:
+		return g.streamBedrock(ctx, p, prompt, systemPrompt, onDelta)
+	default: // unknown providers: buffered call, whole reply as one delta
 		text, tokens, err := g.callProvider(ctx, p, prompt, systemPrompt)
 		if err == nil && text != "" {
 			onDelta(text)

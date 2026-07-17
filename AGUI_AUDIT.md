@@ -54,9 +54,10 @@ B. **FIXED — Collapsible tool results (BUG 3.2) not built.** Team tool executo
    line-numbered body). (`26aab99`)
 C. **FIXED — True per-token streaming.** End to end:
    - *Gateway:* `CompleteStreamForModel`/`CompleteStream` stream natively from
-     claude / openai / deepseek / groq / azure-openai / openrouter (SSE),
-     ollama (NDJSON), and gemini (SSE), with a buffered single-delta fallback
-     for bedrock. Provider/slot failover applies only until the first delta.
+     **all nine providers**: claude / openai / deepseek / groq / azure-openai /
+     openrouter (SSE), ollama (NDJSON), gemini (SSE), and bedrock (AWS binary
+     event-stream, `invoke-with-response-stream`). Provider/slot failover
+     applies only until the first delta.
    - *API:* `POST /v1/chat/completions` (`stream:true`) and
      `POST /api/agents/submit` (`Accept: text/event-stream`) forward real
      deltas as they arrive. Coordinator replies stream at line granularity
