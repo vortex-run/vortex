@@ -65,6 +65,36 @@ func TestAgents_ResponseClearsThinking(t *testing.T) {
 	}
 }
 
+func TestAgents_StreamChunksAccumulateThenFinalize(t *testing.T) {
+	m := NewAgents(nil)
+	m.thinking = true
+
+	ch := make(chan string, 2)
+	ch <- "streamed "
+	ch <- "reply"
+	close(ch)
+
+	updated, cmd := m.Update(agentStreamMsg{ch: ch})
+	am := updated.(AgentsModel)
+	updated, cmd = am.Update(cmd()) // "streamed "
+	am = updated.(AgentsModel)
+	if am.streamText != "streamed " || !am.Thinking() {
+		t.Fatalf("streamText = %q thinking = %v after first chunk", am.streamText, am.Thinking())
+	}
+	updated, cmd = am.Update(cmd()) // "reply"
+	am = updated.(AgentsModel)
+	updated, _ = am.Update(cmd()) // done
+	am = updated.(AgentsModel)
+
+	if am.Thinking() || am.streamText != "" {
+		t.Errorf("thinking = %v streamText = %q after done, want cleared", am.Thinking(), am.streamText)
+	}
+	last := am.Messages()[len(am.Messages())-1]
+	if last.Role != "agent" || last.Content != "streamed reply" {
+		t.Errorf("final message = %+v, want the accumulated reply", last)
+	}
+}
+
 func TestAgents_RoleStyling(t *testing.T) {
 	m := NewAgents(nil)
 	m.messages = append(m.messages,

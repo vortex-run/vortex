@@ -281,9 +281,10 @@ func (g *AIGateway) streamClaude(ctx context.Context, p AIProvider, prompt, syst
 
 // streamOpenAICompat streams any of the OpenAI-compatible providers — they
 // share the chat-completions chunk shape and differ only in endpoint, auth,
-// and default model. No stream_options is sent (support varies across the
-// compatible providers); usage is read when a chunk carries it, otherwise the
-// caller estimates.
+// and default model. Providers documented to support it get
+// stream_options.include_usage so streamed cost tracking is exact; the rest
+// are estimated by the caller (Azure's pinned api-version and some compat
+// gateways reject the field, so it is opt-in per provider).
 func (g *AIGateway) streamOpenAICompat(ctx context.Context, p AIProvider, prompt, systemPrompt string, onDelta func(string)) (string, int, error) {
 	model := g.modelOf(p)
 	if model == "" {
@@ -307,6 +308,10 @@ func (g *AIGateway) streamOpenAICompat(ctx context.Context, p AIProvider, prompt
 	}
 	if includeModel {
 		payload["model"] = model
+	}
+	switch p.Name {
+	case ProviderOpenAI, ProviderDeepSeek, ProviderOpenRouter:
+		payload["stream_options"] = map[string]any{"include_usage": true}
 	}
 	var (
 		b      strings.Builder

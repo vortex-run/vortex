@@ -117,6 +117,39 @@ func TestStreamOpenAI_NoUsageEstimatesTokens(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAICompat_IncludeUsageOptIn(t *testing.T) {
+	// openai/deepseek/openrouter get stream_options.include_usage (exact
+	// streamed cost); azure's pinned api-version rejects it, so it must not.
+	for _, tc := range []struct {
+		provider string
+		want     bool
+	}{
+		{ProviderOpenAI, true},
+		{ProviderDeepSeek, true},
+		{ProviderOpenRouter, true},
+		{ProviderAzureOpenAI, false},
+		{ProviderGroq, false},
+	} {
+		var gotBody map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		}))
+		g := streamGateway(t, srv, AIProvider{Name: tc.provider, APIKey: "k", Models: []string{"m1"}}, AIGatewayConfig{})
+		_, _, err := g.CompleteStreamForModel(context.Background(), "m1", "hi", "", nil)
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.provider, err)
+		}
+		_, has := gotBody["stream_options"]
+		if has != tc.want {
+			t.Errorf("%s: stream_options present = %v, want %v", tc.provider, has, tc.want)
+		}
+	}
+}
+
 func TestStreamOllama_NDJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/generate" {

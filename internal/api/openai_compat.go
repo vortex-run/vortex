@@ -93,6 +93,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		openaiError(w, http.StatusServiceUnavailable, "server_error", "AI gateway not configured")
 		return
 	}
+	// Generations (buffered or streamed) can outlive the 60s WriteTimeout;
+	// the gateway bounds the call instead.
+	allowLongResponse(w)
 	var req openaiChatRequest
 	r.Body = http.MaxBytesReader(w, r.Body, openaiMaxBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -250,6 +253,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openaiError(w, http.StatusServiceUnavailable, "server_error", "AI gateway not configured")
 		return
 	}
+	// Buffered AI generation; may exceed the server's 60s WriteTimeout.
+	allowLongResponse(w)
 	var req openaiResponsesRequest
 	r.Body = http.MaxBytesReader(w, r.Body, openaiMaxBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
