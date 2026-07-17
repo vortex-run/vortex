@@ -349,6 +349,9 @@ func (t RunTerminalTool) Execute(ctx context.Context, params map[string]any) (an
 	name, args := shellCommand(command)
 	cmd := exec.CommandContext(cctx, name, args...)
 	cmd.Dir = resolvedCwd
+	// Never hand the server's environment (provider keys, tokens) to a
+	// user-approved command (production audit M5).
+	cmd.Env = scrubbedEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
