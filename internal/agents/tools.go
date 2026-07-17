@@ -3,9 +3,11 @@ package agents
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -305,6 +307,9 @@ type WriteFileTool struct{ SandboxDir string }
 // Name returns the tool name.
 func (WriteFileTool) Name() string { return "write_file" }
 
+// SideEffecting marks file writes for effect fencing (H3 increment 2).
+func (WriteFileTool) SideEffecting() bool { return true }
+
 // Description returns a human-readable summary.
 func (WriteFileTool) Description() string { return "Write a file within the agent sandbox" }
 
@@ -482,6 +487,9 @@ func NewRunCommandTool(sandboxDir string, allowed []string) RunCommandTool {
 
 // Name returns the tool name.
 func (RunCommandTool) Name() string { return "run_command" }
+
+// SideEffecting marks command execution for effect fencing (H3 increment 2).
+func (RunCommandTool) SideEffecting() bool { return true }
 
 // Description returns a human-readable summary.
 func (RunCommandTool) Description() string { return "Run a whitelisted command in the sandbox" }
@@ -718,6 +726,10 @@ type SandboxedToolRegistry struct {
 	bus             *Bus
 	audit           AuditLogger
 	actor           string
+	// ledger, when set, fences side-effecting tools under an effect scope
+	// (production audit H3 increment 2): a call already journaled for the
+	// scope replays its recorded result instead of re-executing.
+	ledger *EffectLedger
 }
 
 // NewSandboxedRegistry constructs a sandboxed registry over the given base
@@ -743,6 +755,14 @@ func (s *SandboxedToolRegistry) WithAudit(log AuditLogger, actor string) *Sandbo
 	return s
 }
 
+// WithEffectLedger enables side-effect fencing: executions that carry an
+// effect scope (WithEffectScope) and target a SideEffecting tool are journaled
+// and replayed instead of re-executed on a resumed attempt.
+func (s *SandboxedToolRegistry) WithEffectLedger(l *EffectLedger) *SandboxedToolRegistry {
+	s.ledger = l
+	return s
+}
+
 // SandboxDir returns the configured sandbox directory.
 func (s *SandboxedToolRegistry) SandboxDir() string { return s.sandboxDir }
 
@@ -754,21 +774,59 @@ func (s *SandboxedToolRegistry) List() []string { return s.registry.List() }
 
 // Execute looks up and runs a tool, recording the execution (and its outcome)
 // to the audit log when configured. Restrictions are enforced by the tools
-// themselves, which the registry binds to this sandbox.
+// themselves, which the registry binds to this sandbox. Under an effect scope,
+// side-effecting tools are fenced through the effect ledger: an already
+// journaled call replays its recorded result instead of re-executing.
 func (s *SandboxedToolRegistry) Execute(ctx context.Context, name string, params map[string]any) (any, error) {
 	tool, err := s.registry.Get(name)
 	if err != nil {
 		return nil, err
 	}
-	result, execErr := tool.Execute(ctx, params)
-	if s.audit != nil {
-		detail := map[string]any{"tool": name, "ok": execErr == nil}
-		if execErr != nil {
-			detail["error"] = execErr.Error()
+
+	// Side-effect fence (production audit H3 increment 2).
+	scope, scoped := EffectScope(ctx)
+	se, marked := tool.(SideEffecting)
+	if s.ledger != nil && scoped && marked && se.SideEffecting() {
+		key := s.ledger.CallKey(scope, name, params)
+		if recorded, ok := s.ledger.Lookup(scope, key); ok {
+			var replayed any
+			if json.Unmarshal([]byte(recorded), &replayed) != nil {
+				replayed = recorded
+			}
+			if s.audit != nil {
+				_ = s.audit.Append(ctx, s.actor, "tool.execute", name,
+					map[string]any{"tool": name, "ok": true, "replayed": true, "scope": scope})
+			}
+			return replayed, nil
 		}
-		_ = s.audit.Append(ctx, s.actor, "tool.execute", name, detail)
+		result, execErr := tool.Execute(ctx, params)
+		if execErr == nil {
+			encoded, jerr := json.Marshal(result)
+			if jerr == nil {
+				if cerr := s.ledger.Commit(scope, key, string(encoded)); cerr != nil {
+					slog.Default().Warn("agents: journaling tool effect", "tool", name, "scope", scope, "err", cerr)
+				}
+			}
+		}
+		s.auditExec(ctx, name, execErr)
+		return result, execErr
 	}
+
+	result, execErr := tool.Execute(ctx, params)
+	s.auditExec(ctx, name, execErr)
 	return result, execErr
+}
+
+// auditExec records one execution outcome to the audit log when configured.
+func (s *SandboxedToolRegistry) auditExec(ctx context.Context, name string, execErr error) {
+	if s.audit == nil {
+		return
+	}
+	detail := map[string]any{"tool": name, "ok": execErr == nil}
+	if execErr != nil {
+		detail["error"] = execErr.Error()
+	}
+	_ = s.audit.Append(ctx, s.actor, "tool.execute", name, detail)
 }
 
 // ExecuteApproved runs a tool with the human-approval gate disabled. It is

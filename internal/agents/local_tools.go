@@ -193,6 +193,9 @@ type WriteLocalFileTool struct {
 // Name returns the tool name.
 func (WriteLocalFileTool) Name() string { return "write_file" }
 
+// SideEffecting marks local file writes for effect fencing (H3 increment 2).
+func (WriteLocalFileTool) SideEffecting() bool { return true }
+
 // Description returns a human-readable summary.
 func (WriteLocalFileTool) Description() string { return "Write a local file (approval required)" }
 
@@ -248,6 +251,9 @@ type EditFileTool struct {
 
 // Name returns the tool name.
 func (EditFileTool) Name() string { return "edit_file" }
+
+// SideEffecting marks file edits for effect fencing (H3 increment 2).
+func (EditFileTool) SideEffecting() bool { return true }
 
 // Description returns a human-readable summary.
 func (EditFileTool) Description() string {
@@ -310,6 +316,9 @@ type RunTerminalTool struct {
 
 // Name returns the tool name.
 func (RunTerminalTool) Name() string { return "run_terminal" }
+
+// SideEffecting marks terminal commands for effect fencing (H3 increment 2).
+func (RunTerminalTool) SideEffecting() bool { return true }
 
 // Description returns a human-readable summary.
 func (RunTerminalTool) Description() string { return "Run a terminal command (approval required)" }

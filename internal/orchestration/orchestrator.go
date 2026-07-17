@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/agents"
 )
 
 // Executor runs a single task for a given agent type, returning its result.
@@ -234,6 +236,12 @@ func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(ctx, o.cfg.TaskTimeout)
 		defer cancel()
+	}
+	// Effect scope (production audit H3 increment 2): when the run is durable,
+	// scope this task's side-effecting tool calls so a crash-resumed re-run
+	// replays already-journaled effects instead of re-executing them.
+	if o.cfg.Store != nil && o.cfg.RunID != "" {
+		runCtx = agents.WithEffectScope(runCtx, o.cfg.RunID+"/"+t.ID)
 	}
 
 	result, err := o.cfg.Executor.Execute(runCtx, t, o.mem)
