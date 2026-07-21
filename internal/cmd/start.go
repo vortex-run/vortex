@@ -1641,6 +1641,18 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	if auditLog != nil {
 		sandboxed = sandboxed.WithAudit(auditLog, "coordinator")
 	}
+	// Side-effect fence (production audit H3 increment 2): journal
+	// side-effecting tool calls under durable-run scopes so a crash-resumed
+	// orchestration task replays already-performed effects instead of
+	// re-executing them. Optional — the runtime works unfenced without it.
+	if ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db")); lerr != nil {
+		log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
+	} else {
+		if perr := ledger.PruneOlderThan(7 * 24 * time.Hour); perr != nil {
+			log.Warn("pruning effect ledger", "err", perr)
+		}
+		sandboxed = sandboxed.WithEffectLedger(ledger)
+	}
 
 	// Local filesystem + terminal tools (real machine access, approval-gated),
 	// confined to the working directory so writes/cwd stay inside the user's

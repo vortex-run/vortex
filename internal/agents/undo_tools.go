@@ -109,6 +109,9 @@ type UndoTool struct {
 // Name returns the tool name.
 func (UndoTool) Name() string { return "undo" }
 
+// SideEffecting marks undo (a file restore) for effect fencing (H3 increment 2).
+func (UndoTool) SideEffecting() bool { return true }
+
 // Description returns a human-readable summary.
 func (UndoTool) Description() string { return "Undo the last file write (approval required)" }
 
