@@ -51,6 +51,14 @@ jobs:
         # push/PR, not only at release time (audit M7).
         run: task test:race
 
+      - name: Test (release build tag)
+        # Shipped binaries are built with `-tags=release`, which makes the
+        # agent command-approval gate unwaivable (audit I6). That code path
+        # is invisible to the untagged suite above, so exercise it here —
+        # otherwise the guarantee could regress silently and only a released
+        # binary would show it.
+        run: go test -tags release ./internal/agents/...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

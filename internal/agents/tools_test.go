@@ -165,8 +165,10 @@ func TestReadFileTool_RejectsEscape(t *testing.T) {
 
 func TestRunCommandTool_RunsAllowed(t *testing.T) {
 	dir := t.TempDir()
-	// "go version" is allowed; RequireApproval is false (zero value) so it runs.
-	res, err := RunCommandTool{SandboxDir: dir}.Execute(context.Background(),
+	// "go version" is allowed; `approved` marks this as the post-approval
+	// execution, which is how a real run reaches the command (and keeps the
+	// test valid under the release build tag, where the gate is unwaivable).
+	res, err := RunCommandTool{SandboxDir: dir, approved: true}.Execute(context.Background(),
 		map[string]any{"command": "go", "args": []string{"version"}})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
