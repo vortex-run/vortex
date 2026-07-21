@@ -23,12 +23,19 @@ import (
 // model, returning the reply text and the provider-reported total token count.
 type OpenAICompleteFunc func(ctx context.Context, model, prompt, systemPrompt string) (string, int, error)
 
+// OpenAIStreamFunc is the streaming variant: it invokes onDelta with each text
+// fragment as the provider produces it and returns the full text and token
+// count (AGUI audit item C — true token streaming).
+type OpenAIStreamFunc func(ctx context.Context, model, prompt, systemPrompt string, onDelta func(string)) (string, int, error)
+
 // SetOpenAIGateway wires the /v1/* OpenAI-compatible endpoints to the AI
 // gateway: models lists servable model IDs, complete routes a request to the
-// provider serving the requested model.
-func (s *Server) SetOpenAIGateway(models func() []string, complete OpenAICompleteFunc) {
+// provider serving the requested model, and stream is its token-streaming
+// variant (nil degrades stream:true requests to buffered compute-then-chunk).
+func (s *Server) SetOpenAIGateway(models func() []string, complete OpenAICompleteFunc, stream OpenAIStreamFunc) {
 	s.openaiModels = models
 	s.openaiComplete = complete
+	s.openaiStream = stream
 }
 
 // openaiMaxBody bounds /v1/* request bodies (1 MB, matching the management
@@ -86,6 +93,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		openaiError(w, http.StatusServiceUnavailable, "server_error", "AI gateway not configured")
 		return
 	}
+	// Generations (buffered or streamed) can outlive the 60s WriteTimeout;
+	// the gateway bounds the call instead.
+	allowLongResponse(w)
 	var req openaiChatRequest
 	r.Body = http.MaxBytesReader(w, r.Body, openaiMaxBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -102,14 +112,22 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt, system := flattenChatMessages(req.Messages)
+	id := "chatcmpl-" + newCorrelationID()
+	created := time.Now().Unix()
+
+	// True token streaming (AGUI item C): forward provider deltas as they
+	// arrive. Falls back to compute-then-chunk when no stream func is wired.
+	if req.Stream && s.openaiStream != nil {
+		s.streamChatCompletionLive(w, r, id, req.Model, created, prompt, system)
+		return
+	}
+
 	text, tokens, err := s.openaiComplete(r.Context(), req.Model, prompt, system)
 	if err != nil {
 		openaiError(w, http.StatusBadGateway, "server_error", err.Error())
 		return
 	}
 	promptTokens, completionTokens := splitUsage(prompt, text, tokens)
-	id := "chatcmpl-" + newCorrelationID()
-	created := time.Now().Unix()
 
 	if req.Stream {
 		s.streamChatCompletion(w, id, req.Model, created, text, promptTokens, completionTokens)
@@ -131,16 +149,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// streamChatCompletion emits the completed reply as OpenAI SSE delta chunks.
-// The gateway's providers are not streaming, so the reply is computed first
-// and then chunked — clients that require stream:true work unchanged.
-func (s *Server) streamChatCompletion(w http.ResponseWriter, id, model string, created int64, text string, promptTokens, completionTokens int) {
+// sseChatHeaders sets the SSE response headers and returns a chunk writer that
+// emits one chat.completion.chunk frame per call (flushing when supported).
+func sseChatHeaders(w http.ResponseWriter, id, model string, created int64) func(delta map[string]any, finish any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher, _ := w.(http.Flusher)
-
-	writeChunk := func(delta map[string]any, finish any) {
+	return func(delta map[string]any, finish any) {
 		chunk := map[string]any{
 			"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
 			"choices": []map[string]any{{"index": 0, "delta": delta, "finish_reason": finish}},
@@ -151,18 +167,11 @@ func (s *Server) streamChatCompletion(w http.ResponseWriter, id, model string, c
 			flusher.Flush()
 		}
 	}
-	writeChunk(map[string]any{"role": "assistant"}, nil)
-	// Chunk the reply so clients exercise their incremental render path.
-	const chunkSize = 256
-	for i := 0; i < len(text); i += chunkSize {
-		end := i + chunkSize
-		if end > len(text) {
-			end = len(text)
-		}
-		writeChunk(map[string]any{"content": text[i:end]}, nil)
-	}
-	writeChunk(map[string]any{}, "stop")
-	// Final usage frame (stream_options.include_usage shape), then terminator.
+}
+
+// writeChatUsageAndDone writes the final usage frame
+// (stream_options.include_usage shape) and the [DONE] terminator.
+func writeChatUsageAndDone(w http.ResponseWriter, id, model string, created int64, promptTokens, completionTokens int) {
 	usage := map[string]any{
 		"id": id, "object": "chat.completion.chunk", "created": created, "model": model,
 		"choices": []map[string]any{},
@@ -175,9 +184,57 @@ func (s *Server) streamChatCompletion(w http.ResponseWriter, id, model string, c
 	b, _ := json.Marshal(usage)
 	fmt.Fprintf(w, "data: %s\n\n", b)
 	fmt.Fprint(w, "data: [DONE]\n\n")
-	if flusher != nil {
+	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+// streamChatCompletionLive streams provider deltas to the client as OpenAI SSE
+// chunks the moment they arrive — true token streaming (AGUI audit item C).
+// An upstream error is reported as an SSE error object: the 200 status is
+// already committed once streaming starts, matching OpenAI's own mid-stream
+// error behavior.
+func (s *Server) streamChatCompletionLive(w http.ResponseWriter, r *http.Request, id, model string, created int64, prompt, system string) {
+	writeChunk := sseChatHeaders(w, id, model, created)
+	writeChunk(map[string]any{"role": "assistant"}, nil)
+
+	text, tokens, err := s.openaiStream(r.Context(), model, prompt, system, func(delta string) {
+		writeChunk(map[string]any{"content": delta}, nil)
+	})
+	if err != nil {
+		b, _ := json.Marshal(map[string]any{
+			"error": map[string]any{"message": err.Error(), "type": "server_error", "code": nil},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return
+	}
+	writeChunk(map[string]any{}, "stop")
+	promptTokens, completionTokens := splitUsage(prompt, text, tokens)
+	writeChatUsageAndDone(w, id, model, created, promptTokens, completionTokens)
+}
+
+// streamChatCompletion emits an already-computed reply as OpenAI SSE delta
+// chunks — the fallback when no token-streaming gateway func is wired. Clients
+// that require stream:true work unchanged; they just receive the reply in
+// fixed-size chunks after it completes.
+func (s *Server) streamChatCompletion(w http.ResponseWriter, id, model string, created int64, text string, promptTokens, completionTokens int) {
+	writeChunk := sseChatHeaders(w, id, model, created)
+	writeChunk(map[string]any{"role": "assistant"}, nil)
+	// Chunk the reply so clients exercise their incremental render path.
+	const chunkSize = 256
+	for i := 0; i < len(text); i += chunkSize {
+		end := i + chunkSize
+		if end > len(text) {
+			end = len(text)
+		}
+		writeChunk(map[string]any{"content": text[i:end]}, nil)
+	}
+	writeChunk(map[string]any{}, "stop")
+	writeChatUsageAndDone(w, id, model, created, promptTokens, completionTokens)
 }
 
 // openaiResponsesRequest is the (minimal) OpenAI Responses API request shape:
@@ -196,6 +253,8 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		openaiError(w, http.StatusServiceUnavailable, "server_error", "AI gateway not configured")
 		return
 	}
+	// Buffered AI generation; may exceed the server's 60s WriteTimeout.
+	allowLongResponse(w)
 	var req openaiResponsesRequest
 	r.Body = http.MaxBytesReader(w, r.Body, openaiMaxBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -44,8 +44,13 @@ type AgentsModel struct {
 	forgeSeen      int                 // count of progress-history lines already shown
 	pendingQs      []tui.ForgeQuestion // clarifying questions awaiting an answer
 	thinkingSince  time.Time           // when the in-flight submit started
-	width          int
-	height         int
+	// streamText accumulates the in-flight streamed reply (rendered live in
+	// place of the Thinking box); streamCh identifies the active stream so a
+	// stale stream can never write into the buffer.
+	streamText string
+	streamCh   <-chan string
+	width      int
+	height     int
 }
 
 // slashCommands are the Claude-Code-style quick commands shown when the input
@@ -89,6 +94,31 @@ func NewAgents(client *tui.Client) AgentsModel {
 type agentResponse struct {
 	content string
 	err     error
+}
+
+// agentStreamMsg carries an opened reply stream (AGUI item C); err is set
+// when the stream could not be opened.
+type agentStreamMsg struct {
+	ch  <-chan string
+	err error
+}
+
+// agentChunkMsg carries one streamed reply fragment, or the end of the stream.
+type agentChunkMsg struct {
+	ch    <-chan string
+	chunk string
+	done  bool
+}
+
+// readAgentStream waits for the next streamed reply fragment (one per Update).
+func readAgentStream(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		chunk, ok := <-ch
+		if !ok {
+			return agentChunkMsg{ch: ch, done: true}
+		}
+		return agentChunkMsg{ch: ch, chunk: chunk}
+	}
 }
 
 // forgeProgress carries a poll of a forge job's status.
@@ -181,7 +211,7 @@ func (m AgentsModel) pollForge() tea.Cmd {
 // Init starts the spinner ticking.
 func (m AgentsModel) Init() tea.Cmd { return m.spinner.Tick }
 
-// submit sends the current input to the coordinator.
+// submit sends the current input to the coordinator, streaming the reply.
 func (m AgentsModel) submit(text string) tea.Cmd {
 	c := m.client
 	sid := m.sessionID
@@ -189,8 +219,11 @@ func (m AgentsModel) submit(text string) tea.Cmd {
 		if c == nil {
 			return agentResponse{err: fmt.Errorf("not connected")}
 		}
-		resp, err := c.Submit(text, sid)
-		return agentResponse{content: resp, err: err}
+		ch, err := c.SubmitStream(text, sid)
+		if err != nil {
+			return agentResponse{err: err}
+		}
+		return agentStreamMsg{ch: ch}
 	}
 }
 
@@ -217,6 +250,36 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 		return m, cmd
+
+	case agentStreamMsg:
+		if msg.err != nil {
+			return m.Update(agentResponse{err: msg.err})
+		}
+		m.streamText = ""
+		m.streamCh = msg.ch
+		return m, readAgentStream(msg.ch)
+
+	case agentChunkMsg:
+		if msg.ch != m.streamCh {
+			// Stale stream (submits are blocked while thinking, so this is
+			// belt-and-braces): drain silently without touching the buffer.
+			if msg.done {
+				return m, nil
+			}
+			return m, readAgentStream(msg.ch)
+		}
+		if msg.done {
+			full := m.streamText
+			m.streamText = ""
+			m.streamCh = nil
+			// Route the accumulated reply through the normal handling so
+			// approvals, forge-job detection, and timing behave unchanged.
+			return m.Update(agentResponse{content: full})
+		}
+		m.streamText += msg.chunk
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+		return m, readAgentStream(msg.ch)
 
 	case agentResponse:
 		m.thinking = false
@@ -450,7 +513,13 @@ func (m AgentsModel) renderMessages() string {
 		}
 	}
 	if m.thinking {
-		b.WriteString(titledBox("VORTEX", m.spinner.View()+" Thinking…", brand.ColorBorder, minInt(w-2, 90)))
+		// Once tokens arrive, the reply streams into the box live with the
+		// spinner as its cursor; before that, the Thinking indicator.
+		body := m.spinner.View() + " Thinking…"
+		if m.streamText != "" {
+			body = m.streamText + " " + m.spinner.View()
+		}
+		b.WriteString(titledBox("VORTEX", body, brand.ColorBorder, minInt(w-2, 90)))
 	}
 	// Show the staged approval choice so the user sees it before confirming.
 	if m.awaiting && m.approvalChoice != "" {

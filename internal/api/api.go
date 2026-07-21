@@ -105,10 +105,13 @@ type Server struct {
 	readinessFunc func() error
 
 	// OpenAI-compatible /v1/* endpoints (upgrade 3): openaiModels lists
-	// servable model IDs, openaiComplete routes to the AI gateway by model.
-	// Wired via SetOpenAIGateway; nil yields 503.
+	// servable model IDs, openaiComplete routes to the AI gateway by model,
+	// openaiStream is its token-streaming variant (AGUI item C). Wired via
+	// SetOpenAIGateway; nil openaiModels/openaiComplete yields 503, nil
+	// openaiStream degrades stream:true to buffered compute-then-chunk.
 	openaiModels   func() []string
 	openaiComplete OpenAICompleteFunc
+	openaiStream   OpenAIStreamFunc
 
 	// notifier sends a message through the messaging router (POST /api/notify,
 	// used by the TUI code view's Telegram forward). Nil yields 503.
@@ -475,12 +478,27 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		Handler: handler,
 		// Bound every phase of a request so slowloris-style and idle
 		// connections cannot pin resources indefinitely (production audit I4).
+		// AI-backed and streaming endpoints legitimately outlive WriteTimeout;
+		// they opt out per-request via allowLongResponse.
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	return s
+}
+
+// allowLongResponse clears the per-request write deadline that the server's
+// global WriteTimeout (production audit I4) arms. The global timeout protects
+// the fast management endpoints; endpoints that legitimately exceed it — AI
+// completions that generate for minutes, and long-lived SSE streams (agent
+// replies, the comms feed, /v1 streaming) — call this at handler entry and are
+// bounded by their own context deadlines instead. Without it, any response
+// still being produced 60s after the request headers were read is cut off
+// mid-write. The error is ignored: recorders and exotic writers that do not
+// support deadline control (http.ErrNotSupported) simply keep the default.
+func allowLongResponse(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 // TeamAgentInfo is one team agent's status for /api/team/agents.

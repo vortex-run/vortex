@@ -45,7 +45,7 @@ GET  /metrics             → Prometheus exposition
 ```
 POST /api/agents/submit
   body: {"message":"...","session_id":"optional"}
-  Accept: text/event-stream  → SSE streamed chunks
+  Accept: text/event-stream  → SSE chunks: data: {"chunk":"..."} …, then event: done
   else                       → {"response":"...","session_id":"..."}
 
 GET  /api/agents/status              → {active_agents, total_messages, queue_depth}
@@ -55,6 +55,39 @@ GET  /api/agents/history/{id}        → messages for a session
 ```
 
 `session_id` must match `^[A-Za-z0-9_.-]{1,64}$`. Responses are capped at 8 MB.
+
+SSE chunks stream **as the model generates them** (true token streaming):
+direct coordinator answers arrive line by line while the reply is being
+written; routed tasks (team, build, research, …) arrive as a single chunk
+when they complete. Concatenating all chunks always yields exactly the
+non-streaming `response` text.
+
+## OpenAI-compatible API
+
+Any OpenAI-speaking tool (Claude Code, Aider, Cline, Cursor, …) can use
+VORTEX as its AI backend — with provider routing, failover, budget, and cost
+tracking — by pointing `OPENAI_BASE_URL` at VORTEX:
+
+```
+export OPENAI_BASE_URL=http://localhost:9090/v1
+export OPENAI_API_KEY=<your-vortex-key>
+```
+
+```
+GET  /v1/models            → servable model IDs (one per configured provider model)
+POST /v1/chat/completions  → standard chat-completions body
+                             "stream": true → SSE chat.completion.chunk frames,
+                             forwarded live as the provider produces tokens,
+                             then a usage frame and data: [DONE]
+POST /v1/responses         → minimal OpenAI Responses API (buffered)
+```
+
+Auth is unified: the same key works via `Authorization: Bearer` or
+`X-API-Key`. Requests route to the provider serving the requested model
+(exact match on configured models, then family heuristics, then the primary
+provider). Mid-stream provider errors are reported in-band as an SSE
+`{"error": …}` object, since the 200 status is already committed once
+streaming starts.
 
 ## VORTEX Forge
 
