@@ -1,5 +1,81 @@
 # VORTEX — Independent Production Readiness Audit
 
+> **Status note:** the findings below are the *original* reports, preserved as
+> written. Current remediation status is tracked in the addenda that follow —
+> read the newest one first. Several findings that read as open in the body
+> text are closed in-tree today.
+
+---
+
+## Re-audit addendum — 2026-07-22 (post-remediation status pass)
+
+**Scope:** verification of every original finding against `main` after the
+durable-execution, token-streaming, side-effect-fencing, and hardening work
+merged (PRs #4, #5, #7, #8, #9). Build, `go vet`, `go test ./...`, and
+`golangci-lint` are green; the merged binary was booted and driven end-to-end.
+
+### Current status of every finding
+
+| Finding | Status | Evidence |
+|---|---|---|
+| **C1** keys from cluster name | **Fixed** | `internal/keyring`: random 32-byte master key → HKDF-SHA256 per purpose |
+| **H1** session_id traversal | **Fixed** | `validSessionID` at the API + `filepath.Base` in the store |
+| **H2** SSRF rebinding | **Fixed** | `pkg/safedial` resolve-once, pin the IP, re-validate redirects |
+| **H3** no durable execution | **Fixed** | DAG + state transitions persisted (SQLite); crash resume with exactly-once completed tasks; side effects fenced by a replay journal. *Boundary below.* |
+| **H4** unsigned self-update | **⚠ Partial — action required** | Ed25519 verification implemented, but `ReleaseSigningPublicKey` is **empty**, so verification is **skipped** and only the SHA-256 checksum applies — the original flaw. Closing it needs a signing key provisioned by the maintainer. |
+| **H5** unbounded memory | **Fixed** | TTL+cap+sweep on session/limiter maps; A2A task maps FIFO-capped (N1) |
+| **M1** loopback bypass | **Fixed** | `VORTEX_TRUST_LOOPBACK` |
+| **M2** node-local state | **Open** | Architectural; needs a shared-state decision before multi-node |
+| **M3** non-atomic writes | **Fixed** | `pkg/atomicfile` |
+| **M4** placeholder autoscaler | **Fixed** | Real process-CPU sampler (`internal/perf`) |
+| **M5** weak tool containment | **Partial** | Allow-list + approval gate + catastrophic-command blocks + **environment scrubbing** (children no longer inherit provider keys/tokens). Namespace/container isolation still absent. |
+| **M6** stranded dependencies | **Fixed** | `TaskQueue.Validate()` fails fast on unknown deps and cycles |
+| **M7** no PR CI | **Fixed** | CI on push + **every** pull request (the `[main]` branch filter that skipped stacked PRs is removed) |
+| **M8** no agent-plane observability | **Fixed** | Orchestration/agent metrics emitted |
+| **L1–L5** | **Fixed** | Response cap; SQLite memory store; WS stub reconciled; secrets adapter cached; L5 closed with C1 |
+| **I1** documentation | **Partial** | `docs/` now carries 7 guides (install, configuration, agents, api, telegram, development, security); no OpenAPI spec or runbooks yet |
+| **I3** `/ready` aggregation | **Fixed** | `readinessFunc` |
+| **I4** request timeouts | **Fixed** | Read/Write/Idle timeouts, with an explicit opt-out for streaming/AI routes |
+| **I6** approval un-disableable | **Open** | See the new finding below |
+
+### New findings this pass
+
+**N2 — `max_tokens` hardcoded to 1000 (silent truncation).** *Fixed (#8).*
+Every Anthropic-shaped request (claude and bedrock, buffered and streaming)
+sent a literal `"max_tokens": 1000`. Because that API requires an explicit
+cap, this was the effective ceiling on all four paths: long generations were
+cut off mid-sentence with **no error and no log line**. The
+OpenAI-compatible endpoint also parsed the client's `max_tokens` and then
+discarded it, so a client asking for 4096 silently got 1000. Now resolved
+per request: caller value → `AIGatewayConfig.MaxTokens` → 8192 default.
+
+**N3 — CI skipped stacked pull requests entirely.** *Fixed (#8).*
+`ci.yml` filtered `pull_request` to `branches: [main]`, so a PR targeting a
+feature branch ran **no** Lint/Test/Integration — only the security workflow,
+which was never filtered, reported, making such a PR *look* checked. One PR
+in the stack reached the merge queue having never been tested or linted; when
+CI was corrected it immediately failed on a real formatting violation.
+
+**N4 — Approval gate is disabled by the zero value.** *Open (I6).*
+`RunCommandTool.RequireApproval` is a plain exported bool, so the struct
+literal `RunCommandTool{SandboxDir: d, AllowedCommands: c}` yields a command
+executor with **no approval gate** — the unsafe state is the default one. The
+constructor sets it correctly, but nothing forces construction through it.
+Given M5's containment gaps, the gate is the primary control and should not
+be one forgotten field away from off.
+
+### Honest boundaries (not defects, but do not over-read the "Fixed" column)
+
+- **H3 fencing covers tools executed through the sandboxed registry.**
+  Subsystems with their own execution paths (devops, pipeline internals)
+  remain at-least-once on crash resume until they adopt the effect ledger.
+- **M5 remains partial.** Environment scrubbing removes secret exfiltration
+  via child processes; it is not isolation. Unattended agent execution on an
+  untrusted workload still warrants a real sandbox.
+- **H4's mechanism is only as good as the pinned key** — which is currently
+  absent, so the auto-update path is integrity-checked, not authenticity-
+  checked.
+
 ---
 
 ## Re-audit addendum — 2026-07-03 (full-repo re-scan)
@@ -343,3 +419,48 @@ These are not polish items; they are foundational. They should be fixed **before
 **Path to Beta:** remediate C1 (key management), H1/H2/H4 (traversal, SSRF rebinding, signed updates), and H3/H5 (durable execution + bounded memory); add PR CI; reconcile or honestly disable the placeholder features. That is a focused, achievable program of work — call it ~6–10 engineer-weeks for the criticals/highs — and it would move the realistic verdict to **Beta**.
 
 *Audit performed by direct source inspection on 2026-06-10. Findings cite exact file:line locations for independent re-verification.*
+
+---
+
+# Revised Scorecard & Verdict — 2026-07-22
+
+The scorecard above is the **original** assessment and is retained for
+history. Against `main` today, after the remediation tracked in the top
+addendum:
+
+| Dimension | Was | Now | What changed |
+|---|---:|---:|---|
+| **Security** | 3 / 10 | **7 / 10** | C1, H1, H2, M1 closed; agent commands no longer inherit the server's secrets. Held back by M5 (no isolation), H4 (signing key not provisioned), I6. |
+| **Reliability** | 4 / 10 | **8 / 10** | Durable task-DAG execution with crash resume, exactly-once completed tasks, and side-effect fencing; atomic writes; bounded memory. Single-node still. |
+| **Scalability** | 3 / 10 | **4 / 10** | Unbounded maps and the placeholder autoscaler are gone, but state is still node-local (M2) — horizontal scale remains unavailable. |
+| **Maintainability** | 7 / 10 | **8 / 10** | Seven operator/developer guides; CI now actually runs on every PR. |
+| **Production Readiness** | 3 / 10 | **6 / 10** | The two disqualifying items (C1, H3) are closed. What remains is scale (M2) and containment depth (M5). |
+
+## Revised verdict: **Beta — for single-node deployments**
+
+The original report's own *Path to Beta* was: "remediate C1 (key management),
+H1/H2/H4 (traversal, SSRF rebinding, signed updates), and H3/H5 (durable
+execution + bounded memory); add PR CI; reconcile or honestly disable the
+placeholder features." Every item on that list is now done in-tree, with one
+asterisk: **H4's verification code ships but its signing key does not**, so
+the auto-update path is integrity-checked rather than authenticity-checked
+until a key is provisioned. That is an operational step, not a code gap.
+
+Two constraints keep this from being an unqualified production verdict, and
+both are honest limits rather than defects:
+
+1. **Single-node only (M2).** Control-plane state is node-local. Running two
+   nodes is not supported, so there is no HA story and no horizontal scale.
+2. **Containment is a gate, not a sandbox (M5).** Allow-listing, human
+   approval, catastrophic-command refusal, and environment scrubbing are
+   layered defences; they are not isolation. Unattended agent execution
+   against untrusted input still warrants a real sandbox.
+
+For a single-node deployment running trusted workloads, the foundational
+guarantees the original audit found missing — secret confidentiality, audit
+integrity, durable execution, bounded memory, tested changes — now hold.
+
+*Status pass performed 2026-07-22 by direct source inspection plus a
+runtime drive of the merged binary (server boot, agent SSE streaming,
+buffered/streamed parity, environment-scrub verification with a live child
+process).*
