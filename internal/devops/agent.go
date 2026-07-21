@@ -3,6 +3,7 @@ package devops
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/vortex-run/vortex/internal/agents"
@@ -25,11 +26,49 @@ type DevOpsAgent struct {
 	server *Server
 	docker *DockerManager
 	nginx  *NginxManager
+
+	// ledger, when set, fences this agent's side-effecting actions so a
+	// crash-resumed orchestration task replays their recorded outcome instead
+	// of re-running them (production audit H3, increment 2). Optional: without
+	// it the agent behaves exactly as before (at-least-once).
+	ledger *agents.EffectLedger
 }
 
 // NewDevOpsAgent constructs a DevOps agent. approver gates mutating ops.
 func NewDevOpsAgent(gateway agents.AIGateway, notifier Notifier, approver func(action string) bool) *DevOpsAgent {
 	return &DevOpsAgent{gateway: gateway, notifier: notifier, approver: approver}
+}
+
+// SetEffectLedger enables side-effect fencing for this agent's mutating
+// operations (restart, install, nginx changes, arbitrary remote commands).
+func (a *DevOpsAgent) SetEffectLedger(l *agents.EffectLedger) { a.ledger = l }
+
+// fence runs a side-effecting action at most once per (effect scope, action).
+// Under a durable orchestration task, a resumed attempt that reaches the same
+// action replays its recorded result instead of re-executing it — the audit's
+// H3 scenario is a devops command running a second time after a crash.
+//
+// Outside an effect scope, or with no ledger wired, it simply runs the action:
+// interactive devops requests are not resumable and must never be replayed.
+// Only successful outcomes are journaled, so a failed action is retried
+// normally on resume rather than replaying its error.
+func (a *DevOpsAgent) fence(ctx context.Context, action string, fn func() (string, error)) (string, error) {
+	scope, scoped := agents.EffectScope(ctx)
+	if !scoped || a.ledger == nil {
+		return fn()
+	}
+	key := a.ledger.CallKey(scope, "devops:"+action, nil)
+	if recorded, hit := a.ledger.Lookup(scope, key); hit {
+		return recorded, nil
+	}
+	out, err := fn()
+	if err != nil {
+		return out, err
+	}
+	if cerr := a.ledger.Commit(scope, key, out); cerr != nil {
+		slog.Default().Warn("devops: journaling effect", "action", action, "scope", scope, "err", cerr)
+	}
+	return out, nil
 }
 
 // Connect establishes an SSH connection to host and builds the sub-managers.
@@ -107,42 +146,54 @@ func (a *DevOpsAgent) Handle(ctx context.Context, msg string, progressFn func(st
 
 	case strings.HasPrefix(low, "restart "):
 		service := strings.TrimSpace(msg[len("restart "):])
-		emit("🔄 Restarting " + service + "…")
-		if err := a.server.ServiceRestart(ctx, service); err != nil {
-			return "", err
-		}
-		return "✓ Restarted " + service, nil
+		return a.fence(ctx, "restart:"+service, func() (string, error) {
+			emit("🔄 Restarting " + service + "…")
+			if err := a.server.ServiceRestart(ctx, service); err != nil {
+				return "", err
+			}
+			return "✓ Restarted " + service, nil
+		})
 
 	case strings.HasPrefix(low, "install "):
 		pkg := strings.TrimSpace(msg[len("install "):])
-		emit("📦 Installing " + pkg + "…")
-		if err := a.server.InstallPackage(ctx, pkg); err != nil {
-			return "", err
-		}
-		return "✓ Installed " + pkg, nil
+		return a.fence(ctx, "install:"+pkg, func() (string, error) {
+			emit("📦 Installing " + pkg + "…")
+			if err := a.server.InstallPackage(ctx, pkg); err != nil {
+				return "", err
+			}
+			return "✓ Installed " + pkg, nil
+		})
 
 	case strings.HasPrefix(low, "add nginx site "):
 		domain := strings.TrimSpace(msg[len("add nginx site "):])
-		emit("🌐 Adding nginx site " + domain + "…")
-		// Default upstream localhost:3000 unless the message names a port.
-		upstream := "http://localhost:3000"
-		if err := a.nginx.AddSite(ctx, domain, upstream, false); err != nil {
-			return "", err
-		}
-		return "✓ Added nginx site " + domain, nil
+		return a.fence(ctx, "nginx-site:"+domain, func() (string, error) {
+			emit("🌐 Adding nginx site " + domain + "…")
+			// Default upstream localhost:3000 unless the message names a port.
+			upstream := "http://localhost:3000"
+			if err := a.nginx.AddSite(ctx, domain, upstream, false); err != nil {
+				return "", err
+			}
+			return "✓ Added nginx site " + domain, nil
+		})
 
 	case strings.HasPrefix(low, "enable ssl "):
 		domain := strings.TrimSpace(msg[len("enable ssl "):])
-		emit("🔒 Enabling SSL for " + domain + "…")
-		if err := a.nginx.EnableSSL(ctx, domain, "admin@"+domain); err != nil {
-			return "", err
-		}
-		return "✓ SSL enabled for " + domain, nil
+		return a.fence(ctx, "enable-ssl:"+domain, func() (string, error) {
+			emit("🔒 Enabling SSL for " + domain + "…")
+			if err := a.nginx.EnableSSL(ctx, domain, "admin@"+domain); err != nil {
+				return "", err
+			}
+			return "✓ SSL enabled for " + domain, nil
+		})
 
 	default:
-		// General command — run via the approval gate, streaming output.
-		emit("$ " + msg)
-		return a.server.RunCommand(ctx, msg, progressFn)
+		// General command — run via the approval gate, streaming output. This
+		// is the branch the audit's H3 scenario names explicitly (a devops
+		// command re-executing after a crash), so it is fenced too.
+		return a.fence(ctx, "command:"+msg, func() (string, error) {
+			emit("$ " + msg)
+			return a.server.RunCommand(ctx, msg, progressFn)
+		})
 	}
 }
 
