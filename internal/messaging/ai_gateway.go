@@ -44,7 +44,47 @@ type AIGatewayConfig struct {
 	CostPerToken map[string]float64 // model → USD per token (rough)
 	DailyBudget  float64            // USD; 0 = unlimited
 	Client       *http.Client
-	now          func() time.Time // injectable clock (tests)
+	// MaxTokens caps generated tokens on providers that require an explicit
+	// limit (the Anthropic Messages API and Anthropic-on-Bedrock). 0 selects
+	// defaultMaxTokens. Callers can override per request via
+	// CompleteWithOptions / the OpenAI-compatible max_tokens field.
+	MaxTokens int
+	now       func() time.Time // injectable clock (tests)
+}
+
+// defaultMaxTokens is the generation cap used when neither the request nor the
+// gateway config specifies one. The Anthropic Messages API requires max_tokens
+// to be set explicitly, so some value must always be sent; this default is
+// generous enough for long answers (previously this was a hardcoded 1000,
+// which silently truncated long generations).
+const defaultMaxTokens = 8192
+
+// maxTokensKey carries a per-request generation cap through the context. The
+// cap is request-scoped data threaded through an already-ubiquitous ctx rather
+// than added to the signature of every call*/stream* provider method.
+type maxTokensKey struct{}
+
+// WithMaxTokens returns a context requesting n generated tokens for this call
+// (n <= 0 is ignored, leaving the gateway default in force). Honoured by the
+// providers that take an explicit cap: claude and bedrock.
+func WithMaxTokens(ctx context.Context, n int) context.Context {
+	if n <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, maxTokensKey{}, n)
+}
+
+// maxTokensFor returns the generation cap for a request: the per-request
+// override from ctx when set, else the configured gateway default, else
+// defaultMaxTokens.
+func (g *AIGateway) maxTokensFor(ctx context.Context) int {
+	if n, ok := ctx.Value(maxTokensKey{}).(int); ok && n > 0 {
+		return n
+	}
+	if g.cfg.MaxTokens > 0 {
+		return g.cfg.MaxTokens
+	}
+	return defaultMaxTokens
 }
 
 // AIGateway routes completion requests across providers in priority order,
@@ -485,7 +525,7 @@ func (g *AIGateway) callClaude(ctx context.Context, p AIProvider, prompt, system
 		map[string]string{"x-api-key": p.APIKey, "anthropic-version": "2023-06-01"},
 		map[string]any{
 			"model":      g.modelOf(p),
-			"max_tokens": 1000,
+			"max_tokens": g.maxTokensFor(ctx),
 			"system":     systemPrompt,
 			"messages":   []map[string]any{{"role": "user", "content": prompt}},
 		}, &out)

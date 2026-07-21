@@ -21,7 +21,31 @@ import (
 
 // OpenAICompleteFunc routes one completion to the AI gateway for a specific
 // model, returning the reply text and the provider-reported total token count.
+// A client-requested generation cap travels on the context (WithMaxTokens) so
+// this signature stays stable across the gateway's provider call chain.
 type OpenAICompleteFunc func(ctx context.Context, model, prompt, systemPrompt string) (string, int, error)
+
+// maxTokensKey carries a client-requested generation cap through the context
+// to the AI gateway. The api package cannot import messaging (the gateway is
+// wired in via callbacks to keep the packages decoupled), so the wiring in
+// start.go translates this value onto the gateway's own context key.
+type maxTokensKey struct{}
+
+// WithMaxTokens returns a context carrying a client-requested generation cap.
+// n <= 0 is ignored, leaving the gateway's default in force.
+func WithMaxTokens(ctx context.Context, n int) context.Context {
+	if n <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, maxTokensKey{}, n)
+}
+
+// MaxTokensFrom returns the client-requested generation cap carried by ctx.
+// Used by the gateway wiring to forward the value into the messaging layer.
+func MaxTokensFrom(ctx context.Context) int {
+	n, _ := ctx.Value(maxTokensKey{}).(int)
+	return n
+}
 
 // SetOpenAIGateway wires the /v1/* OpenAI-compatible endpoints to the AI
 // gateway: models lists servable model IDs, complete routes a request to the
@@ -102,7 +126,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prompt, system := flattenChatMessages(req.Messages)
-	text, tokens, err := s.openaiComplete(r.Context(), req.Model, prompt, system)
+	// Honour the client's max_tokens: it was previously parsed and dropped, so
+	// every completion silently used the gateway's cap.
+	text, tokens, err := s.openaiComplete(WithMaxTokens(r.Context(), req.MaxTokens), req.Model, prompt, system)
 	if err != nil {
 		openaiError(w, http.StatusBadGateway, "server_error", err.Error())
 		return

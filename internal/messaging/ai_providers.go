@@ -144,7 +144,7 @@ func (g *AIGateway) callBedrock(ctx context.Context, p AIProvider, prompt, syste
 
 	payload := map[string]any{
 		"anthropic_version": "bedrock-2023-05-31",
-		"max_tokens":        1000,
+		"max_tokens":        g.maxTokensFor(ctx),
 		"system":            systemPrompt,
 		"messages":          []map[string]any{{"role": "user", "content": prompt}},
 	}

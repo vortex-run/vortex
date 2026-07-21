@@ -2,13 +2,17 @@
 #
 # Runs tests and lint on every push and pull request. The merge gate is
 # Non-Negotiable Rule #9: `task test` must pass before merging.
+#
+# pull_request has no branch filter on purpose: a filter of [main] skips CI
+# entirely for stacked PRs (one feature branch targeting another), which would
+# let them merge with no tests run at all — only the security workflow, which
+# has never been branch-filtered, would report.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read

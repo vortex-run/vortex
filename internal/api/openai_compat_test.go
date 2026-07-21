@@ -120,6 +120,37 @@ func TestChatCompletions_RoutesAndMatchesSpec(t *testing.T) {
 	}
 }
 
+func TestChatCompletions_ForwardsClientMaxTokens(t *testing.T) {
+	// The client's max_tokens was parsed and then dropped, so every completion
+	// silently used the gateway cap. It must now reach the gateway.
+	var seen int
+	holder := config.NewHolder(&config.Config{})
+	s := New("127.0.0.1:0", holder, "test", discardLogger())
+	s.SetOpenAIGateway(func() []string { return nil },
+		func(ctx context.Context, _, _, _ string) (string, int, error) {
+			seen = MaxTokensFrom(ctx)
+			return "ok", 1, nil
+		})
+
+	body := `{"model":"m","max_tokens":4096,"messages":[{"role":"user","content":"hi"}]}`
+	if rec := serve(s, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if seen != 4096 {
+		t.Errorf("gateway saw max_tokens = %d, want 4096", seen)
+	}
+
+	// Omitted max_tokens leaves the gateway default in force (0 = unset).
+	seen = -1
+	body = `{"model":"m","messages":[{"role":"user","content":"hi"}]}`
+	if rec := serve(s, httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if seen != 0 {
+		t.Errorf("gateway saw max_tokens = %d, want 0 (unset)", seen)
+	}
+}
+
 func TestChatCompletions_MultiTurnTranscript(t *testing.T) {
 	c := &recordingCompleter{reply: "ok"}
 	s := newOpenAITestServer(t, nil, c)
