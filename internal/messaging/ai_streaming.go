@@ -227,7 +227,7 @@ func (g *AIGateway) streamClaude(ctx context.Context, p AIProvider, prompt, syst
 	}
 	payload := map[string]any{
 		"model":      g.modelOf(p),
-		"max_tokens": 1000,
+		"max_tokens": g.maxTokensFor(ctx),
 		"system":     systemPrompt,
 		"messages":   []map[string]any{{"role": "user", "content": prompt}},
 		"stream":     true,
