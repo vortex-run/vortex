@@ -95,7 +95,11 @@ func (g *AIGateway) maxTokensFor(ctx context.Context) int {
 type AIGateway struct {
 	cfg    AIGatewayConfig
 	client *http.Client
-	now    func() time.Time
+	// streamClient serves streaming calls: same transport as client but no
+	// client-level timeout, which would cut long generations mid-stream.
+	// doStreamLines bounds each call with a context deadline instead.
+	streamClient *http.Client
+	now          func() time.Time
 
 	mu            sync.Mutex
 	costToday     float64
@@ -185,7 +189,8 @@ func NewAIGateway(cfg AIGatewayConfig) (*AIGateway, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &AIGateway{cfg: cfg, client: client, now: now, dayStart: now()}, nil
+	streamClient := &http.Client{Transport: client.Transport}
+	return &AIGateway{cfg: cfg, client: client, streamClient: streamClient, now: now, dayStart: now()}, nil
 }
 
 // ErrBudgetExceeded is returned when the daily cost budget is reached.

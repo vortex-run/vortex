@@ -1,7 +1,8 @@
 // Package orchestration implements VORTEX's multi-agent orchestration (build
 // plan M18): decomposing a goal into tasks (planner), running them with
 // dependency + concurrency control (orchestrator), a shared key/value memory,
-// and a dependency-aware task queue. It is stdlib-only.
+// a dependency-aware task queue, and a SQLite-backed run store for crash
+// recovery (production audit H3).
 //
 // This file implements the task queue.
 package orchestration

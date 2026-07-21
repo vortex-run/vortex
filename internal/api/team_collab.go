@@ -143,6 +143,9 @@ func (s *Server) handleCommsStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent comms not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// Long-lived SSE feed: without this the server's WriteTimeout severs the
+	// stream ~60s in, silently dropping events until the client reconnects.
+	allowLongResponse(w)
 	ch, unsub := s.comms.Subscribe()
 	defer unsub()
 
@@ -187,6 +190,8 @@ func (s *Server) handleAgentDirectChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "direct chat not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// Direct chat is an AI generation; it can outlive the 60s WriteTimeout.
+	allowLongResponse(w)
 	var req struct {
 		SessionID string `json:"session_id"`
 		Message   string `json:"message"`

@@ -551,6 +551,7 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = t.SandboxDir
+	cmd.Env = scrubbedEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -569,6 +570,38 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 		"stderr":    stderr.String(),
 		"exit_code": exit,
 	}, nil
+}
+
+// safeEnvVars are the only environment variables agent-executed commands
+// inherit (production audit M5): enough for binaries to run, and none of the
+// process's secrets. Without this, every whitelisted or user-approved command
+// inherited the full server environment — VORTEX_* provider keys, AWS
+// credentials, bot tokens, the master key — and could exfiltrate them.
+var safeEnvVars = map[string]bool{
+	// POSIX basics
+	"PATH": true, "HOME": true, "LANG": true, "LC_ALL": true, "TERM": true,
+	"TZ": true, "USER": true, "LOGNAME": true, "SHELL": true,
+	"TMPDIR": true, "TEMP": true, "TMP": true,
+	// Windows essentials (resolution, temp, per-user dirs — not secrets)
+	"SYSTEMROOT": true, "SYSTEMDRIVE": true, "COMSPEC": true, "PATHEXT": true,
+	"WINDIR": true, "PROGRAMFILES": true, "PROGRAMFILES(X86)": true,
+	"PROGRAMDATA": true, "APPDATA": true, "LOCALAPPDATA": true,
+	"USERPROFILE": true, "HOMEDRIVE": true, "HOMEPATH": true,
+	"NUMBER_OF_PROCESSORS": true, "PROCESSOR_ARCHITECTURE": true,
+}
+
+// scrubbedEnv returns the minimal environment for agent-executed commands:
+// only the allowlisted variables above survive, by exact (case-insensitive)
+// name match.
+func scrubbedEnv() []string {
+	var out []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if safeEnvVars[strings.ToUpper(name)] {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // stringSlice coerces a []string or []any of strings into []string.

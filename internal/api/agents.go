@@ -106,6 +106,9 @@ func (s *Server) handleAgentSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent runtime not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// AI generations and their SSE streams routinely outlive the server's
+	// 60s WriteTimeout; this request is bounded by the runtime instead.
+	allowLongResponse(w)
 	var req agentSubmitRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -207,6 +210,8 @@ func (s *Server) handleAgentApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent runtime not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// Approval executes the pending tool server-side, which can be slow.
+	allowLongResponse(w)
 	var req agentApproveRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
