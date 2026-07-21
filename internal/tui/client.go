@@ -462,6 +462,85 @@ func (c *Client) Submit(msg, sessionID string) (string, error) {
 	return out.Response, nil
 }
 
+// SubmitStream POSTs a message to the agent runtime with an SSE Accept header
+// and delivers reply fragments on the returned channel as the coordinator
+// produces them (true token streaming — AGUI item C), closing it when the
+// reply completes. Like Submit, an unreachable server is surfaced as a single
+// ConnectionErrorMessage chunk rather than an error, so the chat panel shows
+// the notice. A non-nil error means the request could not be built or the
+// server rejected it.
+func (c *Client) SubmitStream(msg, sessionID string) (<-chan string, error) {
+	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
+	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	// No client timeout: the stream is bounded by ctx's submit deadline, and a
+	// client-level timeout would cut a long generation mid-stream.
+	streamClient := &http.Client{}
+	//nolint:bodyclose // the body is closed by the streaming goroutine below (or on the error paths); bodyclose can't track the cross-goroutine defer.
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		cancel()
+		out := make(chan string, 1)
+		out <- ConnectionErrorMessage
+		close(out)
+		return out, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		cancel()
+		return nil, fmt.Errorf("tui: submit stream returned %d", resp.StatusCode)
+	}
+	out := make(chan string, 64)
+	go func() {
+		defer close(out)
+		defer cancel()
+		defer func() { _ = resp.Body.Close() }()
+		ssePayloads(resp.Body, func(payload string) bool {
+			var rec struct {
+				Chunk string `json:"chunk"`
+			}
+			if json.Unmarshal([]byte(payload), &rec) != nil || rec.Chunk == "" {
+				return true
+			}
+			select {
+			case out <- rec.Chunk:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		})
+	}()
+	return out, nil
+}
+
+// ssePayloads scans a Server-Sent-Events response body, invoking fn with each
+// non-empty "data:" payload; event:/comment/blank lines and the empty/{}
+// terminal frames are skipped. fn returns false to stop early. Shared by
+// StreamComms and SubmitStream so the SSE wire handling lives in one place.
+func ssePayloads(body io.Reader, fn func(payload string) bool) {
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "{}" {
+			continue
+		}
+		if !fn(payload) {
+			return
+		}
+	}
+}
+
 // Approve posts an approve/reject decision for a pending agent tool action and
 // returns the result transcript (the action executes server-side on approval,
 // which may call a slow tool, so this uses the long submit timeout).
@@ -571,27 +650,18 @@ func (c *Client) StreamComms(ctx context.Context) (<-chan CommsRecord, error) {
 	go func() {
 		defer close(out)
 		defer func() { _ = resp.Body.Close() }()
-		sc := bufio.NewScanner(resp.Body)
-		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
-		for sc.Scan() {
-			line := sc.Text()
-			if !strings.HasPrefix(line, "data:") {
-				continue // skip event:/comment/blank lines
-			}
-			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if payload == "" || payload == "{}" {
-				continue
-			}
+		ssePayloads(resp.Body, func(payload string) bool {
 			var rec CommsRecord
 			if json.Unmarshal([]byte(payload), &rec) != nil {
-				continue
+				return true
 			}
 			select {
 			case out <- rec:
+				return true
 			case <-ctx.Done():
-				return
+				return false
 			}
-		}
+		})
 	}()
 	return out, nil
 }

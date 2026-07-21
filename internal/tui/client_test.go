@@ -152,6 +152,68 @@ func TestClient_SubmitDownReturnsFriendlyMessage(t *testing.T) {
 	}
 }
 
+func TestClient_SubmitStream(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents/submit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("Accept = %q, want text/event-stream", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl, _ := w.(http.Flusher)
+		for _, chunk := range []string{`{"chunk":"one "}`, `{"chunk":"two "}`, `{"chunk":"three"}`} {
+			_, _ = io.WriteString(w, "data: "+chunk+"\n\n")
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		_, _ = io.WriteString(w, "event: done\ndata: {}\n\n")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(ClientConfig{BaseURL: srv.URL})
+	ch, err := c.SubmitStream("hi", "s1")
+	if err != nil {
+		t.Fatalf("SubmitStream: %v", err)
+	}
+	var got []string
+	for chunk := range ch {
+		got = append(got, chunk)
+	}
+	if len(got) != 3 || strings.Join(got, "") != "one two three" {
+		t.Errorf("chunks = %q, want three fragments joining to 'one two three'", got)
+	}
+}
+
+func TestClient_SubmitStreamDownReturnsFriendlyMessage(t *testing.T) {
+	c := NewClient(ClientConfig{BaseURL: "http://127.0.0.1:1"})
+	ch, err := c.SubmitStream("hi", "s1")
+	if err != nil {
+		t.Fatalf("SubmitStream against a dead server should not error, got: %v", err)
+	}
+	var got []string
+	for chunk := range ch {
+		got = append(got, chunk)
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], ConnectionErrorPrefix) {
+		t.Errorf("chunks = %q, want a single connection-error notice", got)
+	}
+}
+
+func TestClient_SubmitStreamNon200Errors(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents/submit", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "busy", http.StatusServiceUnavailable)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c := NewClient(ClientConfig{BaseURL: srv.URL})
+	if _, err := c.SubmitStream("hi", "s1"); err == nil {
+		t.Error("SubmitStream on a 503 should error")
+	}
+}
+
 func TestClient_AgentChatDownReturnsFriendlyMessage(t *testing.T) {
 	c := NewClient(ClientConfig{BaseURL: "http://127.0.0.1:1"})
 	resp, err := c.AgentChat("code-agent", "s1", "hi")

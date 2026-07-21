@@ -128,7 +128,7 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 		return nil, ErrTooManyRequests
 	}
 
-	out := make(chan string, 1)
+	out := make(chan string, 8)
 	r.queue.Add(1)
 	r.wg.Add(1)
 	r.mu.Unlock()
@@ -151,12 +151,21 @@ func (r *Runtime) Submit(ctx context.Context, userMsg, sessionID string) (<-chan
 			}
 		}()
 
-		resp, err := r.cfg.Coordinator.HandleMessage(mctx, userMsg, sessionID)
-		if err != nil {
-			out <- "error: " + err.Error()
-			return
+		// Deltas stream into the channel as the coordinator produces them
+		// (AGUI item C). The select drops output once the caller is gone, so
+		// an abandoned channel can never block this goroutine (the SSE handler
+		// stops draining when the client disconnects).
+		send := func(chunk string) {
+			select {
+			case out <- chunk:
+			case <-mctx.Done():
+			}
 		}
-		out <- resp
+		_, err := r.cfg.Coordinator.HandleMessageStream(mctx, userMsg, sessionID, send)
+		if err != nil {
+			send("error: " + err.Error())
+		}
+		// On success all content has already been delivered as deltas.
 	}()
 	return out, nil
 }

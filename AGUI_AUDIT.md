@@ -41,22 +41,41 @@ Senior review of "built but not connected" defects. Status legend:
     `resolveWorkingDir` now honours `VORTEX_WORK_DIR`. Live-verified: real
     `calc.py` written to disk. (`8fa868c`)
 
-## Remaining (lower impact — not yet done)
+## Remaining (lower impact)
 
-A. **Checkpoint "Edit" (E) action unimplemented in the TUI/API.** The
-   `CheckpointManager` supports `Edit`, but there is no `POST /api/checkpoints/{id}/edit`
-   route and the code view only offers V/A/R/S. Edit path is dead from the UI.
-B. **Collapsible tool results (BUG 3.2) not built.** Tool calls (write_file, etc.)
-   are not shown as collapsible `▶ write_file calc.py [expand]` rows.
-C. **True per-token streaming.** We stream *events* (task/result), not AI tokens.
-   Real token streaming needs `CompleteStream` plumbed through every provider in
-   the AI gateway — a large, provider-by-provider change.
-D. **MINOR — Direct-chatting the coordinator 502s.** `/api/agents/coordinator/chat`
-   → `DirectChatFor("coordinator")` is nil (coordinator isn't a registered A2A
-   specialist). Not reachable from the TUI; the endpoint is just misleading.
+A. **FIXED — Checkpoint "Edit" (E) action unimplemented in the TUI/API.** Added
+   `POST /api/checkpoints/{id}/edit` (+ provider `Edit` + client `EditCheckpoint`);
+   E opens an inline editor in the checkpoint review, Ctrl+S saves and resolves
+   the checkpoint as edited so the pipeline continues. A/R now hit the real
+   approve/reject endpoints too. (`6c7f7c0`)
+B. **FIXED — Collapsible tool results (BUG 3.2) not built.** Team tool executor
+   publishes `tool_result` bus messages; the chat panel renders them as
+   collapsible `▶ write_file calc.py` rows (Enter toggles, ▼ expands to a
+   line-numbered body). (`26aab99`)
+C. **FIXED — True per-token streaming.** End to end:
+   - *Gateway:* `CompleteStreamForModel`/`CompleteStream` stream natively from
+     **all nine providers**: claude / openai / deepseek / groq / azure-openai /
+     openrouter (SSE), ollama (NDJSON), gemini (SSE), and bedrock (AWS binary
+     event-stream, `invoke-with-response-stream`). Provider/slot failover
+     applies only until the first delta.
+   - *API:* `POST /v1/chat/completions` (`stream:true`) and
+     `POST /api/agents/submit` (`Accept: text/event-stream`) forward real
+     deltas as they arrive. Coordinator replies stream at line granularity
+     through a state machine shared with `filterCoordinatorResponse`, so
+     internal artifacts never reach the stream (verified live: an injected
+     `Goal:` line was stripped mid-stream).
+   - *TUI:* `Client.SubmitStream` consumes the SSE chunks; the `vortex code`
+     chat panel renders the reply as a live growing line with the spinner as
+     its cursor, replacing the static "thinking..." wait.
+   (The legacy dashboard agents tab still uses buffered `Submit` — cosmetic,
+   it renders replies whole.)
+D. **FIXED — Direct-chatting the coordinator 502s.** `teamCollab.Chat` now routes
+   `agentID=="coordinator"` to the coordinator's `HandleMessage` entry point
+   (own system prompt + response filtering) instead of the nil A2A
+   `DirectChatFor`. (`5073f15`)
 E. **FIXED — `MessageBus.AgentMessages` was test-only.** Now exposed via
    `GET /api/agents/team/{id}/messages` (auth-gated), returning the per-agent
    slice of the comms feed for dashboard/TUI drill-down. Wired through the
    `CommsProvider` interface + `teamCollab` adapter over `*a2a.MessageBus`.
 
-All FIXED items are committed, tested, and CI-green on `8fa868c`.
+All items are FIXED, committed, and tested.
