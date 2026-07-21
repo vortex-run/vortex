@@ -108,9 +108,10 @@ type countingEffectTool struct {
 	executions *int
 }
 
-func (countingEffectTool) Name() string          { return "effect_tool" }
-func (countingEffectTool) Description() string   { return "test side effect" }
-func (countingEffectTool) SideEffecting() bool   { return true }
+func (countingEffectTool) Name() string        { return "effect_tool" }
+func (countingEffectTool) Description() string { return "test side effect" }
+func (countingEffectTool) SideEffecting() bool { return true }
+
 func (c countingEffectTool) Execute(_ context.Context, params map[string]any) (any, error) {
 	*c.executions++
 	return map[string]any{"ran": *c.executions, "cmd": params["cmd"]}, nil
