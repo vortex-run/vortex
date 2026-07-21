@@ -173,7 +173,7 @@ func TestRunTerminal_RequiresApproval(t *testing.T) {
 
 func TestRunTerminal_ExecutesAfterApproval(t *testing.T) {
 	cfg, _ := localCfg(t)
-	res, err := RunTerminalTool{cfg: cfg, RequireApproval: false}.Execute(context.Background(),
+	res, err := RunTerminalTool{cfg: cfg, approved: true}.Execute(context.Background(),
 		map[string]any{"command": "echo vortex"})
 	if err != nil {
 		t.Fatalf("approved run: %v", err)

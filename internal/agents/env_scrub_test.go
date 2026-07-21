@@ -37,7 +37,7 @@ func TestScrubbedEnv_DropsSecretsKeepsEssentials(t *testing.T) {
 func TestRunCommand_EnvironmentIsScrubbed(t *testing.T) {
 	t.Setenv("VORTEX_CANARY_SECRET", "leaked-if-visible")
 
-	tool := RunCommandTool{SandboxDir: t.TempDir(), AllowedCommands: []string{"go"}}
+	tool := RunCommandTool{SandboxDir: t.TempDir(), AllowedCommands: []string{"go"}, approved: true}
 	res, err := tool.Execute(context.Background(), map[string]any{
 		"command": "go", "args": []string{"env"},
 	})

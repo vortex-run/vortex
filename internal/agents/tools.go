@@ -476,7 +476,17 @@ type RunCommandTool struct {
 	// instead of running — the coordinator routes this to a human approver
 	// (M10.7). It defaults to true via NewRunCommandTool until an OS-level
 	// sandbox makes unattended execution safe.
+	//
+	// NOTE: this field's zero value is false, so a struct literal that omits
+	// it yields an UNGATED command executor. Release builds close that hazard
+	// by ignoring the field entirely (approvalAlwaysRequired, audit I6); the
+	// only way to execute there is through the approval flow below.
 	RequireApproval bool
+	// approved is set only by the approval flow (ExecuteApproved) after a
+	// human has authorised this exact action. It is unexported so no caller
+	// outside this package can forge it, which is what lets release builds
+	// treat the gate as unwaivable.
+	approved bool
 }
 
 // NewRunCommandTool builds a RunCommandTool with RequireApproval defaulted to
@@ -554,7 +564,10 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 	if verr := validateArgs(command, args); verr != nil {
 		return nil, verr
 	}
-	if t.RequireApproval {
+	// Gate unless a human already approved THIS action. In release builds the
+	// waiver is ignored entirely (audit I6), so an unset or explicitly-cleared
+	// RequireApproval cannot execute a command.
+	if !t.approved && (t.RequireApproval || approvalAlwaysRequired) {
 		return nil, &ApprovalError{Request: ApprovalRequest{Command: command, Args: args}}
 	}
 	cmd := exec.CommandContext(ctx, command, args...)
@@ -873,7 +886,10 @@ func (s *SandboxedToolRegistry) ExecuteApproved(ctx context.Context, name string
 		return nil, err
 	}
 	if rc, ok := tool.(RunCommandTool); ok {
-		rc.RequireApproval = false
+		// Mark this specific execution as human-approved rather than clearing
+		// the gate flag: `approved` is unexported, so release builds can treat
+		// the gate as unwaivable while still honouring a real approval (I6).
+		rc.approved = true
 		tool = rc
 	}
 	result, execErr := tool.Execute(ctx, params)

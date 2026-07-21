@@ -27,6 +27,11 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+      # The `release` tag makes the human-approval gate on agent command
+      # execution unwaivable in shipped binaries (production audit I6).
+      # Without it a struct literal that omits RequireApproval — whose zero
+      # value is false — yields an ungated command executor.
+      - -tags=release
     ldflags:
       - -s -w
       - -X github.com/vortex-run/vortex/internal/cmd.version={{.Version}}

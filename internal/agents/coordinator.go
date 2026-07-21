@@ -877,7 +877,9 @@ func executeApprovedLocal(ctx context.Context, tool Tool, params map[string]any)
 		tl.RequireApproval = false
 		return tl.Execute(ctx, params)
 	case RunTerminalTool:
-		tl.RequireApproval = false
+		// Mark the execution approved rather than clearing the gate, so
+		// release builds can keep the gate unwaivable (audit I6).
+		tl.approved = true
 		return tl.Execute(ctx, params)
 	case CreateProjectTool:
 		tl.RequireApproval = false

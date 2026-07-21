@@ -310,8 +310,15 @@ func (t EditFileTool) Execute(_ context.Context, params map[string]any) (any, er
 
 // RunTerminalTool runs an arbitrary command (approval required, guardrailed).
 type RunTerminalTool struct {
-	cfg             LocalFSConfig
+	cfg LocalFSConfig
+	// RequireApproval gates execution. Its zero value is false, so a struct
+	// literal omitting it is ungated; release builds ignore the field
+	// entirely (approvalAlwaysRequired, audit I6).
 	RequireApproval bool
+	// approved is set only by the approval flow after a human authorised this
+	// exact action. Unexported so it cannot be forged from outside the
+	// package — that is what makes the release-build gate unwaivable.
+	approved bool
 }
 
 // Name returns the tool name.
@@ -340,7 +347,9 @@ func (t RunTerminalTool) Execute(ctx context.Context, params map[string]any) (an
 			return nil, err
 		}
 	}
-	if t.RequireApproval {
+	// Gate unless a human already approved THIS action; release builds ignore
+	// the waiver entirely (audit I6).
+	if !t.approved && (t.RequireApproval || approvalAlwaysRequired) {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
 			Description: "run: " + command,
