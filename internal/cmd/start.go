@@ -1645,12 +1645,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// side-effecting tool calls under durable-run scopes so a crash-resumed
 	// orchestration task replays already-performed effects instead of
 	// re-executing them. Optional — the runtime works unfenced without it.
-	if ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db")); lerr != nil {
-		log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
-	} else {
-		if perr := ledger.PruneOlderThan(7 * 24 * time.Hour); perr != nil {
-			log.Warn("pruning effect ledger", "err", perr)
-		}
+	if ledger := openEffectLedger(log); ledger != nil {
 		sandboxed = sandboxed.WithEffectLedger(ledger)
 	}
 
@@ -2100,6 +2095,37 @@ func (a *devopsNotifyAdapter) Notify(ctx context.Context, title, body string) er
 // buildDevOps constructs the M16 DevOps agent from configured servers, connects
 // to each, registers the API, and returns a DevOpsFunc for the coordinator.
 // Returns nil when no servers are configured.
+// effectLedgerOnce guards the process-wide effect ledger: the agent runtime
+// and the devops agent both fence against it, and both must share one handle
+// (SQLite serialises writes through a single connection).
+var (
+	effectLedgerOnce sync.Once
+	effectLedger     *agents.EffectLedger
+)
+
+// openEffectLedger opens (once) the side-effect journal used for crash-resume
+// fencing, pruning entries older than a week. It returns nil when the ledger
+// cannot be opened — callers then run unfenced, which is the pre-H3-increment-2
+// behaviour (at-least-once) rather than a failure.
+func openEffectLedger(log *slog.Logger) *agents.EffectLedger {
+	effectLedgerOnce.Do(func() {
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			cacheDir = os.TempDir()
+		}
+		ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db"))
+		if lerr != nil {
+			log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
+			return
+		}
+		if perr := ledger.PruneOlderThan(7 * 24 * time.Hour); perr != nil {
+			log.Warn("pruning effect ledger", "err", perr)
+		}
+		effectLedger = ledger
+	})
+	return effectLedger
+}
+
 func buildDevOps(ctx context.Context, cfg *config.Config, gateway agents.AIGateway, msg messagingComponents, apiSrv *api.Server, log *slog.Logger) agents.DevOpsFunc {
 	if len(cfg.Servers) == 0 {
 		// No servers configured — still register the (empty) servers endpoint.
@@ -2120,6 +2146,12 @@ func buildDevOps(ctx context.Context, cfg *config.Config, gateway agents.AIGatew
 	}
 
 	agent := devops.NewDevOpsAgent(gateway, notifier, approver)
+	// Fence devops side effects (service restarts, package installs, nginx
+	// changes, remote commands) so a crash-resumed orchestration task does not
+	// run them twice (production audit H3 increment 2).
+	if ledger := openEffectLedger(log); ledger != nil {
+		agent.SetEffectLedger(ledger)
+	}
 	connected := 0
 	for _, srv := range cfg.Servers {
 		if err := agent.Connect(ctx, srv.Host, srv.User, srv.KeyPath); err != nil {
