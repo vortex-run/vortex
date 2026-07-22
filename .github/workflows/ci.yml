@@ -103,3 +103,47 @@ jobs:
         # -race so the concurrent agent/bus/runtime paths exercised end-to-end
         # are race-checked (ubuntu-latest has a C toolchain for cgo).
         run: go test -v -race -tags integration -timeout 300s ./integration/...
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web/dashboard
+        run: npm ci
+
+      - name: Audit dependencies
+        working-directory: web/dashboard
+        # govulncheck covers Go modules only, so npm advisories previously had
+        # no CI signal at all — a high-severity ReDoS reached main and was
+        # found by a Dependabot email rather than a failing check. Dev-only
+        # packages are included deliberately: they do not ship, but they do
+        # run on CI and developer machines.
+        run: npm audit --audit-level=high
+
+      - name: Build dashboard
+        working-directory: web/dashboard
+        run: npm run build
+
+      - name: Verify committed dist is up to date
+        # web/dashboard/dist is BOTH committed and embedded into the Go binary
+        # (web/dashboard/embed.go, //go:embed all:dist). Nothing rebuilt it in
+        # CI, so editing dashboard source without running `npm run build`
+        # shipped a stale UI inside the binary with no failing check anywhere.
+        # A non-empty diff here means the committed build no longer matches the
+        # source it is supposed to be built from.
+        run: |
+          if ! git diff --exit-code --stat -- dist; then
+            echo "::error::web/dashboard/dist is stale. Run 'npm run build' in web/dashboard and commit the result."
+            exit 1
+          fi
+        working-directory: web/dashboard
