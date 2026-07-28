@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,7 +75,14 @@ type DataPipelineAgent struct {
 	processor *Processor
 	charts    *ChartRenderer
 	dir       string // workDir/pipeline
+	// ledger, when set, fences output saving so a crash-resumed orchestration
+	// task does not write a second copy of its outputs or re-send its
+	// notification (production audit H3, increment 2). Optional.
+	ledger *agents.EffectLedger
 }
+
+// SetEffectLedger enables side-effect fencing for saved outputs + notification.
+func (a *DataPipelineAgent) SetEffectLedger(l *agents.EffectLedger) { a.ledger = l }
 
 // NewDataPipelineAgent constructs the agent saving under workDir/pipeline.
 func NewDataPipelineAgent(gateway agents.AIGateway, notifier Notifier, workDir string) *DataPipelineAgent {
@@ -198,6 +206,35 @@ func (a *DataPipelineAgent) applyPlan(ds *Dataset, plan *Plan) (*Dataset, error)
 
 // saveOutputs writes the processed data (JSON) + chart (SVG) and notifies.
 func (a *DataPipelineAgent) saveOutputs(ctx context.Context, ds *Dataset, plan *Plan, request string) (*PipelineResult, error) {
+	// Side-effect fence (production audit H3 increment 2). Output filenames
+	// embed time.Now(), so a crash-resumed task does NOT overwrite its earlier
+	// output — it writes a second, differently-named copy and re-sends the
+	// notification. Replaying the recorded result instead keeps both
+	// exactly-once and returns the original paths.
+	if scope, scoped := agents.EffectScope(ctx); scoped && a.ledger != nil {
+		key := a.ledger.CallKey(scope, "pipeline:save-outputs", map[string]any{"request": request})
+		if recorded, hit := a.ledger.Lookup(scope, key); hit {
+			var prev PipelineResult
+			if json.Unmarshal([]byte(recorded), &prev) == nil {
+				return &prev, nil
+			}
+		}
+		res, err := a.saveOutputsUnfenced(ctx, ds, plan, request)
+		if err != nil {
+			return nil, err
+		}
+		if encoded, jerr := json.Marshal(res); jerr == nil {
+			if cerr := a.ledger.Commit(scope, key, string(encoded)); cerr != nil {
+				slog.Default().Warn("pipeline: journaling saved outputs", "scope", scope, "err", cerr)
+			}
+		}
+		return res, nil
+	}
+	return a.saveOutputsUnfenced(ctx, ds, plan, request)
+}
+
+// saveOutputsUnfenced performs the actual writes + notification.
+func (a *DataPipelineAgent) saveOutputsUnfenced(ctx context.Context, ds *Dataset, plan *Plan, request string) (*PipelineResult, error) {
 	if err := os.MkdirAll(a.dir, 0o755); err != nil { //nolint:gosec // user work dir
 		return nil, err
 	}

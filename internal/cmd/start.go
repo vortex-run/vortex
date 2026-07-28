@@ -2044,6 +2044,11 @@ func buildPipeline(gateway agents.AIGateway, msg messagingComponents, workingDir
 		notifier = &pipelineNotifyAdapter{router: msg.router}
 	}
 	agent := pipeline.NewDataPipelineAgent(gateway, notifier, workingDir)
+	// Fence saved outputs + notification so a crash-resumed orchestration task
+	// does not write duplicate output files or re-notify (audit H3 inc 2).
+	if ledger := openEffectLedger(log); ledger != nil {
+		agent.SetEffectLedger(ledger)
+	}
 
 	apiSrv.SetPipelineProvider(func(ctx context.Context, source, data, request string) (api.PipelineResultInfo, error) {
 		res, err := agent.Analyze(ctx, source, []byte(data), request, nil)
