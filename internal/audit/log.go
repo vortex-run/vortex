@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -19,6 +20,12 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrChainUnverified marks a verification failure that a wrong key explains
+// just as well as tampering — a mismatch at the very first entry. Callers use
+// it to report "cannot verify" instead of accusing someone of modifying the
+// log, and to decide that a re-key migration is worth retrying.
+var ErrChainUnverified = errors.New("audit: chain cannot be verified with this key")
 
 // Entry is a single audit record. Hash is the HMAC chaining this entry to the
 // previous one; it is computed over the previous hash plus this entry's fields.
@@ -158,6 +165,18 @@ func (l *Log) verifyLocked(entries []Entry) error {
 		}
 		want := l.computeHash(prevHash, e.Seq, e.Timestamp, e.Actor, e.Action, e.Resource)
 		if !hmac.Equal([]byte(want), []byte(e.Hash)) {
+			// Every hash is an HMAC under the log's key, so a wrong key makes
+			// the FIRST entry mismatch — indistinguishable, from the hash
+			// alone, from entry 1 having been modified. Say so rather than
+			// asserting tampering: a key mismatch (restored backup, renamed
+			// cluster, failed re-key migration) is the more common cause, and
+			// a false accusation of tampering teaches operators to ignore the
+			// signal. Past entry 1 the key is proven correct — earlier entries
+			// verified under it — so a mismatch there really is modification.
+			if e.Seq == 1 {
+				return fmt.Errorf("audit: chain broken at entry 1: hash mismatch — "+
+					"the log was written with a different key, or entry 1 was modified (%w)", ErrChainUnverified)
+			}
 			return fmt.Errorf("audit: chain broken at entry %d: hash mismatch (entry modified)", e.Seq)
 		}
 		prevHash = e.Hash
