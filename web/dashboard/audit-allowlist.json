@@ -1,0 +1,20 @@
+{
+  "$comment": [
+    "Advisories accepted as not-applicable to this app, checked by scripts/audit-ci.mjs.",
+    "An entry here is a claim that the vulnerable code path CANNOT be reached in our",
+    "configuration — not that the issue is unimportant, and not a way to quiet CI.",
+    "Every entry needs a reason, the reachability argument, and a review date.",
+    "Anything high/critical NOT listed here fails the build."
+  ],
+  "allow": [
+    {
+      "id": "GHSA-qwww-vcr4-c8h2",
+      "package": "react-router",
+      "title": "RSC Mode CSRF Bypass Allows Action Execution Before 400 Response",
+      "reason": "Applies only to React Server Components (RSC) mode. This dashboard is a pure client-side SPA: it is built by Vite to static assets, embedded into the Go binary (web/dashboard/embed.go) and served as files. There is no React server runtime, no RSC route handlers, and no server actions, so the vulnerable path is unreachable. Verified: no renderToString/renderToPipeableStream/StaticRouter/hydrateRoot/react-server usage anywhere in src/.",
+      "why-not-upgraded": "react-router-dom@7.18.1 pins react-router to exactly 7.18.1, so react-router cannot be moved to a fixed 8.x independently. npm's suggested fix is a DOWNGRADE to react-router-dom@7.11.0, which is itself a breaking change and would give back the four other react-router advisories fixed by moving to 7.18.1 (open redirect, XSS, arbitrary constructor injection, route-matching DoS). Downgrading would be a net security loss.",
+      "revisit": "2026-10-01",
+      "revisit-action": "Re-check whether react-router-dom has published a 7.x release depending on a react-router outside 7.12.0-8.2.0, or a stable 8.x line. If so, upgrade and delete this entry."
+    }
+  ]
+}
