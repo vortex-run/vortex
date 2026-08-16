@@ -21,7 +21,7 @@ merged (PRs #4, #5, #7, #8, #9). Build, `go vet`, `go test ./...`, and
 | **C1** keys from cluster name | **Fixed** | `internal/keyring`: random 32-byte master key → HKDF-SHA256 per purpose |
 | **H1** session_id traversal | **Fixed** | `validSessionID` at the API + `filepath.Base` in the store |
 | **H2** SSRF rebinding | **Fixed** | `pkg/safedial` resolve-once, pin the IP, re-validate redirects |
-| **H3** no durable execution | **Fixed** | DAG + state transitions persisted (SQLite); crash resume with exactly-once completed tasks; side effects fenced by a replay journal. *Boundary below.* |
+| **H3** no durable execution | **Fixed — verified against a real process kill** | DAG + state transitions persisted (SQLite); crash resume with exactly-once completed tasks; side effects fenced by a replay journal. Evidence below. *Boundary below.* |
 | **H4** unsigned self-update | **⚠ Partial — action required** | Ed25519 verification implemented, but `ReleaseSigningPublicKey` is **empty**, so verification is **skipped** and only the SHA-256 checksum applies — the original flaw. Closing it needs a signing key provisioned by the maintainer. |
 | **H5** unbounded memory | **Fixed** | TTL+cap+sweep on session/limiter maps; A2A task maps FIFO-capped (N1) |
 | **M1** loopback bypass | **Fixed** | `VORTEX_TRUST_LOOPBACK` |
@@ -63,6 +63,43 @@ executor with **no approval gate** — the unsafe state is the default one. The
 constructor sets it correctly, but nothing forces construction through it.
 Given M5's containment gaps, the gate is the primary control and should not
 be one forgotten field away from off.
+
+### H3 verified end-to-end (2026-08-17)
+
+The unit tests simulate a crash by opening a fresh store over the same
+database. That proves the logic but not the claim, so the claim was tested
+directly: a running server was killed with `taskkill /F` — no graceful
+shutdown, no chance to flush — in the middle of a four-task orchestration,
+then restarted. A stub model provider recorded every task dispatch, so
+re-execution is countable rather than inferred.
+
+State captured immediately after the kill:
+
+    RUN 58abd759 status=running resume=0
+      t1 complete attempts=1
+      t2 complete attempts=1
+      t3 complete attempts=1
+      t4 running  attempts=1      <- interrupted mid-flight
+
+After restarting the binary, exactly one new dispatch was recorded
+(`MARKER_T4`), and the run reached:
+
+    RUN 58abd759 status=done resume=1
+      t1 complete attempts=1      <- never re-executed
+      t2 complete attempts=1      <- never re-executed
+      t3 complete attempts=1      <- never re-executed
+      t4 complete attempts=2      <- re-ran once, as designed
+
+That is the finding's own requirement met on all four points: completed
+work is not repeated (so its side effects are not repeated either), the
+interrupted task re-runs at-least-once, the run finishes, and the resume
+counter advances so a poison run cannot loop forever. The original failure
+scenario — "a 40-minute orchestration is 80% done when the process is
+OOM-killed... previously-completed side effects execute a second time" —
+does not reproduce.
+
+Note the run was left `status=running` by the kill rather than being
+mislabelled failed, which is what makes it eligible for resume at all.
 
 ### Honest boundaries (not defects, but do not over-read the "Fixed" column)
 
