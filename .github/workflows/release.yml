@@ -42,6 +42,14 @@ jobs:
       - name: Install syft
         run: go install github.com/anchore/syft/cmd/syft@latest
 
+      # osslsigncode Authenticode-signs the Windows binary so it ships with a
+      # real publisher instead of "Publisher: Unknown" in the firewall and
+      # SmartScreen prompts. Installed unconditionally because the signing
+      # wrapper decides at runtime whether a certificate is configured;
+      # installing it is cheap and keeps the release step branch-free.
+      - name: Install osslsigncode
+        run: sudo apt-get update && sudo apt-get install -y osslsigncode
+
       # When VORTEX_SIGNING_KEY is unset the sign wrapper creates no .sig, but
       # GoReleaser would still try to upload checksums.txt.sig and fail — so
       # skip the sign step entirely and ship an integrity-only release.
@@ -57,6 +65,12 @@ jobs:
           # the secret is unset the sign wrapper no-ops and the release is
           # integrity-only.
           VORTEX_SIGNING_KEY: ${{ secrets.VORTEX_SIGNING_KEY }}
+          # Authenticode code-signing certificate for the Windows binary. This
+          # is what populates the Windows "Publisher" field. When unset,
+          # scripts/sign-windows.sh no-ops and the binary ships unsigned, so
+          # snapshot and fork builds still succeed.
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASS: ${{ secrets.WINDOWS_CERT_PASS }}
           # Cross-repo PAT for pushing the Homebrew cask to
           # vortex-run/homebrew-tap. When unset the cask upload is skipped
           # (see homebrew_casks.skip_upload in .goreleaser.yaml).

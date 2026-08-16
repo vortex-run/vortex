@@ -53,10 +53,12 @@ func resolveConfigPath(p string) (string, error) {
 
 func newServiceInstallCommand() *cobra.Command {
 	var (
-		execPath   string
-		configPath string
-		initSystem string
-		dryRun     bool
+		execPath         string
+		configPath       string
+		initSystem       string
+		dryRun           bool
+		skipFirewall     bool
+		firewallProfiles string
 	)
 	c := &cobra.Command{
 		Use:   "install",
@@ -79,11 +81,13 @@ func newServiceInstallCommand() *cobra.Command {
 				return err
 			}
 			return service.Install(service.InstallConfig{
-				ExecPath:   exec,
-				ConfigPath: conf,
-				InitSystem: service.InitSystem(initSystem),
-				DryRun:     dryRun,
-				Out:        out,
+				ExecPath:         exec,
+				ConfigPath:       conf,
+				InitSystem:       service.InitSystem(initSystem),
+				DryRun:           dryRun,
+				Out:              out,
+				SkipFirewall:     skipFirewall,
+				FirewallProfiles: firewallProfiles,
 			})
 		},
 	}
@@ -91,13 +95,18 @@ func newServiceInstallCommand() *cobra.Command {
 	c.Flags().StringVar(&configPath, "config-path", "", "path to vortex.cue (default: the --config value)")
 	c.Flags().StringVar(&initSystem, "init-system", "", "force init system: systemd|openrc|windows (default: auto-detect)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print actions without executing them")
+	c.Flags().BoolVar(&skipFirewall, "skip-firewall", false,
+		"do not create the Windows Firewall rule (Windows only; the rule is what lets VORTEX start unattended)")
+	c.Flags().StringVar(&firewallProfiles, "firewall-profiles", "",
+		"netsh profiles for the inbound rule (Windows only; default \"private,domain\" — add \"public\" to expose VORTEX on untrusted networks)")
 	return c
 }
 
 func newServiceUninstallCommand() *cobra.Command {
 	var (
-		initSystem string
-		dryRun     bool
+		initSystem   string
+		dryRun       bool
+		skipFirewall bool
 	)
 	c := &cobra.Command{
 		Use:   "uninstall",
@@ -109,9 +118,10 @@ func newServiceUninstallCommand() *cobra.Command {
 				return errNeedRoot
 			}
 			return service.Uninstall(service.InstallConfig{
-				InitSystem: service.InitSystem(initSystem),
-				DryRun:     dryRun,
-				Out:        cmd.OutOrStdout(),
+				InitSystem:   service.InitSystem(initSystem),
+				DryRun:       dryRun,
+				Out:          cmd.OutOrStdout(),
+				SkipFirewall: skipFirewall,
 			})
 		},
 	}

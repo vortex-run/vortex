@@ -54,6 +54,13 @@ type InstallConfig struct {
 	InitSystem InitSystem // if empty, auto-detect
 	DryRun     bool       // print actions without executing
 	Out        io.Writer  // where messages are written; defaults to os.Stdout
+	// SkipFirewall disables Windows Firewall rule management. No effect on
+	// Linux, where the installer never touches the firewall.
+	SkipFirewall bool
+	// FirewallProfiles overrides which netsh profiles the inbound rule covers
+	// (default "private,domain" — public is excluded deliberately). Set to
+	// "private,domain,public" to expose VORTEX on untrusted networks.
+	FirewallProfiles string
 }
 
 func (c *InstallConfig) out() io.Writer {
@@ -132,6 +139,12 @@ func installWindows(cfg InstallConfig) error {
 	fmt.Fprintln(out, "Run VORTEX as a Windows Service via NSSM.")
 	fmt.Fprintln(out, "Download NSSM from nssm.cc then run:")
 	fmt.Fprintf(out, "  nssm install vortex %s start --config %s\n", cfg.ExecPath, cfg.ConfigPath)
+
+	// Pre-authorise the binary so the first start does not sit behind an
+	// interactive firewall dialog that nobody is present to answer.
+	if !cfg.SkipFirewall {
+		addFirewallRule(cfg.ExecPath, cfg.FirewallProfiles, cfg.DryRun, out)
+	}
 	return nil
 }
 
@@ -189,6 +202,9 @@ func Uninstall(cfg InstallConfig) error {
 		fmt.Fprintln(out, "Removed OpenRC service.")
 	case InitWindows:
 		fmt.Fprintln(out, "Remove the Windows Service with: nssm remove vortex confirm")
+		if !cfg.SkipFirewall {
+			removeFirewallRule(cfg.DryRun, out)
+		}
 	default:
 		if cfg.DryRun {
 			fmt.Fprintln(out, "[dry-run] would remove ./vortex.service and ./vortex-openrc")
