@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Plus } from "lucide-react";
 import { useRoutes } from "../lib/hooks";
 import type { RouteHealth } from "../types";

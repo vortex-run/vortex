@@ -29,6 +29,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # Required, not cosmetic: without it setup-go reuses the runner's
+          # cached 1.26.x, so govulncheck scans a toolchain that may be missing
+          # the newest standard-library security fixes — which is how this scan
+          # started reporting net/url and html/template advisories that a
+          # current toolchain does not have.
+          check-latest: true
           cache: true
 
       - name: Run govulncheck
@@ -44,19 +50,3 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/dependency-review-action@v4
-        with:
-          # Accepted advisories must be listed here AND in
-          # web/dashboard/audit-allowlist.json, which is the single source of
-          # truth for WHY each one is accepted (reachability argument, why it
-          # cannot be upgraded, revisit date). This action cannot read that
-          # file, so the id is repeated here; keep the two in sync — an entry
-          # removed there should be removed here too.
-          #
-          # GHSA-qwww-vcr4-c8h2 (react-router RSC CSRF bypass): applies only to
-          # React Server Components mode. The dashboard is a pure client-side
-          # SPA built to static assets and embedded in the Go binary, so there
-          # is no React server runtime for the vulnerable path to run in.
-          # react-router-dom@7.18.1 pins react-router to exactly 7.18.1, and
-          # the suggested "fix" is a downgrade that reinstates four other
-          # advisories — a net security loss.
-          allow-ghsas: GHSA-qwww-vcr4-c8h2

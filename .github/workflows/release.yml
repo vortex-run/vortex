@@ -27,6 +27,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # The most important of the three: without it, released binaries are
+          # built with whatever Go patch happens to be cached on the runner, so
+          # a shipped artifact can carry standard-library vulnerabilities that
+          # were fixed weeks earlier.
+          check-latest: true
           cache: true
 
       - name: Run tests before release
