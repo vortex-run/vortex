@@ -281,7 +281,7 @@ func TestNetworking_ConfigReloadUpdatesRoutes(t *testing.T) {
 // waitListening waits until addr accepts a TCP connection.
 func waitListening(t *testing.T, addr string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testutil.ProcessWait)
 	for time.Now().Before(deadline) {
 		if c, err := net.DialTimeout("tcp", addr, 100*time.Millisecond); err == nil {
 			_ = c.Close()
@@ -289,7 +289,7 @@ func waitListening(t *testing.T, addr string) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("nothing listening on %s within 5s", addr)
+	t.Fatalf("nothing listening on %s within %s", addr, testutil.ProcessWait)
 }
 
 // tcpRoundTrip sends payload to addr and reads the echoed reply.
