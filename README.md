@@ -265,3 +265,4 @@ before opening a PR, and keep the stdlib-first, single-binary ethos. See
 ## License
 
 Apache 2.0 — Copyright 2026 VORTEX Contributors. See [LICENSE](LICENSE).
+Sandeep Kumar Bollavaram
