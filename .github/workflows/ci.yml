@@ -97,6 +97,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          # Without check-latest, setup-go reuses whatever 1.26.x is already in
+          # the runner's tool cache, which lags behind Go's security releases.
+          check-latest: true
           cache: true
 
       - name: Run integration tests

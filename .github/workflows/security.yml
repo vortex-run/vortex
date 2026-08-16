@@ -29,6 +29,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # Required, not cosmetic: without it setup-go reuses the runner's
+          # cached 1.26.x, so govulncheck scans a toolchain that may be missing
+          # the newest standard-library security fixes — which is how this scan
+          # started reporting net/url and html/template advisories that a
+          # current toolchain does not have.
+          check-latest: true
           cache: true
 
       - name: Run govulncheck
