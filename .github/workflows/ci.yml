@@ -105,7 +105,15 @@ jobs:
       - name: Run integration tests
         # -race so the concurrent agent/bus/runtime paths exercised end-to-end
         # are race-checked (ubuntu-latest has a C toolchain for cgo).
-        run: go test -v -race -tags integration -timeout 300s ./integration/...
+        #
+        # 900s, not 300s. The suite spends most of its time building the vortex
+        # binary and starting real processes, and it had grown to ~280s on this
+        # runner against the old 300s limit — a ~7% margin, so one slower
+        # runner or one added test would fail the build. It is already 497s on
+        # a Windows dev machine. A timeout that trips on a healthy suite is
+        # worse than a slow one: it reports `panic: test timed out` with a
+        # goroutine dump instead of naming the test that broke.
+        run: go test -v -race -tags integration -timeout 900s ./integration/...
 
   dashboard:
     name: Dashboard
