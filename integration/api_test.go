@@ -84,8 +84,10 @@ func TestAPI_ShutdownEndpoint_LocalhostOnly(t *testing.T) {
 		t.Errorf("/internal/shutdown status = %d, want 200", resp.StatusCode)
 	}
 
-	// The process should exit cleanly within 5s.
-	deadline := time.Now().Add(5 * time.Second)
+	// The process should exit cleanly. Uses the shared process deadline: a
+	// graceful shutdown drains in-flight work, so on a loaded runner it is
+	// slower than a laptop suggests.
+	deadline := time.Now().Add(testutil.ProcessWait)
 	for time.Now().Before(deadline) {
 		r, e := http.Get(p.APIAddr + "/health")
 		if e != nil {
