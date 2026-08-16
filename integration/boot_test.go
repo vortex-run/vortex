@@ -92,7 +92,10 @@ func TestBoot_RejectsInvalidConfig(t *testing.T) {
 	}
 
 	// After a failed start, nothing should be listening on the API port.
-	if resp, err := http.Get("http://127.0.0.1:9090/health"); err == nil {
+	// Uses a bounded client: this call is the one that took the whole suite
+	// down with `panic: test timed out` when the port behaved unexpectedly,
+	// because http.Get has no timeout.
+	if resp, err := testutil.Client().Get("http://127.0.0.1:9090/health"); err == nil {
 		_ = resp.Body.Close()
 		t.Error("server should not be listening after invalid-config failure")
 	}
