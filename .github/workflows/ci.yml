@@ -139,6 +139,13 @@ jobs:
         # audit-allowlist.json, and warns when an allowlist entry goes stale.
         run: npm run audit:ci
 
+      - name: Lint dashboard
+        working-directory: web/dashboard
+        # The dashboard has had an eslint config and a lint script all along,
+        # but nothing ran them: the Go lint job covers Go only. It was failing
+        # on a real react-hooks/purity violation that no check reported.
+        run: npm run lint
+
       - name: Build dashboard
         working-directory: web/dashboard
         run: npm run build

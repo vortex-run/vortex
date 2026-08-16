@@ -538,10 +538,25 @@ func runStart(ctx context.Context, pidfile string) error {
 		display.StepFail("Audit log", err.Error())
 		return fmt.Errorf("initialising audit log: %w", err)
 	}
-	if auditLog != nil {
-		display.Step("Audit log", "enabled, tamper-proof chain")
-	} else {
+	switch {
+	case auditLog == nil:
 		display.Step("Audit log", "disabled")
+	default:
+		// Actually check the property before claiming it. Previously this
+		// printed "tamper-proof chain" unconditionally, so an operator whose
+		// chain did not verify — from real tampering, a restored backup, or a
+		// re-key migration that could not run — was reassured at every boot and
+		// only found out by running `vortex audit verify` by hand.
+		if verr := auditLog.Verify(); verr != nil {
+			if errors.Is(verr, audit.ErrChainUnverified) {
+				display.Step("Audit log", "enabled — CHAIN UNVERIFIED (key mismatch or tampering)")
+			} else {
+				display.Step("Audit log", "enabled — CHAIN BROKEN (entry modified)")
+			}
+			log.Error("audit chain does not verify", "err", verr, "path", auditLogPath())
+		} else {
+			display.Step("Audit log", "enabled, tamper-proof chain")
+		}
 	}
 	if auditLog != nil {
 		_ = auditLog.Append(ctx, "system", "vortex.start", "server", map[string]any{

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -59,6 +60,22 @@ func deriveKey(purpose string) ([]byte, error) {
 	return kr.Subkey(purpose), nil
 }
 
+// pathExists reports whether a non-empty file or directory is present. It
+// distinguishes "data exists that we could not migrate" (keep migration
+// pending) from "nothing to migrate" (retire it) — without the distinction, a
+// fresh install would hold the migration open on every boot forever.
+func pathExists(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	if info.IsDir() {
+		entries, rerr := os.ReadDir(p)
+		return rerr == nil && len(entries) > 0
+	}
+	return info.Size() > 0
+}
+
 // migrationMarkerPath is the file whose presence records that the legacy
 // cluster-name → master-key migration has already run.
 func migrationMarkerPath() string {
@@ -85,6 +102,11 @@ func migrateLegacyKeys(cfg *config.Config, log *slog.Logger) {
 
 	legacy := cfg.Cluster.Name
 	migrated := false
+	// pending records that we found data the current key cannot read and the
+	// legacy key could not read either, so migration is still owed. The marker
+	// is withheld in that case so the next boot retries (see the end of this
+	// function).
+	pending := false
 
 	// --- secret store ------------------------------------------------------
 	if newKey, err := deriveKey("secrets"); err == nil {
@@ -95,10 +117,17 @@ func migrateLegacyKeys(cfg *config.Config, log *slog.Logger) {
 			if lerr == nil && legacyStore.CanDecrypt() {
 				if rerr := legacyStore.Rekey(newKey); rerr != nil {
 					log.Warn("secret store key migration failed", "err", rerr)
+					pending = true
 				} else {
 					log.Info("migrated secret store to master-derived key")
 					migrated = true
 				}
+			} else if pathExists(secretStorePath()) {
+				// Data is present but readable by neither key — written under
+				// some other cluster name. Keep migration pending rather than
+				// retiring it. (An absent or empty store has nothing to
+				// migrate, so it must NOT hold the migration open forever.)
+				pending = true
 			}
 		}
 	}
@@ -112,17 +141,40 @@ func migrateLegacyKeys(cfg *config.Config, log *slog.Logger) {
 			if lerr == nil && legacyLog.Verifies() {
 				if rerr := legacyLog.Rekey(newKey); rerr != nil {
 					log.Warn("audit log key migration failed", "err", rerr)
+					pending = true
 				} else {
 					log.Info("migrated audit log to master-derived key")
 					migrated = true
 				}
+			} else if pathExists(path) && errors.Is(newLog.Verify(), audit.ErrChainUnverified) {
+				// The chain fails at entry 1 under both keys, which a wrong key
+				// explains as readily as tampering. Stay pending so a corrected
+				// cluster name can still re-key it; a genuinely tampered log
+				// simply keeps failing, which is the correct outcome.
+				pending = true
 			}
 		}
 	}
 
 	// Record completion (write the marker even when nothing needed migrating,
-	// so subsequent boots skip the probe). Only skip on a hard marker-write
-	// failure, which is itself logged.
+	// so subsequent boots skip the probe) — EXCEPT when something clearly
+	// needed migrating and we could not do it.
+	//
+	// The legacy key is derived from the CURRENT cluster name, so if the log
+	// was written under a different name (a rename, or a config restored from
+	// elsewhere) the legacy probe misses. Writing the marker anyway retired
+	// the only path that could ever re-key it: the audit log then failed
+	// verification forever, reporting "entry modified" as though it had been
+	// tampered with, recoverable only by deleting an undocumented marker file.
+	// Leaving the marker unwritten costs two verification passes on the next
+	// boot and keeps the migration reachable once the name is corrected.
+	if pending {
+		log.Warn("key migration incomplete: data exists that this key cannot read, "+
+			"and the legacy cluster-name key did not match either — leaving migration "+
+			"pending so it can retry",
+			"cluster", legacy, "hint", "if the cluster was renamed, set it back to the original name and restart")
+		return
+	}
 	if err := os.WriteFile(migrationMarkerPath(), []byte("1\n"), 0o600); err != nil {
 		log.Warn("writing key migration marker failed", "err", err)
 	} else if migrated {

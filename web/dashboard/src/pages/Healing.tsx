@@ -1,5 +1,32 @@
+import { useEffect, useState } from "react";
 import { useHealing } from "../lib/hooks";
 import { StatusDot } from "../components/ui/StatusDot";
+
+// ago renders a relative time. It takes "now" as an argument rather than
+// reading the clock itself, which keeps it pure: the same inputs always render
+// the same output, so React can re-render freely without the text changing
+// underneath it.
+function ago(iso: string, now: number): string {
+  if (!iso) return "—";
+  const secs = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  return secs < 60 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+}
+
+// useNow returns a timestamp that advances on an interval. Reading Date.now()
+// during render is impure (react-hooks/purity) AND stale in practice: the
+// value only changed when something else happened to re-render the page, so
+// "12s ago" could sit frozen between data refreshes. Ticking it as state makes
+// the elapsed time actually advance. The default matches the 10s poll of
+// useHealing — the underlying data is at most that fresh, so a finer tick
+// would only add re-renders and false precision.
+function useNow(intervalMs = 10_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
 
 // Healing renders the M14 self-healing dashboard: overall health, per-route
 // check status, SLO compliance, and recovery activity. Auto-refreshes (10s).
@@ -11,6 +38,7 @@ export function Healing() {
   const healthy = data?.healthy ?? true;
   const passing = checks.filter((c) => c.healthy).length;
   const score = checks.length === 0 ? 100 : Math.round((passing / checks.length) * 100);
+  const now = useNow();
 
   function rowClass(failures: number, isHealthy: boolean): string {
     if (!isHealthy) return "bg-red-500/10";
@@ -18,11 +46,6 @@ export function Healing() {
     return "";
   }
 
-  function ago(iso: string): string {
-    if (!iso) return "—";
-    const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-    return secs < 60 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
-  }
 
   return (
     <div className="space-y-4">
@@ -70,7 +93,7 @@ export function Healing() {
                   </td>
                   <td className="py-1.5">{c.latency_ms}ms</td>
                   <td className="py-1.5">{c.consecutive_failures}</td>
-                  <td className="py-1.5 text-muted-foreground">{ago(c.last_check)}</td>
+                  <td className="py-1.5 text-muted-foreground">{ago(c.last_check, now)}</td>
                 </tr>
               ))}
             </tbody>
