@@ -7,6 +7,16 @@
 # entirely for stacked PRs (one feature branch targeting another), which would
 # let them merge with no tests run at all — only the security workflow, which
 # has never been branch-filtered, would report.
+#
+# Third-party actions are pinned to full commit SHAs, not tags. A tag is a
+# mutable pointer: whoever controls the action's repository can repoint v6 at
+# new code, and it runs here with this workflow's token. release.yml is the
+# case that matters — goreleaser-action runs there with contents: write AND the
+# release signing secrets, so a repointed tag could sign a malicious binary
+# with a legitimate key, defeating the whole point of signing releases
+# (production audit H4). The trailing comment records which tag each SHA was.
+# To update: resolve the new tag with
+#   gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
 name: CI
 
 on:
@@ -26,18 +36,18 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # full history so `git describe` produces a version
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
           check-latest: true
 
       - name: Install Task
-        uses: arduino/setup-task@v2
+        uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2
         with:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -63,16 +73,16 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
           check-latest: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6
         with:
           version: v1.64.8
           # Build golangci-lint from source with the job's Go 1.26 toolchain.
@@ -92,9 +102,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test] # only run once unit tests pass
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
           # Without check-latest, setup-go reuses whatever 1.26.x is already in
@@ -119,10 +129,10 @@ jobs:
     name: Dashboard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
