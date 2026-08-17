@@ -572,6 +572,13 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = t.SandboxDir
 	cmd.Env = scrubbedEnv()
+	// Contain the whole process tree (production audit M5): by default the
+	// context kills only this process, leaving anything it spawned running.
+	setProcessGroup(cmd)
+	cmd.Cancel = func() error { killProcessTree(cmd); return nil }
+	// Bound the post-kill wait: a surviving grandchild can hold the output
+	// pipe open, and Wait blocks until every writer closes it.
+	cmd.WaitDelay = commandWaitDelay
 	// Bounded capture: an unbounded buffer let a single approved command
 	// exhaust the server's heap well inside the timeout (see boundedbuf.go).
 	stdout, stderr := newCommandBuffer(), newCommandBuffer()

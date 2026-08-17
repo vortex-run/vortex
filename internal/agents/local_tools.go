@@ -366,6 +366,11 @@ func (t RunTerminalTool) Execute(ctx context.Context, params map[string]any) (an
 	name, args := shellCommand(command)
 	cmd := exec.CommandContext(cctx, name, args...)
 	cmd.Dir = resolvedCwd
+	// Contain the whole process tree (production audit M5). Without this the
+	// caller-supplied timeout bounds the tool call but not the work it started.
+	setProcessGroup(cmd)
+	cmd.Cancel = func() error { killProcessTree(cmd); return nil }
+	cmd.WaitDelay = commandWaitDelay
 	// Never hand the server's environment (provider keys, tokens) to a
 	// user-approved command (production audit M5).
 	cmd.Env = scrubbedEnv()
