@@ -45,7 +45,9 @@ func Download(ctx context.Context, url, dest, expectedSHA256 string, progress fu
 	}
 	h := sha256.New()
 	pw := &progressWriter{fn: progress}
-	_, copyErr := io.Copy(io.MultiWriter(f, h, pw), resp.Body)
+	// Bounded: the download happens before the checksum can be computed, so an
+	// endless stream would otherwise fill the disk before anything is verified.
+	_, copyErr := copyLimited(io.MultiWriter(f, h, pw), resp.Body, maxArtifactBytes, "release archive")
 	closeErr := f.Close()
 
 	if copyErr != nil {
@@ -168,7 +170,10 @@ func writeEntry(r io.Reader, destDir, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(out, r); err != nil { //nolint:gosec // size bounded by release archive
+	// A zip entry decompresses to whatever its author chose — measured at
+	// 1028x on a trivially compressible entry — so the archive size bounds
+	// nothing. Cap the expansion (see limits.go).
+	if _, err := copyLimited(out, r, maxArtifactBytes, "extracted file "+name); err != nil {
 		_ = out.Close()
 		return "", err
 	}
