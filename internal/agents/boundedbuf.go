@@ -3,6 +3,7 @@ package agents
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Bounded capture for command output.
@@ -86,3 +87,10 @@ func (b *boundedBuffer) Truncated() bool {
 func newCommandBuffer() *boundedBuffer {
 	return &boundedBuffer{Limit: maxCommandOutputBytes}
 }
+
+// commandWaitDelay bounds how long Wait lingers after a command is cancelled.
+// exec.Cmd copies output through an internal pipe, and Wait does not return
+// until every writer closes it — so a surviving grandchild that inherited the
+// handle could keep a killed command's Wait blocked indefinitely. After this
+// delay Go closes the pipe and returns.
+const commandWaitDelay = 5 * time.Second
