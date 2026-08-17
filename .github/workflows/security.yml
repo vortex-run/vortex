@@ -7,6 +7,16 @@
 #   - dependency-review: blocks PRs that introduce dependencies with known
 #     vulnerabilities. The action diffs base vs head, so it only runs on
 #     pull_request events.
+#
+# Third-party actions are pinned to full commit SHAs, not tags. A tag is a
+# mutable pointer: whoever controls the action's repository can repoint v6 at
+# new code, and it runs here with this workflow's token. release.yml is the
+# case that matters — goreleaser-action runs there with contents: write AND the
+# release signing secrets, so a repointed tag could sign a malicious binary
+# with a legitimate key, defeating the whole point of signing releases
+# (production audit H4). The trailing comment records which tag each SHA was.
+# To update: resolve the new tag with
+#   gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
 name: Security Scan
 
 on:
@@ -24,9 +34,9 @@ jobs:
     name: govulncheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.26'
           # Required, not cosmetic: without it setup-go reuses the runner's
@@ -47,6 +57,6 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
