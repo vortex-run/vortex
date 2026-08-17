@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -370,9 +369,11 @@ func (t RunTerminalTool) Execute(ctx context.Context, params map[string]any) (an
 	// Never hand the server's environment (provider keys, tokens) to a
 	// user-approved command (production audit M5).
 	cmd.Env = scrubbedEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Bounded capture: see boundedbuf.go. This tool takes a caller-supplied
+	// timeout, so an unbounded buffer had no ceiling at all.
+	stdout, stderr := newCommandBuffer(), newCommandBuffer()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	start := time.Now()
 	runErr := cmd.Run()
 	exit := 0

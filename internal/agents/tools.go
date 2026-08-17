@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -573,9 +572,11 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 	cmd := exec.CommandContext(ctx, command, args...)
 	cmd.Dir = t.SandboxDir
 	cmd.Env = scrubbedEnv()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Bounded capture: an unbounded buffer let a single approved command
+	// exhaust the server's heap well inside the timeout (see boundedbuf.go).
+	stdout, stderr := newCommandBuffer(), newCommandBuffer()
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	runErr := cmd.Run()
 	exit := 0
 	if runErr != nil {
