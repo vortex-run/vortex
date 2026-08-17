@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -114,5 +113,7 @@ func fetchBytes(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s returned %s", url, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	// Bounded: this is fetched BEFORE it can be verified, so a hostile host
+	// would otherwise have a free hand at the heap (see limits.go).
+	return readLimited(resp.Body, maxMetadataBytes, "signature file")
 }

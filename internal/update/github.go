@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"runtime"
 	"strings"
@@ -138,7 +137,8 @@ func FetchChecksums(ctx context.Context, release *Release) (map[string]string, e
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("checksums.txt download returned %s", resp.Status)
 	}
-	b, err := io.ReadAll(resp.Body)
+	// Bounded: fetched before verification is possible (see limits.go).
+	b, err := readLimited(resp.Body, maxMetadataBytes, "checksums.txt")
 	if err != nil {
 		return nil, err
 	}
