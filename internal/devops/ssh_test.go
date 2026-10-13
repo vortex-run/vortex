@@ -327,4 +327,3 @@ func TestSSH_KnownHostsMissingFile(t *testing.T) {
 		t.Fatal("NewSSHClient should fail when known_hosts path is missing")
 	}
 }
-
