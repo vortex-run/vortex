@@ -2,10 +2,16 @@
   "$comment": [
     "Advisories accepted as not-applicable to this app, checked by scripts/audit-ci.mjs.",
     "An entry here is a claim that the vulnerable code path CANNOT be reached in our",
-    "configuration \u2014 not that the issue is unimportant, and not a way to quiet CI.",
+    "configuration — not that the issue is unimportant, and not a way to quiet CI.",
     "Every entry needs a reason, the reachability argument, and a review date.",
-    "Anything high/critical NOT listed here fails the build.",
-    "Currently empty: no accepted exceptions. Keep it that way when a real upgrade is available."
+    "Anything high/critical NOT listed here fails the build."
   ],
-  "allow": []
+  "allow": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "braces<=3.0.3 has no patched 3.x release; npm only offers Tailwind v4 as a 'fix'. In this app braces is pulled solely by tailwindcss@3 → chokidar/micromatch for the Vite/Tailwind build-time file watcher. It is not imported by dashboard source and does not appear in web/dashboard/dist. Production traffic never executes braces. Review when migrating to Tailwind v4.",
+      "reviewed": "2026-10-13"
+    }
+  ]
 }
