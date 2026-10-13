@@ -34,12 +34,14 @@ internal/
   agents/          AI coordinator, tools, LSP, SQLite memory
   auth/            API keys (bcrypt), RBAC, OIDC
   audit/           HMAC hash-chained log, compliance reports
-  cluster/         raft + gossip membership
+  cluster/         raft + gossip membership (experimental; state is node-local)
   config/          CUE config loading + hot reload
+  gateway/         AI provider routing (chat completions / failover)
   keyring/         master-key derivation (HKDF) for at-rest keys
-  messaging/       AI gateway (9 providers) + Telegram/WhatsApp/Slack
+  messaging/       Telegram/WhatsApp/Slack + AI gateway wiring
   orchestration/   multi-agent task DAG
   proxy/           HTTP/TCP/UDP/QUIC reverse proxy
+  proxy/gateway/   edge backend gateway (package proxygateway) — not the AI gateway
   secrets/         encrypted store + rotation
   security/        rate limiting, blocklists, edge
   tls/             cert manager, mTLS mesh
@@ -50,7 +52,13 @@ pkg/
   safedial/        SSRF-safe HTTP client (DNS pinning)
   lifecycle/       graceful start/stop/reload
   logger/          structured logging
+web/dashboard/     React UI (embedded dist/)
+docs/openapi.yaml  machine-readable management API sketch
 ```
+
+Top-level `agents/`, `pipeline/`, `research/`, and `plugins/` are **operator
+drop-in scaffolding** (often empty `.gitkeep` trees). Implementation code lives
+under `internal/` — do not put new product logic in those empty roots.
 
 ## Conventions
 

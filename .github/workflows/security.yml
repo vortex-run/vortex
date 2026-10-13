@@ -48,8 +48,10 @@ jobs:
           cache: true
 
       - name: Run govulncheck
+        # Pin the scanner the same way actions are SHA-pinned: @latest drifts
+        # under us and can change exit semantics mid-week.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   dependency-review:

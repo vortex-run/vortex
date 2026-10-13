@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSHConfig configures an SSH connection.
@@ -86,32 +87,40 @@ func NewSSHClient(cfg SSHConfig) (*SSHClient, error) {
 		cfg:  cfg,
 		addr: net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)),
 	}
+	hostKeyCB, err := c.hostKeyCallback()
+	if err != nil {
+		return nil, err
+	}
 	c.sshCfg = &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            auths,
 		Timeout:         cfg.Timeout,
-		HostKeyCallback: c.hostKeyCallback(),
+		HostKeyCallback: hostKeyCB,
 	}
 	return c, nil
 }
 
 // SetTOFULogger installs a callback invoked when a new host key is trusted on
-// first connect.
+// first connect (TOFU path only).
 func (c *SSHClient) SetTOFULogger(fn func(host, fingerprint string)) { c.tofuLog = fn }
 
 // hostKeyCallback returns a host-key verifier. With KnownHosts set it uses
-// strict verification; otherwise it trusts on first use (TOFU) and logs a
-// warning via tofuLog.
-func (c *SSHClient) hostKeyCallback() ssh.HostKeyCallback {
-	// NOTE: KnownHosts-file verification is intentionally simplified to TOFU here
-	// (knownhosts parsing would need the x/crypto/ssh/knownhosts subpackage,
-	// which is available; TOFU is used when no file is configured).
+// strict OpenSSH known_hosts verification; otherwise it trusts on first use
+// (TOFU) and logs the fingerprint via tofuLog when configured.
+func (c *SSHClient) hostKeyCallback() (ssh.HostKeyCallback, error) {
+	if path := strings.TrimSpace(c.cfg.KnownHosts); path != "" {
+		cb, err := knownhosts.New(path)
+		if err != nil {
+			return nil, fmt.Errorf("devops: loading known_hosts %s: %w", path, err)
+		}
+		return cb, nil
+	}
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if c.tofuLog != nil {
 			c.tofuLog(hostname, ssh.FingerprintSHA256(key))
 		}
-		return nil // Trust On First Use
-	}
+		return nil // Trust On First Use when no known_hosts file is configured
+	}, nil
 }
 
 // Connect establishes the SSH connection (verifying the host key per config).

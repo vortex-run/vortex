@@ -28,8 +28,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  # One live run per ref: force-pushes and new commits on a PR cancel the
+  # superseded suite instead of stacking race/integration jobs for hours.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -49,7 +51,7 @@ jobs:
       - name: Install Task
         uses: arduino/setup-task@b91d5d2c96a56797b48ac1e0e89220bf64044611 # v2
         with:
-          version: 3.x
+          version: 3.44.1
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
@@ -68,6 +70,21 @@ jobs:
         # otherwise the guarantee could regress silently and only a released
         # binary would show it.
         run: go test -tags release ./internal/agents/...
+
+      - name: Coverage summary
+        # Soft signal only — no hard floor yet (avoid flaking the merge gate).
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -n 5
+          echo "## Coverage" >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tail -n 1 >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
 
   lint:
     name: Lint

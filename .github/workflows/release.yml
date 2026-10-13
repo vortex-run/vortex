@@ -45,12 +45,33 @@ jobs:
           cache: true
 
       - name: Run tests before release
-        run: go test -race ./...
+        # Mirror the CI merge gate so a tag cannot ship what a PR would reject.
+        run: |
+          go test -race ./...
+          go test -tags release ./internal/agents/...
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/dashboard/package-lock.json
+
+      - name: Build and verify dashboard dist
+        # Embedded UI must match source at release time (same guard as ci.yml).
+        working-directory: web/dashboard
+        run: |
+          npm ci
+          npm run build
+          if ! git diff --exit-code --stat -- dist; then
+            echo "::error::web/dashboard/dist is stale. Run 'npm run build' in web/dashboard and commit the result."
+            exit 1
+          fi
 
       # syft must be on PATH before GoReleaser runs: the sboms block in
       # .goreleaser.yaml shells out to it for the per-archive SPDX documents.
       - name: Install syft
-        run: go install github.com/anchore/syft/cmd/syft@latest
+        run: go install github.com/anchore/syft/cmd/syft@v1.54.1
 
       # osslsigncode Authenticode-signs the Windows binary so it ships with a
       # real publisher instead of "Publisher: Unknown" in the firewall and
@@ -67,7 +88,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
-          version: latest
+          version: v2.18.3
           args: release --clean ${{ secrets.VORTEX_SIGNING_KEY == '' && '--skip=sign' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -98,19 +98,39 @@ so every request presenting a loopback address must still carry a credential.
 
 ### Release signing
 
-Generate a signing keypair, pin the public key, and store the private key as a
-CI secret:
+The Ed25519 public key is pinned in `internal/update/signature.go`
+(`ReleaseSigningPublicKey`). Releases signed with the matching private key
+(GitHub Actions secret `VORTEX_SIGNING_KEY`) verify on `vortex self-update`.
+
+To rotate:
 
 ```bash
 ./scripts/sign.sh keygen
-# → pin PUBLIC_KEY in internal/update/signature.go (ReleaseSigningPublicKey)
-# → set PRIVATE_KEY as the CI secret VORTEX_SIGNING_KEY
+# → replace ReleaseSigningPublicKey with the new PUBLIC_KEY
+# → set the new PRIVATE_KEY as the CI secret VORTEX_SIGNING_KEY
+# → cut a new release so every binary carries the rotated public key
 ```
 
-When `VORTEX_SIGNING_KEY` is unset, releases are integrity-only (SHA-256) and
-self-update falls back gracefully.
+When `VORTEX_SIGNING_KEY` is unset, GoReleaser skips signing (`--skip=sign`)
+and ships integrity-only checksums — but a binary with a pinned public key
+will refuse unsigned updates (`ErrNoSignature`). Keep the secret configured
+for production releases.
+
+## Host keys (DevOps SSH)
+
+When a server entry sets `known_hosts`, VORTEX verifies the remote host key
+against that OpenSSH known_hosts file. With no file configured, connections
+use trust-on-first-use (TOFU) and log the fingerprint when a logger is set —
+prefer an explicit known_hosts file for production fleets.
+
+## Multi-node & containment (honest boundaries)
+
+VORTEX is **production-ready for single-node** deployments. Cluster gossip/raft
+exist for discovery experiments, but keys, audit, and quota state remain
+node-local — do not treat multi-node as HA yet. Agent tools use allow-lists,
+approval gates, and environment scrubbing; they are **not** container- or
+namespace-isolated.
 
 ## Reporting vulnerabilities
 
-Please report security issues privately to the maintainers rather than opening
-a public issue.
+See [SECURITY.md](../SECURITY.md) for private reporting.

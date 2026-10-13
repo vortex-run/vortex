@@ -3,9 +3,6 @@ package secrets
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,13 +11,13 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/awsigv4"
 )
 
 const (
-	ssmTimeout  = 10 * time.Second
-	ssmService  = "ssm"
-	awsAlgo     = "AWS4-HMAC-SHA256"
-	emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	ssmTimeout = 10 * time.Second
+	ssmService = "ssm"
 )
 
 // AWSSSMAdapter is a secret Adapter backed by AWS SSM Parameter Store, talking
@@ -186,7 +183,7 @@ func sigV4Sign(req *http.Request, payload []byte, accessKey, secretKey, region, 
 	dateStamp := now.Format("20060102")
 	req.Header.Set("X-Amz-Date", amzDate)
 
-	payloadHash := hexSHA256(payload)
+	payloadHash := awsigv4.HexSHA256(payload)
 	host := req.Host
 	if host == "" {
 		host = req.URL.Host
@@ -210,35 +207,16 @@ func sigV4Sign(req *http.Request, payload []byte, accessKey, secretKey, region, 
 	// String to sign.
 	scope := dateStamp + "/" + region + "/" + service + "/aws4_request"
 	stringToSign := strings.Join([]string{
-		awsAlgo,
+		awsigv4.Algo,
 		amzDate,
 		scope,
-		hexSHA256([]byte(canonicalRequest)),
+		awsigv4.HexSHA256([]byte(canonicalRequest)),
 	}, "\n")
 
-	// Signing key and signature.
-	kDate := hmacSHA256([]byte("AWS4"+secretKey), dateStamp)
-	kRegion := hmacSHA256(kDate, region)
-	kService := hmacSHA256(kRegion, service)
-	kSigning := hmacSHA256(kService, "aws4_request")
-	signature := hex.EncodeToString(hmacSHA256(kSigning, stringToSign))
+	signature := awsigv4.Sign(awsigv4.SigningKey(secretKey, dateStamp, region, service), stringToSign)
 
 	auth := fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		awsAlgo, accessKey, scope, signedHeaders, signature)
+		awsigv4.Algo, accessKey, scope, signedHeaders, signature)
 	req.Header.Set("Authorization", auth)
 	return nil
-}
-
-func hexSHA256(b []byte) string {
-	if len(b) == 0 {
-		return emptySHA256
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
-func hmacSHA256(key []byte, data string) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write([]byte(data))
-	return h.Sum(nil)
 }

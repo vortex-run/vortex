@@ -145,12 +145,12 @@ func (t *TelegramBot) post(ctx context.Context, method string, payload any) erro
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		t.baseURL+"/"+method, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return t.redact(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return err
+		return t.redact(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
@@ -196,12 +196,12 @@ func (t *TelegramBot) SendFile(ctx context.Context, chatID int64, filename strin
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		t.baseURL+"/sendDocument", &buf)
 	if err != nil {
-		return err
+		return t.redact(err)
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return err
+		return t.redact(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
@@ -292,11 +292,11 @@ func (t *TelegramBot) getUpdates(ctx context.Context, offset int64) ([]telegramU
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		fmt.Sprintf("%s/getUpdates?offset=%d&timeout=0", t.baseURL, offset), nil)
 	if err != nil {
-		return nil, err
+		return nil, t.redact(err)
 	}
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, t.redact(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var out getUpdatesResponse
@@ -617,4 +617,48 @@ func (t *TelegramBot) handleClarifyCallback(data string) bool {
 		t.hooks.ClarifySubmit(session, strings.Join(combined, ", "))
 	}
 	return true
+}
+
+// redactedError carries a message with the bot token removed while keeping the
+// original error reachable through errors.Is/errors.As.
+//
+// It deliberately does not use %w in a fmt.Errorf: wrapping preserves the
+// chain, but Error() would then format the wrapped error and put the token
+// straight back into the string this type exists to sanitise.
+type redactedError struct {
+	msg   string
+	cause error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.cause }
+
+// redact strips the bot token from an error's message.
+//
+// Telegram authenticates by putting the token in the URL PATH
+// (https://api.telegram.org/bot<TOKEN>/method), and net/http reports transport
+// failures as *url.Error, whose Error() is `Post "<full URL>": <cause>`. So
+// every timeout, DNS failure, or refused connection on this client wrote a
+// live bot credential into the logs — at WARN level, in the default
+// configuration, with no way for an operator to opt out.
+//
+// That is a credential-disclosure bug rather than cosmetic noise: logs get
+// pasted into issue reports, shipped to aggregators, and captured in screen
+// recordings. A leaked bot token lets anyone send messages as the bot and read
+// everything the bot receives, which for VORTEX is the agent approval channel.
+func (t *TelegramBot) redact(err error) error {
+	if err == nil {
+		return nil
+	}
+	// An empty token must short-circuit: strings.ReplaceAll with an empty old
+	// value inserts the replacement between every character, which would turn
+	// the message into unreadable garbage.
+	if t.cfg.Token == "" {
+		return err
+	}
+	msg := strings.ReplaceAll(err.Error(), t.cfg.Token, "<redacted>")
+	if msg == err.Error() {
+		return err // nothing to hide; keep the original error identity
+	}
+	return &redactedError{msg: msg, cause: err}
 }

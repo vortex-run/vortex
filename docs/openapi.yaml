@@ -1,0 +1,222 @@
+openapi: 3.0.3
+info:
+  title: VORTEX Management API
+  description: |
+    HTTP/JSON control and data plane for a self-hosted VORTEX node.
+    Default listen address is `:9090`. See docs/api.md for narrative detail.
+  version: "0.2.0"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:9090
+    description: Local management listener
+
+tags:
+  - name: health
+  - name: agents
+  - name: admin
+  - name: openai
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string }
+                  config_hash: { type: string }
+                  uptime: { type: string }
+
+  /ready:
+    get:
+      tags: [health]
+      summary: Readiness aggregate
+      security: []
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+
+  /metrics:
+    get:
+      tags: [health]
+      summary: Prometheus exposition
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Prometheus text
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/status:
+    get:
+      tags: [admin]
+      summary: Extended node status
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Status document
+
+  /api/agents/submit:
+    post:
+      tags: [agents]
+      summary: Submit a message to the agent coordinator
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+                session_id:
+                  type: string
+                  pattern: '^[A-Za-z0-9_.-]{1,64}$'
+      responses:
+        "200":
+          description: Buffered or SSE response
+
+  /api/agents/status:
+    get:
+      tags: [agents]
+      summary: Agent runtime status
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Queue and agent counters
+
+  /api/agents/history:
+    get:
+      tags: [agents]
+      summary: List conversation sessions
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Session list
+
+  /api/agents/history/{id}:
+    get:
+      tags: [agents]
+      summary: Messages for a session
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session messages
+
+  /api/agents/approve:
+    post:
+      tags: [agents]
+      summary: Resolve an approval gate prompt
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id: { type: string }
+                approved: { type: boolean }
+      responses:
+        "200":
+          description: Approval recorded
+
+  /api/keys:
+    get:
+      tags: [admin]
+      summary: List API keys (admin)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Key metadata (no secrets)
+    post:
+      tags: [admin]
+      summary: Issue an API key (admin)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "201":
+          description: Key created (plaintext shown once)
+
+  /api/audit:
+    get:
+      tags: [admin]
+      summary: Audit log entries
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Recent audit entries
+
+  /v1/models:
+    get:
+      tags: [openai]
+      summary: OpenAI-compatible model list
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Model IDs
+
+  /v1/chat/completions:
+    post:
+      tags: [openai]
+      summary: OpenAI-compatible chat completions (optional stream)
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Completion or SSE stream
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []

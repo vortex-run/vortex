@@ -1822,7 +1822,7 @@ func buildForge(gateway agents.AIGateway, msg messagingComponents, log *slog.Log
 
 	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(cacheDir, "vortex", "forge-serve")}
 	if msg.router != nil {
-		delivery.Sender = &forgeNotifyAdapter{router: msg.router}
+		delivery.Sender = &routerNotify{router: msg.router}
 	}
 
 	f, err := forge.NewForge(forge.ForgeConfig{
@@ -1891,26 +1891,35 @@ func (a *forgeRuntimeAdapter) List() []api.ForgeJob {
 	return out
 }
 
-// forgeNotifyAdapter adapts messaging.Router to forge.NotificationSender.
-type forgeNotifyAdapter struct{ router *messaging.Router }
+// routerNotify adapts *messaging.Router to the Notifier / NotificationSender
+// surfaces used by forge, research, orchestration, pipeline, devops, and healing.
+type routerNotify struct{ router *messaging.Router }
 
-func (a *forgeNotifyAdapter) SendMessage(ctx context.Context, _ int64, text string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, "VORTEX Forge", text)
-}
-
-func (a *forgeNotifyAdapter) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
-	return a.router.SendFile(ctx, filename, data, caption)
-}
-
-// researchNotifyAdapter bridges *messaging.Router to research.Notifier.
-type researchNotifyAdapter struct{ router *messaging.Router }
-
-func (a *researchNotifyAdapter) Notify(ctx context.Context, title, body string) error {
+func (a *routerNotify) Notify(ctx context.Context, title, body string) error {
 	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
 }
 
-func (a *researchNotifyAdapter) NotifyFile(ctx context.Context, filename string, data []byte, caption string) error {
+func (a *routerNotify) NotifyFile(ctx context.Context, filename string, data []byte, caption string) error {
 	return a.router.SendFile(ctx, filename, data, caption)
+}
+
+func (a *routerNotify) SendMessage(ctx context.Context, _ int64, text string) error {
+	return a.router.Send(ctx, messaging.SeverityInfo, "VORTEX Forge", text)
+}
+
+func (a *routerNotify) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
+	return a.router.SendFile(ctx, filename, data, caption)
+}
+
+func (a *routerNotify) Send(ctx context.Context, severity, title, body string) error {
+	sev := messaging.SeverityInfo
+	switch severity {
+	case "critical":
+		sev = messaging.SeverityCritical
+	case "warn":
+		sev = messaging.SeverityWarn
+	}
+	return a.router.Send(ctx, sev, title, body)
 }
 
 // buildResearch constructs the M15 research pipeline and returns a ResearchFunc
@@ -1923,7 +1932,7 @@ func buildResearch(gateway agents.AIGateway, msg messagingComponents, workingDir
 	reporter := research.NewReporter(workingDir)
 	var notifier research.Notifier
 	if msg.router != nil {
-		notifier = &researchNotifyAdapter{router: msg.router}
+		notifier = &routerNotify{router: msg.router}
 	}
 	agent := research.NewResearchAgent(
 		research.NewSearcher(), research.NewFetcher(),
@@ -1964,13 +1973,6 @@ func buildResearch(gateway agents.AIGateway, msg messagingComponents, workingDir
 	}
 }
 
-// orchestrateNotifyAdapter bridges *messaging.Router to orchestration.Notifier.
-type orchestrateNotifyAdapter struct{ router *messaging.Router }
-
-func (a *orchestrateNotifyAdapter) Notify(ctx context.Context, title, body string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
-}
-
 // buildOrchestration constructs the M18 multi-agent orchestration agent: a
 // planner-driven runner whose AgentRouter dispatches each task to the right
 // specialized agent handler (research/devops/data_pipeline) or the gateway
@@ -2007,7 +2009,7 @@ func buildOrchestration(ctx context.Context, gateway agents.AIGateway, msg messa
 
 	var notifier orchestration.Notifier
 	if msg.router != nil {
-		notifier = &orchestrateNotifyAdapter{router: msg.router}
+		notifier = &routerNotify{router: msg.router}
 	}
 	agent := orchestration.NewOrchestrationAgent(gateway, router, notifier)
 	// Emit orchestration-plane metrics (production audit M8). Guard against a
@@ -2035,17 +2037,6 @@ func buildOrchestration(ctx context.Context, gateway agents.AIGateway, msg messa
 	}
 }
 
-// pipelineNotifyAdapter bridges *messaging.Router to pipeline.Notifier.
-type pipelineNotifyAdapter struct{ router *messaging.Router }
-
-func (a *pipelineNotifyAdapter) Notify(ctx context.Context, title, body string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
-}
-
-func (a *pipelineNotifyAdapter) NotifyFile(ctx context.Context, filename string, data []byte, caption string) error {
-	return a.router.SendFile(ctx, filename, data, caption)
-}
-
 // buildPipeline constructs the M17 data pipeline agent, registers the analyze
 // API, and returns a PipelineFunc for the coordinator. Returns nil when no AI
 // gateway is configured (planning needs it, though analysis degrades).
@@ -2056,7 +2047,7 @@ func buildPipeline(gateway agents.AIGateway, msg messagingComponents, workingDir
 	}
 	var notifier pipeline.Notifier
 	if msg.router != nil {
-		notifier = &pipelineNotifyAdapter{router: msg.router}
+		notifier = &routerNotify{router: msg.router}
 	}
 	agent := pipeline.NewDataPipelineAgent(gateway, notifier, workingDir)
 	// Fence saved outputs + notification so a crash-resumed orchestration task
@@ -2105,13 +2096,6 @@ func extractURL(s string) string {
 	return ""
 }
 
-// devopsNotifyAdapter bridges *messaging.Router to devops.Notifier.
-type devopsNotifyAdapter struct{ router *messaging.Router }
-
-func (a *devopsNotifyAdapter) Notify(ctx context.Context, title, body string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, title, body)
-}
-
 // buildDevOps constructs the M16 DevOps agent from configured servers, connects
 // to each, registers the API, and returns a DevOpsFunc for the coordinator.
 // Returns nil when no servers are configured.
@@ -2154,7 +2138,7 @@ func buildDevOps(ctx context.Context, cfg *config.Config, gateway agents.AIGatew
 	}
 	var notifier devops.Notifier
 	if msg.router != nil {
-		notifier = &devopsNotifyAdapter{router: msg.router}
+		notifier = &routerNotify{router: msg.router}
 	}
 	// Approval for DevOps mutating ops routes through the messaging approval gate
 	// when configured; otherwise denied (fail-safe).
@@ -2197,21 +2181,6 @@ func buildDevOps(ctx context.Context, cfg *config.Config, gateway agents.AIGatew
 	}
 }
 
-// healingNotifyAdapter bridges *messaging.Router to healing.Notifier (string
-// severity → messaging.Severity).
-type healingNotifyAdapter struct{ router *messaging.Router }
-
-func (a *healingNotifyAdapter) Send(ctx context.Context, severity, title, body string) error {
-	sev := messaging.SeverityInfo
-	switch severity {
-	case "critical":
-		sev = messaging.SeverityCritical
-	case "warn":
-		sev = messaging.SeverityWarn
-	}
-	return a.router.Send(ctx, sev, title, body)
-}
-
 // buildHealing wires the M14 self-healing subsystem: a health monitor with a
 // check per route, a recovery manager with default rules, an SLO tracker, and
 // the event loop that routes health events to recovery. It registers shutdown
@@ -2250,7 +2219,7 @@ func buildHealing(ctx context.Context, cfg *config.Config, apiSrv *api.Server,
 
 	var notifier healing.Notifier
 	if msg.router != nil {
-		notifier = &healingNotifyAdapter{router: msg.router}
+		notifier = &routerNotify{router: msg.router}
 	}
 	var auditAdapter healing.AuditLogger
 	if auditLog != nil {

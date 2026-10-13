@@ -2,12 +2,11 @@ package messaging
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/awsigv4"
 )
 
 // (context is used by the call* methods' ctx parameters.)
@@ -194,7 +193,7 @@ func bedrockSignV4(headers map[string]string, payload []byte, method, host, path
 	headers["X-Amz-Date"] = amzDate
 	headers["Host"] = host
 
-	payloadHash := hexSHA256Hex(payload)
+	payloadHash := awsigv4.HexSHA256(payload)
 
 	// Canonical headers must be sorted by lowercased name.
 	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\nx-amz-date:%s\n",
@@ -207,27 +206,12 @@ func bedrockSignV4(headers map[string]string, payload []byte, method, host, path
 
 	scope := strings.Join([]string{dateStamp, region, service, "aws4_request"}, "/")
 	stringToSign := strings.Join([]string{
-		"AWS4-HMAC-SHA256", amzDate, scope, hexSHA256Hex([]byte(canonicalRequest)),
+		awsigv4.Algo, amzDate, scope, awsigv4.HexSHA256([]byte(canonicalRequest)),
 	}, "\n")
 
-	signingKey := hmacSHA256([]byte("AWS4"+secretKey), dateStamp)
-	signingKey = hmacSHA256(signingKey, region)
-	signingKey = hmacSHA256(signingKey, service)
-	signingKey = hmacSHA256(signingKey, "aws4_request")
-	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
+	signature := awsigv4.Sign(awsigv4.SigningKey(secretKey, dateStamp, region, service), stringToSign)
 
 	headers["Authorization"] = fmt.Sprintf(
-		"AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		accessKey, scope, signedHeaders, signature)
-}
-
-func hmacSHA256(key []byte, data string) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write([]byte(data))
-	return h.Sum(nil)
-}
-
-func hexSHA256Hex(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
+		"%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+		awsigv4.Algo, accessKey, scope, signedHeaders, signature)
 }

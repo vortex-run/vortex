@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // commandHandler simulates a remote command, returning stdout, stderr, exit.
@@ -274,3 +275,56 @@ func TestSSH_TOFULogsNewHost(t *testing.T) {
 		t.Errorf("TOFU logger should record the fingerprint, got %q", trusted)
 	}
 }
+
+func TestSSH_KnownHostsRejectsUnknown(t *testing.T) {
+	srv := newTestSSHServer(t, echoHandler)
+	host, port, _ := net.SplitHostPort(srv.addr)
+	kh := filepath.Join(t.TempDir(), "known_hosts")
+	// Empty known_hosts: every host key is unknown → connect must fail.
+	if err := os.WriteFile(kh, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewSSHClient(SSHConfig{
+		Host: host, Port: atoi(port), User: "u", Password: "secret",
+		Timeout: 5 * time.Second, KnownHosts: kh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err == nil {
+		_ = c.Close()
+		t.Fatal("Connect should reject unknown host key when known_hosts is set")
+	}
+}
+
+func TestSSH_KnownHostsAcceptsPinned(t *testing.T) {
+	srv := newTestSSHServer(t, echoHandler)
+	host, port, _ := net.SplitHostPort(srv.addr)
+	line := knownhosts.Line([]string{net.JoinHostPort(host, port)}, srv.hostKey.PublicKey())
+	kh := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(kh, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewSSHClient(SSHConfig{
+		Host: host, Port: atoi(port), User: "u", Password: "secret",
+		Timeout: 5 * time.Second, KnownHosts: kh,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect with pinned host key: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+}
+
+func TestSSH_KnownHostsMissingFile(t *testing.T) {
+	_, err := NewSSHClient(SSHConfig{
+		Host: "127.0.0.1", User: "u", Password: "secret",
+		KnownHosts: filepath.Join(t.TempDir(), "does-not-exist"),
+	})
+	if err == nil {
+		t.Fatal("NewSSHClient should fail when known_hosts path is missing")
+	}
+}
+

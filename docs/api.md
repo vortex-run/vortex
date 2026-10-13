@@ -4,6 +4,8 @@ The management API listens on `:9090` (configurable). Responses are JSON.
 Every response carries an `X-Correlation-ID` and the security headers
 (HSTS over TLS, `X-Content-Type-Options`, CSP, etc.).
 
+Machine-readable sketch: [openapi.yaml](openapi.yaml).
+
 ## Authentication
 
 Protected endpoints require an API key, sent as `Authorization: Bearer <key>`

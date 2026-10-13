@@ -15,7 +15,19 @@ $ vortex setup        # pick an AI provider, optional Telegram
 $ vortex start        # edge + security + agent runtime, one process
 ```
 
-> _Screenshot / demo gif placeholder — `docs/` has full walkthroughs._
+### Try the local demo (2 minutes)
+
+```powershell
+pwsh scripts/demo/demo.ps1
+```
+
+Opens a throwaway cluster with live backends, TLS routes, and the dashboard at
+http://127.0.0.1:9090/dashboard/ — isolated from your real install. Details:
+[scripts/demo/README.md](scripts/demo/README.md).
+
+[![CI](https://github.com/vortex-run/vortex/actions/workflows/ci.yml/badge.svg)](https://github.com/vortex-run/vortex/actions/workflows/ci.yml)
+[![Security Scan](https://github.com/vortex-run/vortex/actions/workflows/security.yml/badge.svg)](https://github.com/vortex-run/vortex/actions/workflows/security.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 ---
 
@@ -255,14 +267,16 @@ Go 1.26+ and [Task](https://taskfile.dev) are required. Details in
 
 ## Contributing
 
-Issues and PRs are welcome. CI runs build, race-enabled tests, lint, and the
-integration suite on every push and PR. Please run `task test` and `task lint`
-before opening a PR, and keep the stdlib-first, single-binary ethos. See
-[docs/development.md](docs/development.md).
+Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security reports go through
+[SECURITY.md](SECURITY.md) — never open a public issue for vulnerabilities.
+
+CI runs build, race-enabled tests, lint, dashboard build, and the integration
+suite on every push and PR. Please run `task test` (and dashboard lint/build if
+you touch `web/dashboard`) before opening a PR.
 
 ---
 
 ## License
 
-Apache 2.0 — Copyright 2026 VORTEX Contributors. See [LICENSE](LICENSE).
-Sandeep Kumar Bollavaram
+Apache License 2.0 — Copyright 2026 VORTEX Contributors. See [LICENSE](LICENSE).

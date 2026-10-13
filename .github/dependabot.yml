@@ -1,0 +1,33 @@
+# Dependabot keeps Go modules, the dashboard npm lockfile, and GitHub Actions
+# current so weekly govulncheck does not become the only discovery path for
+# known CVEs (see the six weeks of red Security Scan before this sprint).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /web/dashboard
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      dashboard-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

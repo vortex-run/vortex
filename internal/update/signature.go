@@ -22,7 +22,7 @@ import (
 // To enable: generate a key (scripts/sign.sh keygen), set this constant to the
 // public key, and configure the release workflow to sign checksums.txt with
 // the private key, publishing checksums.txt.sig alongside it.
-var ReleaseSigningPublicKey = ""
+var ReleaseSigningPublicKey = "YdFLEJG5dwdsibXFlQjjfpHIws49P1xPWtTxH1LTdhk="
 
 // ErrNoSignature is returned when signature verification is requested but the
 // release has no checksums.txt.sig asset.

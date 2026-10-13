@@ -40,8 +40,11 @@ vortex.pid
 
 # Agent runtime output (pipeline analyses, research reports) written at the
 # repo root when VORTEX runs here during development — scratch, not source.
-/pipeline/
-/research/
+# Keep the scaffolding READMEs tracked so the empty roots are explained.
+/pipeline/*
+!/pipeline/README.md
+/research/*
+!/research/README.md
 
 # env file
 .env
@@ -52,3 +55,7 @@ CLAUDE.md
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local release-signing material — never commit
+.secrets/
+

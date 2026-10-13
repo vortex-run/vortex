@@ -12,13 +12,12 @@ import { Secrets } from "./pages/Secrets";
 import { Nodes } from "./pages/Nodes";
 import { Plugins } from "./pages/Plugins";
 import { Settings } from "./pages/Settings";
- import { Healing } from "./pages/Healing";
-import { Stub } from "./pages/Stub";
+import { Healing } from "./pages/Healing";
+import { Traffic } from "./pages/Traffic";
 
 const queryClient = new QueryClient();
 
-// All routes live under the /dashboard base path (the app is served there by
-// VORTEX). Pages are stubs here; real implementations land in later files.
+// Served under /dashboard/ by the VORTEX management API (embedded dist).
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -30,7 +29,7 @@ export default function App() {
             <Route path="routes" element={<RoutesPage />} />
             <Route path="routes/new" element={<RouteBuilder />} />
             <Route path="namespaces" element={<Namespaces />} />
-            <Route path="traffic" element={<Stub name="Traffic" />} />
+            <Route path="traffic" element={<Traffic />} />
             <Route path="security" element={<Security />} />
             <Route path="metrics" element={<Metrics />} />
             <Route path="plugins" element={<Plugins />} />
