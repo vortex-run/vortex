@@ -20,6 +20,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    ignore:
+      # typescript-eslint 8.72 requires typescript <6.1.0, so a TypeScript 7
+      # bump breaks npm ci. Remove once typescript-eslint supports it.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       dashboard-dependencies:
         patterns:
