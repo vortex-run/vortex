@@ -35,7 +35,7 @@ func waitExit(t *testing.T, p *VortexProcess, d time.Duration) {
 	done := make(chan error, 1)
 	go func() { done <- p.Cmd.Wait() }()
 	select {
-	case <-done:
+	case <-done: //nolint:errcheck // only the exit matters here, not its status
 		// Graceful shutdown via the endpoint; process exit observed.
 	case <-time.After(d):
 		_ = p.Cmd.Process.Kill()

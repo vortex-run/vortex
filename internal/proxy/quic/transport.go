@@ -107,7 +107,7 @@ func (t *Transport) ListenAndServe(ctx context.Context) error {
 	case <-ctx.Done():
 		_ = t.server.Close()
 		// Drain the serve goroutine's result.
-		<-errCh
+		<-errCh //nolint:errcheck // shutting down; the serve result no longer matters
 		return nil
 	case err := <-errCh:
 		if errors.Is(err, quic.ErrServerClosed) {
