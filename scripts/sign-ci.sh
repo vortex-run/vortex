@@ -17,4 +17,14 @@ if [ -z "${VORTEX_SIGNING_KEY:-}" ]; then
 fi
 
 dir="$(cd "$(dirname "$0")" && pwd)"
+
+# A signature from any other key would make every installed binary reject this
+# release, so stop here rather than publish it.
+pinned="$(sed -n 's/^var ReleaseSigningPublicKey = "\(.*\)".*$/\1/p' "$dir/../internal/update/signature.go")"
+actual="$(bash "$dir/sign.sh" pubkey "$VORTEX_SIGNING_KEY")"
+if [ -z "$pinned" ] || [ "$actual" != "$pinned" ]; then
+  echo "VORTEX_SIGNING_KEY does not match ReleaseSigningPublicKey; refusing to sign" >&2
+  exit 1
+fi
+
 bash "$dir/sign.sh" sign "$VORTEX_SIGNING_KEY" "$artifact"
