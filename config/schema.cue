@@ -82,7 +82,7 @@ package vortex
 // #RateLimit bounds request rate for a route.
 #RateLimit: {
 	rpm:   int & >0
-	burst: int & >0 | *(rpm div 60 + 1)
+	burst: int & >0 | *(div(rpm, 60) + 1)
 }
 
 // #Route is one routing rule. The protocol determines which other fields apply.

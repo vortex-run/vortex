@@ -87,6 +87,22 @@ func TestLoadValidConfig(t *testing.T) {
 	}
 }
 
+// The burst default is computed in the schema, so a CUE upgrade that changes
+// integer division syntax must not silently change it.
+func TestRateLimitBurstDefault(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+cluster: {name: "c"}
+tls: {acme_email: "you@example.com"}
+routes: [{name: "r", protocol: "https", host: "a.com", backends: [{host: "127.0.0.1", port: 4000}], rate_limit: {rpm: 125}}]
+`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cfg.Routes[0].RateLimit.Burst; got != 3 {
+		t.Errorf("burst = %d, want 3 (125 div 60 + 1)", got)
+	}
+}
+
 func TestLoadMissingRequiredField(t *testing.T) {
 	// cluster.name is required (string & !=""); omit it.
 	body := `
