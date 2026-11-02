@@ -16,7 +16,7 @@ on `main`. Findings not listed keep the status in the 2026-07-22 table.
 |---|---|---|
 | **H4** unsigned self-update | **Implemented; no signed release yet** | `ReleaseSigningPublicKey` is pinned in `internal/update/signature.go`. The newest release, v0.3.0, has `checksums.txt` but no `checksums.txt.sig`, so the signing path has not been proven on a real release. |
 | **I6 / N4** approval gate zero value | **Fixed in release builds** | `approvalAlwaysRequired` is true under the `release` build tag, which `.goreleaser.yaml` sets, and `tools.go` and `local_tools.go` check it. Development builds can still waive the gate by design; CI tests both. |
-| **I1** documentation | **Partial** | `docs/openapi.yaml` now exists. There are still no runbooks. |
+| **I1** documentation | **Fixed** | `docs/openapi.yaml` and `docs/runbooks.md` now exist. |
 
 ### New finding
 
