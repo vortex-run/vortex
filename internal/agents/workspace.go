@@ -32,9 +32,14 @@ func containInTrustedRoot(trustedRoot, abs string) (string, error) {
 	}
 
 	// Lexical containment before symlink resolution (blocks ../ and prefix traps).
-	if !pathWithinBase(target, base) {
+	// IsLocal also rejects reserved Windows device names such as NUL. Rebuilding
+	// target from the checked relative part means nothing below can touch the
+	// unvalidated input.
+	rel, err := filepath.Rel(base, target)
+	if err != nil || !filepath.IsLocal(rel) {
 		return "", fmt.Errorf("%w: %q is outside trusted workspace %q", ErrWorkspaceEscape, target, base)
 	}
+	target = filepath.Join(base, rel)
 
 	realBase, err := filepath.EvalSymlinks(base)
 	if err != nil {

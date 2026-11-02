@@ -272,7 +272,7 @@ func TestPathWithinBase_Table(t *testing.T) {
 			{"win: extended-length prefix is a different volume", `\\?\C:\trusted\x`, `C:\trusted`, false},
 			{"win: UNC same share", `\\srv\share\dir\sub`, `\\srv\share\dir`, true},
 			{"win: UNC same share, case-folded", `\\SRV\Share\DIR\sub`, `\\srv\share\dir`, true},
-			{"win: UNC different share denied", `\\srv\other\dir\sub`, `\\srv\share\dir`, false},
+			{"win: UNC different share denied", `\\srv\second\dir\sub`, `\\srv\share\dir`, false},
 			{"win: UNC sibling prefix trap", `\\srv\share\dirX\sub`, `\\srv\share\dir`, false},
 		}...)
 	} else {

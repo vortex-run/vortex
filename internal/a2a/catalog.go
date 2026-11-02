@@ -74,14 +74,14 @@ func ValidateManifest(m AgentManifest) error {
 		return fmt.Errorf("at least one capability is required")
 	}
 	seen := map[string]struct{}{}
-	for _, cap := range m.Capabilities {
-		cap = strings.TrimSpace(cap)
-		if cap == "" {
+	for _, raw := range m.Capabilities {
+		name := strings.TrimSpace(raw)
+		if name == "" {
 			return fmt.Errorf("empty capability")
 		}
-		key := strings.ToLower(cap)
+		key := strings.ToLower(name)
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate capability %q", cap)
+			return fmt.Errorf("duplicate capability %q", name)
 		}
 		seen[key] = struct{}{}
 	}
