@@ -115,6 +115,73 @@ func (cfg LocalFSConfig) waivesApproval(abs string) bool {
 	if !cfg.AutoMode || cfg.TrustedRoot == "" {
 		return false
 	}
-	_, err := containInTrustedRoot(cfg.TrustedRoot, abs)
-	return err == nil
+	resolved, err := containInTrustedRoot(cfg.TrustedRoot, abs)
+	return err == nil && !autoModeSensitive(cfg.TrustedRoot, resolveExistingPrefix(resolved))
+}
+
+// resolveExistingPrefix evaluates symlinks in the part of p that exists and
+// keeps the rest as written. A file about to be created stays unresolved in
+// containInTrustedRoot, which would hide a link in its parent directories.
+func resolveExistingPrefix(p string) string {
+	rest := ""
+	for dir := p; ; dir = filepath.Dir(dir) {
+		if evaluated, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(evaluated, rest)
+		}
+		if filepath.Dir(dir) == dir {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+	}
+}
+
+// autoModeSensitiveDirs hold files that run as code on a later, unrelated
+// action. A git hook written without approval would run on the next approved
+// `git commit`, bypassing the shell gate Auto Mode promises to keep. GIT~1 is
+// the Windows short name for .git.
+var autoModeSensitiveDirs = map[string]bool{
+	".git": true, "git~1": true, ".githooks": true, ".husky": true,
+}
+
+// autoModeSensitive reports whether a path inside trustedRoot must keep its
+// approval prompt under Auto Mode: hook directories, and vortex.cue, which
+// could widen trusted_root or auto_mode on the next restart. Paths it cannot
+// relate to the root count as sensitive.
+func autoModeSensitive(trustedRoot, resolved string) bool {
+	rel, ok := relToTrustedRoot(trustedRoot, resolved)
+	if !ok {
+		return true
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for i, part := range parts {
+		// Windows ignores trailing dots and spaces, and ".git::$INDEX_ALLOCATION"
+		// names the .git directory itself.
+		part, _, _ = strings.Cut(part, ":")
+		part = strings.ToLower(strings.TrimRight(part, ". "))
+		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && part == "vortex.cue") {
+			return true
+		}
+	}
+	return false
+}
+
+// relToTrustedRoot returns resolved relative to the root, trying the root as
+// configured and with symlinks evaluated, since containInTrustedRoot can return
+// either form.
+func relToTrustedRoot(trustedRoot, resolved string) (string, bool) {
+	base, err := filepath.Abs(trustedRoot)
+	if err != nil {
+		return "", false
+	}
+	if rel, err := filepath.Rel(base, resolved); err == nil && filepath.IsLocal(rel) {
+		return rel, true
+	}
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return "", false
+	}
+	if rel, err := filepath.Rel(realBase, resolved); err == nil && filepath.IsLocal(rel) {
+		return rel, true
+	}
+	return "", false
 }

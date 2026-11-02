@@ -173,6 +173,56 @@ func TestWriteLocalFile_AutoModeWaivesInScopeApproval(t *testing.T) {
 	}
 }
 
+// A hook written without approval would run on the next approved git commit, so
+// Auto Mode must not waive these paths even though they are inside the root.
+func TestWriteLocalFile_AutoModeKeepsApprovalForSensitivePaths(t *testing.T) {
+	gated := []string{
+		".git/hooks/pre-commit", ".git/config", ".GIT/hooks/pre-push", "sub/.git/config",
+		".githooks/pre-commit", ".husky/pre-commit", "vortex.cue", "conf/VORTEX.CUE",
+		".git./config", ".git /config", "git~1/config",
+	}
+	waived := []string{"src/hook.go", ".gitignore", ".github/notes.md", "git/config", "vortex.cue.bak"}
+	root := t.TempDir()
+	cfg := LocalFSConfig{Root: root, TrustedRoot: root, AutoMode: true}
+	tool := WriteLocalFileTool{cfg: cfg, RequireApproval: true}
+	write := func(p string) error {
+		_, err := tool.Execute(context.Background(), map[string]any{
+			"path": p, "content": "x", "create_dirs": true,
+		})
+		return err
+	}
+	for _, p := range gated {
+		var ae *ApprovalError
+		if err := write(p); !errors.As(err, &ae) {
+			t.Errorf("%s: err = %v, want approval required", p, err)
+		}
+	}
+	for _, p := range waived {
+		if err := write(p); err != nil {
+			t.Errorf("%s: err = %v, want written without approval", p, err)
+		}
+	}
+}
+
+// A link inside the root must not launder a write into .git.
+func TestWriteLocalFile_AutoModeKeepsApprovalThroughSymlink(t *testing.T) {
+	root := t.TempDir()
+	hooks := filepath.Join(root, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(hooks, filepath.Join(root, "innocent")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	cfg := LocalFSConfig{Root: root, TrustedRoot: root, AutoMode: true}
+	_, err := WriteLocalFileTool{cfg: cfg, RequireApproval: true}.Execute(context.Background(),
+		map[string]any{"path": "innocent/pre-commit", "content": "x"})
+	var ae *ApprovalError
+	if !errors.As(err, &ae) {
+		t.Fatalf("err = %v, want approval required", err)
+	}
+}
+
 func TestWriteLocalFile_AutoModeStillRequiresApprovalWithoutTrust(t *testing.T) {
 	root := t.TempDir()
 	cfg := LocalFSConfig{Root: root, AutoMode: true} // no TrustedRoot
