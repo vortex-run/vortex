@@ -107,6 +107,23 @@ func TestMemoryStore_ListSessions(t *testing.T) {
 	}
 }
 
+// Sessions updated within the same millisecond must still list newest first.
+func TestMemoryStore_ListSessionsBreaksTimestampTies(t *testing.T) {
+	s := newTestStore(t)
+	a, _ := s.NewSession()
+	b, _ := s.NewSession()
+	if _, err := s.db.Exec(`UPDATE sessions SET updated_at = 1000`); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := s.ListSessions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || sessions[0].SessionID != b || sessions[1].SessionID != a {
+		t.Fatalf("ListSessions = %+v, want %s then %s", sessions, b, a)
+	}
+}
+
 func TestMemoryStore_SearchMessages(t *testing.T) {
 	s := newTestStore(t)
 	sid, _ := s.NewSession()
