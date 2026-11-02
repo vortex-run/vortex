@@ -129,6 +129,10 @@ type Server struct {
 	// views of the agent team). Nil yields an empty list.
 	teamAgents func() []TeamAgentInfo
 
+	// orchStore backs GET /api/orchestration/* (read-only run/task state).
+	// Nil yields empty collections. Wired via SetOrchStoreProvider.
+	orchStore OrchStoreReader
+
 	// Agent-team collaboration providers (AG-UI File 6): the comms feed, direct
 	// chat, and human checkpoints. All auth-gated; nil disables each feature.
 	comms       CommsProvider
@@ -408,6 +412,8 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/devops/command", s.requireAPIKey(http.HandlerFunc(s.handleDevOpsCommand)))
 	mux.Handle("POST /api/pipeline/analyze", s.requireAPIKey(http.HandlerFunc(s.handlePipelineAnalyze)))
 	mux.Handle("POST /api/orchestrate", s.requireAPIKey(http.HandlerFunc(s.handleOrchestrate)))
+	mux.Handle("GET /api/orchestration/runs", s.requireAPIKey(http.HandlerFunc(s.handleOrchRuns)))
+	mux.Handle("GET /api/orchestration/runs/{id}/tasks", s.requireAPIKey(http.HandlerFunc(s.handleOrchRunTasks)))
 	mux.Handle("GET /api/secrets/status", s.protected(http.HandlerFunc(s.handleSecretsStatus)))
 	mux.Handle("GET /api/plugins", s.protected(http.HandlerFunc(s.handlePlugins)))
 	mux.Handle("GET /api/audit", s.protected(http.HandlerFunc(s.handleAudit)))
@@ -421,6 +427,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/agents/submit",
 		s.requireAPIKey(s.rateLimitAgents(http.HandlerFunc(s.handleAgentSubmit))))
 	mux.Handle("GET /api/agents/status", s.requireAPIKey(http.HandlerFunc(s.handleAgentStatus)))
+	mux.Handle("GET /api/agents/catalog", s.requireAPIKey(http.HandlerFunc(s.handleAgentCatalog)))
 	mux.Handle("POST /api/agents/approve", s.requireAPIKey(http.HandlerFunc(s.handleAgentApprove)))
 	mux.Handle("GET /api/agents/history", s.requireAPIKey(http.HandlerFunc(s.handleAgentHistory)))
 	mux.Handle("GET /api/agents/history/{id}", s.requireAPIKey(http.HandlerFunc(s.handleAgentSessionHistory)))

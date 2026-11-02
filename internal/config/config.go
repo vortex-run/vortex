@@ -34,6 +34,7 @@ type Config struct {
 	Security      Security      `json:"security"`
 	Secrets       Secrets       `json:"secrets"`
 	Observability Observability `json:"observability"`
+	Agents        Agents        `json:"agents"`
 	Servers       []Server      `json:"servers,omitempty"`
 
 	// hash is the SHA-256 of the canonical JSON encoding of the config,
@@ -126,6 +127,17 @@ type Observability struct {
 	LogFile       string    `json:"log_file"`
 	LogSampling   bool      `json:"log_sampling"`
 	LogRotate     LogRotate `json:"log_rotate"`
+}
+
+// Agents mirrors #Agents.
+type Agents struct {
+	LocalTools LocalTools `json:"local_tools"`
+}
+
+// LocalTools mirrors #LocalTools — workspace trust for coordinator local FS tools.
+type LocalTools struct {
+	TrustedRoot string `json:"trusted_root"`
+	AutoMode    bool   `json:"auto_mode"`
 }
 
 // LogRotate mirrors #LogRotate.

@@ -133,11 +133,13 @@ func (t *AgentTeam) Cards() []a2a.AgentCard {
 
 // TeamStep is one planned step of the pipeline.
 type TeamStep struct {
-	AgentRole string          `json:"agent_role"`
-	Goal      string          `json:"goal"`
-	DependsOn []string        `json:"depends_on"`
-	Status    string          `json:"status"`
-	Result    *a2a.TaskResult `json:"result,omitempty"`
+	AgentRole            string          `json:"agent_role"`
+	RequiredCapabilities []string        `json:"required_capabilities,omitempty"`
+	PermissionProfile    string          `json:"permission_profile,omitempty"`
+	Goal                 string          `json:"goal"`
+	DependsOn            []string        `json:"depends_on"`
+	Status               string          `json:"status"`
+	Result               *a2a.TaskResult `json:"result,omitempty"`
 }
 
 // TeamPlan is the ordered set of steps for a goal.
@@ -302,7 +304,25 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 
 	for i := range plan.Steps {
 		step := &plan.Steps[i]
-		agentID, agent := t.agentFor(step.AgentRole)
+		role, err := t.resolveStepRole(step)
+		if err != nil {
+			res.Success = false
+			// Capability-selected steps carry no agent_role, so name the stage
+			// explicitly instead of rendering "failed at  stage".
+			res.FailedAt = "step resolution"
+			if role != "" {
+				res.FailedAt = role
+			} else if strings.TrimSpace(step.AgentRole) != "" {
+				res.FailedAt = step.AgentRole
+			}
+			res.Error = err.Error()
+			res.Duration = time.Since(start)
+			res.Files = mapKeys(fileSet)
+			t.notify("✗ VORTEX team task failed", res.Summary())
+			return res, nil
+		}
+		step.AgentRole = role
+		agentID, agent := t.agentFor(role)
 		if agent == nil {
 			step.Status = "skipped"
 			continue
@@ -477,6 +497,23 @@ func countLines(s string) int {
 
 // contextTODO returns a background context for the best-effort preview read.
 func contextTODO() context.Context { return context.Background() }
+
+// resolveStepRole returns the pipeline role for a step, using the capability
+// catalog when required_capabilities are set (no silent fallback).
+func (t *AgentTeam) resolveStepRole(step *TeamStep) (string, error) {
+	useCaps := len(step.RequiredCapabilities) > 0 || strings.TrimSpace(step.PermissionProfile) != ""
+	if !useCaps {
+		return step.AgentRole, nil
+	}
+	if strings.TrimSpace(step.AgentRole) != "" {
+		return "", fmt.Errorf("agents: step sets both agent_role and required_capabilities")
+	}
+	_, role, err := a2a.DefaultCatalog().ResolveTeam(a2a.SelectQuery{
+		RequiredCapabilities: step.RequiredCapabilities,
+		PermissionProfile:    step.PermissionProfile,
+	})
+	return role, err
+}
 
 // agentFor returns the registered id + agent for a role.
 func (t *AgentTeam) agentFor(role string) (string, a2a.Agent) {

@@ -318,6 +318,7 @@ Severity legend: **Critical** (exploitable / data loss now) · **High** (serious
 - **Recommended solution:** Add a `push`/`pull_request` CI workflow running `go vet`, `golangci-lint` (config already present at `.golangci.yml`), and `go test -race ./...` plus the dashboard build/lint. Make it a required status check.
 - **Difficulty:** Easy
 - **Effort:** 0.5 day.
+- **Remediation (current):** **Fixed.** `.github/workflows/ci.yml` runs on push/PR: critical-package `-race`, full `task test:race`, release-tag agent tests, and integration `-race` on ubuntu-latest. The narrative above is the original finding, not current CI behavior.
 
 ## M8 — No application-level observability for the agent/workflow plane (operational blind spot)
 - **Severity:** Medium

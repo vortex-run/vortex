@@ -14,6 +14,7 @@ import { Plugins } from "./pages/Plugins";
 import { Settings } from "./pages/Settings";
 import { Healing } from "./pages/Healing";
 import { Traffic } from "./pages/Traffic";
+import { Agents } from "./pages/Agents";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="audit" element={<AuditLog />} />
             <Route path="secrets" element={<Secrets />} />
             <Route path="healing" element={<Healing />} />
+            <Route path="agents" element={<Agents />} />
             <Route path="settings" element={<Settings />} />
           </Route>
         </Routes>

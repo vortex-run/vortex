@@ -132,11 +132,17 @@ type VortexProcess struct {
 }
 
 // env returns the child environment with the isolated config home applied.
+// On Windows, UserConfigDir uses APPDATA and UserCacheDir uses LOCALAPPDATA;
+// both must be redirected or the child shares the developer's real
+// %LocalAppData%\vortex (memory, default apikeys path, audit) across tests.
 func (p *VortexProcess) env() []string {
 	return append(os.Environ(),
 		"XDG_CONFIG_HOME="+p.ConfigHome,
+		"XDG_CACHE_HOME="+p.ConfigHome,
 		"AppData="+p.ConfigHome,
 		"APPDATA="+p.ConfigHome,
+		"LocalAppData="+p.ConfigHome,
+		"LOCALAPPDATA="+p.ConfigHome,
 	)
 }
 
@@ -176,7 +182,10 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	// test's process to release it, so this process — not a lingering stale one
 	// — is the one that answers /health. Without this, back-to-back tests can
 	// observe the wrong server's responses (e.g. one without Studio wired).
-	waitPortFree(t, "127.0.0.1:9090", 10*time.Second)
+	if err := waitPortFree(t, "127.0.0.1:9090", 10*time.Second); err != nil {
+		t.Fatalf("management API port :9090 still busy after wait: %v\n"+
+			"another vortex (or stale test) may be holding the listener — stop it before integration tests", err)
+	}
 
 	args := append([]string{"start", "--config", configPath, "--log-level", "debug"}, extraArgs...)
 	cmd := exec.Command(bin, args...)
@@ -231,11 +240,14 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 }
 
 // waitPortFree blocks until addr can be bound (a prior server has fully released
-// it, including any TIME_WAIT) or the timeout elapses. It actually listens on
-// the port rather than dialing, so a predecessor in TIME_WAIT does not pass.
-func waitPortFree(t *testing.T, addr string, timeout time.Duration) {
+// it, including any TIME_WAIT) or returns an error when the timeout elapses.
+// It actually listens on the port rather than dialing, so a predecessor in
+// TIME_WAIT does not pass. Callers must treat a non-nil error as fatal: starting
+// anyway would race a stale :9090 listener (health 200 + wrong API key store).
+func waitPortFree(t *testing.T, addr string, timeout time.Duration) error {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
+	var last error
 	for time.Now().Before(deadline) {
 		ln, err := net.Listen("tcp", addr)
 		if err == nil {
@@ -243,11 +255,15 @@ func waitPortFree(t *testing.T, addr string, timeout time.Duration) {
 			// Briefly let the kernel release the just-closed listener before the
 			// child binds it.
 			time.Sleep(50 * time.Millisecond)
-			return
+			return nil
 		}
+		last = err
 		time.Sleep(100 * time.Millisecond)
 	}
-	// Don't fail hard: the start readiness check surfaces a real problem.
+	if last == nil {
+		last = fmt.Errorf("port %s still in use", addr)
+	}
+	return fmt.Errorf("waitPortFree(%s): %w", addr, last)
 }
 
 // Stop stops the running process and waits up to 10s for it to exit cleanly.

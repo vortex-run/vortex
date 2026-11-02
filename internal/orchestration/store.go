@@ -34,6 +34,7 @@ type RunInfo struct {
 	ID        string
 	Goal      string
 	SessionID string
+	Status    string // running, done, or failed
 }
 
 // RunStore persists orchestration runs in SQLite. Safe for concurrent use —
@@ -156,8 +157,11 @@ func (s *RunStore) CreateRun(goal, sessionID string, tasks []*Task) (string, err
 	return id, nil
 }
 
-// SaveTask upserts one task's current state. A transition to running also
-// increments the attempt counter (in SQL, so the Task struct needs no field).
+// SaveTask upserts one task's current state. When t.Attempts is set (>0) it is
+// written as the authoritative attempt count (queue Claim increments it; see
+// upsertTask). When Attempts is zero and the task is running, the legacy SQL
+// bump is retained so older callers/tests that only flip State still
+// accumulate attempts.
 func (s *RunStore) SaveTask(runID string, t *Task) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -169,7 +173,7 @@ func (s *RunStore) SaveTask(runID string, t *Task) error {
 	if err := upsertTask(tx, runID, -1, t); err != nil {
 		return err
 	}
-	if t.State == StateRunning {
+	if t.Attempts == 0 && t.State == StateRunning {
 		if _, err := tx.Exec(
 			`UPDATE orch_tasks SET attempts = attempts + 1 WHERE run_id=? AND id=?`,
 			runID, t.ID); err != nil {
@@ -200,7 +204,9 @@ func (s *RunStore) SyncTasks(runID string, tasks []*Task) error {
 // upsertTask inserts or updates one task row. idx is only written on insert
 // (CreateRun); updates never move a task's plan position. An empty state is
 // stored as pending — planner tasks arrive unset and the queue's Add applies
-// the same default.
+// the same default. attempts is written when t.Attempts > 0 (the queue's
+// authoritative count) and left untouched when zero, so legacy state-only
+// writers never regress it and SyncTasks reconciles it like every other field.
 func upsertTask(tx *sql.Tx, runID string, idx int, t *Task) error {
 	state := t.State
 	if state == "" {
@@ -213,26 +219,75 @@ func upsertTask(tx *sql.Tx, runID string, idx int, t *Task) error {
 	if t.DependsOn == nil {
 		deps = []byte("[]")
 	}
-	meta, err := json.Marshal(t.Meta)
+	metaMap, err := taskMetaForUpsert(tx, runID, idx, t)
+	if err != nil {
+		return err
+	}
+	meta, err := json.Marshal(metaMap)
 	if err != nil {
 		return fmt.Errorf("orchestration: marshaling task meta: %w", err)
 	}
-	if t.Meta == nil {
-		meta = []byte("{}")
-	}
 	_, err = tx.Exec(
-		`INSERT INTO orch_tasks(run_id, id, idx, name, agent_type, input, depends_on, state, result, error, meta, started_at, finished_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO orch_tasks(run_id, id, idx, name, agent_type, input, depends_on, state, result, error, meta, attempts, started_at, finished_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(run_id, id) DO UPDATE SET
 		   state=excluded.state, result=excluded.result, error=excluded.error,
-		   meta=excluded.meta, started_at=excluded.started_at, finished_at=excluded.finished_at`,
+		   meta=excluded.meta,
+		   attempts=CASE WHEN excluded.attempts > 0 THEN excluded.attempts ELSE orch_tasks.attempts END,
+		   started_at=excluded.started_at, finished_at=excluded.finished_at`,
 		runID, t.ID, idx, t.Name, t.AgentType, t.Input, string(deps),
-		string(state), t.Result, t.Error, string(meta),
+		string(state), t.Result, t.Error, string(meta), t.Attempts,
 		unixMilliOrZero(t.StartedAt), unixMilliOrZero(t.FinishedAt))
 	if err != nil {
 		return fmt.Errorf("orchestration: upserting task %s: %w", t.ID, err)
 	}
 	return nil
+}
+
+// taskMetaForUpsert builds the JSON meta blob for a task row. CreateRun passes
+// idx >= 0; SaveTask/SyncTasks use idx -1 for updates.
+//
+// Contract: a non-empty t.Meta replaces the stored meta wholesale (no merge).
+// An empty or nil t.Meta on update preserves the existing DB meta so
+// state-only SaveTask calls (resume simulators, concurrent state writes) do
+// not wipe planner fields such as required_capabilities. Consequently meta
+// cannot be cleared to {} through SaveTask/SyncTasks; the queue only ever
+// merges keys (SetMeta), so no caller needs to. MaxAttempts and
+// VerificationCriteria are struct fields and are re-stamped into meta from the
+// task on every write (not read back from the row).
+//
+// Stored meta that is not a JSON object (corruption or hand edits) is dropped
+// and rewritten from the task: it is unreadable to LoadRun anyway, and failing
+// the write would stall the run for the sake of bytes we cannot interpret.
+func taskMetaForUpsert(tx *sql.Tx, runID string, idx int, t *Task) (map[string]any, error) {
+	metaMap := map[string]any{}
+	if len(t.Meta) > 0 {
+		for k, v := range t.Meta {
+			metaMap[k] = v
+		}
+	} else if idx < 0 {
+		var existing sql.NullString
+		err := tx.QueryRow(
+			`SELECT meta FROM orch_tasks WHERE run_id=? AND id=?`, runID, t.ID).
+			Scan(&existing)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("orchestration: reading task meta: %w", err)
+		}
+		if existing.Valid && existing.String != "" && existing.String != "{}" {
+			// json.Unmarshal of a JSON `null` sets the map to nil (and leaves
+			// it nil on error), so always re-establish a writable map.
+			if uerr := json.Unmarshal([]byte(existing.String), &metaMap); uerr != nil || metaMap == nil {
+				metaMap = map[string]any{}
+			}
+		}
+	}
+	if t.MaxAttempts > 0 {
+		metaMap["max_attempts"] = t.MaxAttempts
+	}
+	if t.VerificationCriteria != "" {
+		metaMap["verification_criteria"] = t.VerificationCriteria
+	}
+	return metaMap, nil
 }
 
 // SyncMemory upserts a shared-memory snapshot for the run in one transaction.
@@ -287,7 +342,7 @@ func (s *RunStore) MarkResumed(runID string) (int, error) {
 // ListIncomplete returns resumable runs (status running), oldest first.
 func (s *RunStore) ListIncomplete() ([]RunInfo, error) {
 	rows, err := s.db.Query(
-		`SELECT id, goal, session_id FROM orch_runs WHERE status=? ORDER BY created_at ASC`,
+		`SELECT id, goal, session_id, status FROM orch_runs WHERE status=? ORDER BY created_at ASC`,
 		RunRunning)
 	if err != nil {
 		return nil, err
@@ -296,7 +351,32 @@ func (s *RunStore) ListIncomplete() ([]RunInfo, error) {
 	var out []RunInfo
 	for rows.Next() {
 		var r RunInfo
-		if err := rows.Scan(&r.ID, &r.Goal, &r.SessionID); err != nil {
+		if err := rows.Scan(&r.ID, &r.Goal, &r.SessionID, &r.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListRecent returns runs ordered by updated_at descending (newest first).
+// Terminal and in-progress runs are included. limit <= 0 returns all runs.
+func (s *RunStore) ListRecent(limit int) ([]RunInfo, error) {
+	q := `SELECT id, goal, session_id, status FROM orch_runs ORDER BY updated_at DESC`
+	args := []any{}
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RunInfo
+	for rows.Next() {
+		var r RunInfo
+		if err := rows.Scan(&r.ID, &r.Goal, &r.SessionID, &r.Status); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -307,7 +387,7 @@ func (s *RunStore) ListIncomplete() ([]RunInfo, error) {
 // LoadRun returns a run's tasks (in plan order) and shared-memory entries.
 func (s *RunStore) LoadRun(runID string) ([]*Task, []MemoryEntry, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, agent_type, input, depends_on, state, result, error, meta, started_at, finished_at
+		`SELECT id, name, agent_type, input, depends_on, state, result, error, meta, attempts, started_at, finished_at
 		 FROM orch_tasks WHERE run_id=? ORDER BY idx ASC`, runID)
 	if err != nil {
 		return nil, nil, err
@@ -320,12 +400,30 @@ func (s *RunStore) LoadRun(runID string) ([]*Task, []MemoryEntry, error) {
 		var deps, meta, state string
 		var started, finished int64
 		if err := rows.Scan(&t.ID, &t.Name, &t.AgentType, &t.Input, &deps,
-			&state, &t.Result, &t.Error, &meta, &started, &finished); err != nil {
+			&state, &t.Result, &t.Error, &meta, &t.Attempts, &started, &finished); err != nil {
 			return nil, nil, err
 		}
 		t.State = TaskState(state)
 		_ = json.Unmarshal([]byte(deps), &t.DependsOn)
+		// Best-effort: these columns are only ever written by json.Marshal
+		// here, so a decode failure means external corruption. The task still
+		// loads (with nil deps/meta and default MaxAttempts) rather than
+		// making the whole run unloadable/unresumable.
 		_ = json.Unmarshal([]byte(meta), &t.Meta)
+		normalizeTaskMetaFromJSON(t.Meta)
+		if t.Meta != nil {
+			if v, ok := t.Meta["max_attempts"].(float64); ok && int(v) > 0 {
+				t.MaxAttempts = int(v)
+				delete(t.Meta, "max_attempts")
+			}
+			if v, ok := t.Meta["verification_criteria"].(string); ok {
+				t.VerificationCriteria = v
+				delete(t.Meta, "verification_criteria")
+			}
+			if len(t.Meta) == 0 {
+				t.Meta = nil
+			}
+		}
 		if started > 0 {
 			t.StartedAt = time.UnixMilli(started)
 		}
@@ -357,6 +455,38 @@ func (s *RunStore) LoadRun(runID string) ([]*Task, []MemoryEntry, error) {
 		memory = append(memory, e)
 	}
 	return tasks, memory, mrows.Err()
+}
+
+// normalizeTaskMetaFromJSON repairs Meta values after json.Unmarshal into
+// map[string]any (JSON arrays become []any, not []string).
+func normalizeTaskMetaFromJSON(meta map[string]any) {
+	if meta == nil {
+		return
+	}
+	if v, ok := meta[metaRequiredCapabilities]; ok {
+		if caps, err := coerceStringSlice(v); err == nil {
+			meta[metaRequiredCapabilities] = caps
+		}
+	}
+}
+
+func coerceStringSlice(v any) ([]string, error) {
+	switch s := v.(type) {
+	case []string:
+		return s, nil
+	case []any:
+		out := make([]string, 0, len(s))
+		for _, item := range s {
+			str, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("orchestration: meta slice element is not a string")
+			}
+			out = append(out, str)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("orchestration: meta value is not a string slice")
+	}
 }
 
 // unixMilliOrZero converts a time to unix ms, mapping the zero time to 0 so

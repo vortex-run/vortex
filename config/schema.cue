@@ -17,6 +17,13 @@ package vortex
 	security:      #Security
 	secrets:       #Secrets
 	observability: #Observability
+	// agents configures coordinator / local-tool behaviour (workspace trust).
+	agents: #Agents | *{
+		local_tools: {
+			trusted_root: ""
+			auto_mode:    false
+		}
+	}
 	// servers are SSH-reachable hosts the DevOps agent (M16) can manage. Empty
 	// for deployments that don't use remote VPS management.
 	servers: [...#Server] | *[]
@@ -145,3 +152,22 @@ package vortex
 
 // #Duration is a Go time.Duration string, e.g. "10s", "500ms", "30s", "1m".
 #Duration: =~"^[0-9]+(ns|us|µs|ms|s|m|h)$"
+
+// #Agents configures agent-runtime options (coordinator local tools).
+#Agents: {
+	local_tools: #LocalTools | *{
+		trusted_root: ""
+		auto_mode:    false
+	}
+}
+
+// #LocalTools configures real-machine FS tools (approval-gated by default).
+// Auto Mode never enables global host access — it only waives repeated
+// in-scope file approvals when trusted_root is set.
+#LocalTools: {
+	trusted_root: string | *""
+	auto_mode:    bool | *false
+	if auto_mode {
+		trusted_root: string & !=""
+	}
+}

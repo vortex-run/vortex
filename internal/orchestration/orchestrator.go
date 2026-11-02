@@ -246,9 +246,45 @@ func (o *Orchestrator) runTask(ctx context.Context, q *TaskQueue, t *Task) {
 
 	result, err := o.cfg.Executor.Execute(runCtx, t, o.mem)
 	if err != nil {
-		_ = q.Fail(t.ID, err.Error())
-		o.emit(fmt.Sprintf("❌ %s: %v", t.Name, err))
+		retried, rerr := q.FailOrRetry(t.ID, err.Error())
+		if rerr != nil {
+			_ = q.Fail(t.ID, err.Error())
+		}
+		if retried {
+			o.emit(fmt.Sprintf("🔁 %s: retrying after error: %v", t.Name, err))
+		} else {
+			o.emit(fmt.Sprintf("❌ %s: %v", t.Name, err))
+		}
 		return
+	}
+	if verr := VerifyTaskResult(t.VerificationCriteria, result); verr != nil {
+		status := "failed"
+		if isUnsupportedVerification(verr) {
+			status = "unsupported"
+		}
+		_ = q.SetMeta(t.ID, map[string]any{
+			"verification_status": status,
+			"verification_error":  verr.Error(),
+		})
+		if isUnsupportedVerification(verr) {
+			_ = q.Fail(t.ID, verr.Error())
+			o.emit(fmt.Sprintf("❌ %s: %v", t.Name, verr))
+			return
+		}
+		retried, rerr := q.FailOrRetry(t.ID, verr.Error())
+		if rerr != nil {
+			_ = q.Fail(t.ID, verr.Error())
+		}
+		if retried {
+			o.emit(fmt.Sprintf("🔁 %s: retrying after verification: %v", t.Name, verr))
+		} else {
+			o.emit(fmt.Sprintf("❌ %s: %v", t.Name, verr))
+		}
+		return
+	}
+	if strings.TrimSpace(t.VerificationCriteria) != "" {
+		// nil retracts the verification_error a failed earlier attempt left.
+		_ = q.SetMeta(t.ID, map[string]any{"verification_status": "passed", "verification_error": nil})
 	}
 	o.mem.Set("task:"+t.ID, result, t.ID)
 	_ = q.Complete(t.ID, result)

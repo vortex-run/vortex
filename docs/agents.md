@@ -67,7 +67,23 @@ Analyse CSV/JSON and generate charts.
 
 The orchestrator decomposes a goal into a task DAG and runs tasks with
 dependency + concurrency control. Unknown or cyclic dependencies fail fast
-rather than stranding silently.
+rather than stranding silently. Tasks may set `max_attempts` (capped at 3) for
+bounded retries on executor failure, and optional `verification_criteria` to
+check executor output after each attempt. **Partial:** only structured criteria
+are enforced today (`nonempty`, `contains:…`, `prefix:…`). Free-text criteria
+are rejected when the plan is validated (the orchestration fails fast with
+`unsupported verification_criteria` instead of running); as defence in depth, a
+persisted task that still carries unsupported criteria fails at run time as
+`unsupported`. There is no shell/test harness auto-verification yet.
+
+Capability discovery uses the A2A agent catalog (`GET /api/agents/catalog`,
+API-key gated like the other agent endpoints): validated static manifests with
+capability-based selection and bounded delegation contracts (depth/fan-out
+limits). A planner task may set `required_capabilities` (plus optional
+`permission_profile`) *instead of* `agent`; setting both is a plan error. The
+catalog is registry data only — listing an agent does not mean it is running.
+Live specialist status comes from `GET /api/team/agents`; both are shown on the
+dashboard **Agents** page.
 
 > _"Research the top 2 caching libraries, benchmark both, and write up which to use."_
 
@@ -89,3 +105,47 @@ generate one.
 Tools that touch the real machine require explicit approval (TUI `[Y]/[N]`,
 Telegram reply, or `POST /api/agents/approve`). This is the primary safety
 control for unattended runs — keep it on in production.
+
+### Local workspace trust (Auto Mode foundations)
+
+Configure in `vortex.cue` under `agents.local_tools` (defaults: empty
+`trusted_root`, `auto_mode: false`):
+
+```cue
+agents: {
+	local_tools: {
+		trusted_root: "/path/to/your/project" // or a path relative to the work dir
+		auto_mode:    true                    // requires trusted_root
+	}
+}
+```
+
+Environment overrides: `VORTEX_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`,
+`VORTEX_AGENTS_LOCAL_TOOLS_AUTO_MODE`. Invalid or missing trusted directories
+fail at startup with a clear field path. When both the coordinator working
+directory and `trusted_root` are set, startup requires **work dir ⊆ trusted_root**
+(lexical containment). Prefer `trusted_root` equal to the project root (or `.`
+relative to that root), or an absolute ancestor that contains the work dir.
+A `trusted_root` that is only a subdirectory of the work dir is rejected so the
+shell cwd is not left outside the FS trust boundary.
+
+| Field | Meaning |
+|---|---|
+| `trusted_root` | When set, all local FS tool paths must resolve inside this directory (lexical + symlink checks). Empty = no workspace confinement (approval remains the control). |
+| `auto_mode` | With a `trusted_root`, routine in-scope write/edit/create_project may skip repeated approval prompts. Shell (`run_terminal`) stays approval-gated. Release builds still force shell approval. |
+
+Auto Mode is **not** unrestricted host access. Out-of-scope paths are denied by
+the runtime. There is still no container/namespace isolation for local tools.
+
+### Hot reload (`SIGHUP` / `vortex reload`)
+
+Config reload swaps the live `vortex.cue` in the config `Holder` (same path as
+routes and policy). **`agents.local_tools` is validated at process startup only:**
+`RegisterLocalTools` binds `trusted_root` and `auto_mode` into the coordinator’s
+local tool registry once; there is no reload hook to rebuild that registry or the
+specialist trusted-tool set. In-flight agent work may still be executing tools
+built from the previous settings.
+
+To change `trusted_root` or `auto_mode`, edit `vortex.cue` and **restart VORTEX**
+(`vortex stop` then `vortex start`, or your service manager). Do not rely on
+reload to tighten or widen workspace trust on a running process.

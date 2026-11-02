@@ -233,7 +233,15 @@ tasks:
     env:
       CGO_ENABLED: "1"
     cmds:
-      - go test -race -count=1 ./...
+      # Bounded so a stuck goroutine fails the job instead of hanging CI.
+      - go test -race -count=1 -timeout 25m ./...
+
+  test:race:critical:
+    desc: Race-detector smoke for orchestration, agents, a2a, and api (CI-critical concurrency)
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - go test -race -count=1 -timeout 10m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
 
   test:integration:
     desc: Run integration tests (starts a real vortex process)

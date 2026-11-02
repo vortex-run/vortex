@@ -82,6 +82,9 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.Hash() == "" {
 		t.Error("config hash should be non-empty")
 	}
+	if cfg.Agents.LocalTools.AutoMode {
+		t.Error("agents.local_tools.auto_mode default should be false")
+	}
 }
 
 func TestLoadMissingRequiredField(t *testing.T) {

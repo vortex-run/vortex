@@ -41,6 +41,14 @@ limit); plaintext is shown once and never stored. The store is written
 atomically on every issue/revoke. RBAC roles (`admin`, `operator`, `viewer`,
 `readonly`) gate endpoints; admin-only routes require the admin role.
 
+**Data-plane vs control-plane:** Agent runtime routes (`/api/agents/*`,
+including `GET /api/agents/catalog`), Forge, orchestration (`POST /api/orchestrate`,
+`GET /api/orchestration/*`), logs, and OpenAI-compatible `/v1/*` endpoints use
+`requireAPIKey` — they need a valid key even from loopback when auth is
+configured. Control-plane routes (`/internal/reload`, dashboard data under
+`/api/status`, etc.) may allow loopback without a key unless
+`VORTEX_TRUST_LOOPBACK=false`.
+
 ## Audit log
 
 A tamper-proof, append-only log HMAC-chains every security-relevant event: each
@@ -77,7 +85,20 @@ so every request presenting a loopback address must still carry a credential.
 ## Agent sandbox
 
 - Sandbox filesystem tools confine writes to a sandbox dir (lexical + symlink
-  escape checks). Local FS/terminal tools are confined to the working dir.
+  escape checks).
+- Local FS/terminal tools: set `agents.local_tools.trusted_root` in `vortex.cue`
+  (or `VORTEX_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`) to confine paths to that
+  workspace (lexical + symlink checks). When unset, absolute paths are allowed
+  after approval (approval remains the primary control). `auto_mode` may waive
+  repeated approval only for routine in-scope file mutations — never for shell,
+  and never outside the trusted root. Defaults keep Auto Mode off globally.
+  `agents.local_tools` is applied at process startup only; SIGHUP / `vortex reload`
+  does not rebuild the local tool registry — restart after changing trust settings.
+  Startup validation requires the coordinator working directory to be inside
+  `trusted_root` (work dir ⊆ trusted_root) so the default shell cwd is not left
+  outside the FS trust boundary. If `run_terminal` is invoked with an empty cwd
+  and Root would escape `trusted_root`, the tool falls back to `trusted_root`
+  (approved shell is still not a full OS jail).
 - The **approval gate** is the primary control for machine-touching actions —
   keep it enabled for unattended runs.
 - `http_get` and the research fetcher use an **SSRF-safe dialer** that resolves

@@ -57,10 +57,17 @@ jobs:
       - name: Build
         run: task build
 
+      - name: Test (race, critical packages)
+        # Fast fail on concurrency-heavy packages before the full module suite.
+        # Same four paths as `task test:race:critical` (orchestration, agents, a2a, api).
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 -timeout 10m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
+
       - name: Test (race)
         # ubuntu-latest has a C toolchain, so run the race detector on the
         # whole unit suite — the merge gate must catch data races on every
-        # push/PR, not only at release time (audit M7).
+        # push/PR, not only at release time (audit M7). Bounded via Taskfile.
         run: task test:race
 
       - name: Test (release build tag)

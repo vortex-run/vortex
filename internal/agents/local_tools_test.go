@@ -45,8 +45,8 @@ func TestReadLocalFile_ReadsContent(t *testing.T) {
 }
 
 func TestReadLocalFile_AbsolutePathAllowed(t *testing.T) {
-	// No path confinement: an absolute path anywhere is readable (the approval
-	// gate, not a cwd boundary, is the control — and reads need no approval).
+	// Without TrustedRoot, absolute paths anywhere remain readable (approval
+	// is the control for mutations; reads need no approval).
 	dir := t.TempDir()
 	target := filepath.Join(dir, "anywhere.txt")
 	if err := os.WriteFile(target, []byte("data"), 0o600); err != nil {
@@ -93,9 +93,8 @@ func TestWriteLocalFile_ExecutesAfterApproval(t *testing.T) {
 }
 
 func TestWriteLocalFile_AbsolutePathAllowed(t *testing.T) {
-	// After approval (RequireApproval=false here), a write to ANY absolute path
-	// is allowed — there is no cwd confinement. Write to a sibling temp dir, not
-	// the configured Root.
+	// Without TrustedRoot, after approval a write to ANY absolute path is
+	// allowed. Write to a sibling temp dir, not the configured Root.
 	other := t.TempDir()
 	target := filepath.Join(other, "calc.py")
 	cfg := LocalFSConfig{Root: t.TempDir()} // a DIFFERENT root
