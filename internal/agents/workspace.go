@@ -125,8 +125,8 @@ func (cfg LocalFSConfig) waivesApproval(abs string) bool {
 func resolveExistingPrefix(p string) string {
 	rest := ""
 	for dir := p; ; dir = filepath.Dir(dir) {
-		if real, err := filepath.EvalSymlinks(dir); err == nil {
-			return filepath.Join(real, rest)
+		if evaluated, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(evaluated, rest)
 		}
 		if filepath.Dir(dir) == dir {
 			return p
