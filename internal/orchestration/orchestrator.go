@@ -117,6 +117,9 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 	// so the dispatch loop can re-check for newly-ready tasks.
 	var running int
 	done := make(chan struct{}, len(tasks))
+	// Retries can signal done more often than there are tasks, so a full buffer
+	// is possible. Closing dispatchEnded releases any sender once nothing reads.
+	dispatchEnded := make(chan struct{})
 
 	for {
 		if ctx.Err() != nil {
@@ -133,7 +136,13 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 			sem <- struct{}{}
 			go func(t *Task) {
 				defer wg.Done()
-				defer func() { <-sem; done <- struct{}{} }()
+				defer func() {
+					<-sem
+					select {
+					case done <- struct{}{}:
+					case <-dispatchEnded:
+					}
+				}()
 				o.runTask(ctx, q, t)
 			}(task)
 		}
@@ -156,6 +165,7 @@ func (o *Orchestrator) Run(ctx context.Context, goal string, tasks []*Task) (*Ru
 		case <-ctx.Done():
 		}
 	}
+	close(dispatchEnded)
 	wg.Wait()
 
 	// Reconcile every task's final state in one transaction (H3): dep-failure
