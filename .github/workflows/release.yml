@@ -46,9 +46,13 @@ jobs:
 
       - name: Run tests before release
         # Mirror the CI merge gate so a tag cannot ship what a PR would reject.
+        # CGO_ENABLED=1 is explicit (not inherited) so -race cannot silently
+        # degrade if the runner image changes; bounds match task test:race.
+        env:
+          CGO_ENABLED: "1"
         run: |
-          go test -race ./...
-          go test -tags release ./internal/agents/...
+          go test -race -count=1 -timeout 25m ./...
+          go test -tags release -count=1 ./internal/agents/...
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
