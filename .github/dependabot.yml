@@ -25,6 +25,10 @@ updates:
       # bump breaks npm ci. Remove once typescript-eslint supports it.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # Tailwind 4 moved its PostCSS plugin and config, which breaks the build.
+      # Remove when the dashboard is migrated.
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
     groups:
       dashboard-dependencies:
         patterns:
@@ -36,3 +40,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    groups:
+      # init, autobuild, analyze and upload-sarif must share a version, so
+      # separate PRs for them can never pass CI.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
