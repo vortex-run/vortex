@@ -373,6 +373,7 @@ cd web/dashboard && npm ci && npm run lint && npm run build && npm run audit:ci
 | 10 | `VORTEX_PRODUCTION_AUDIT.md` | What’s fixed vs open |
 | 11 | `CONTRIBUTING.md` / `SECURITY.md` | Community + vuln reporting |
 | 12 | `docs/IP_NOTES.md` | Patent counsel note (maintainers) |
+| 13 | `docs/runbooks.md` | Operator incident and recovery steps |
 
 ---
 
