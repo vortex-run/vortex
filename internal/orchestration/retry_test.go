@@ -3,9 +3,12 @@ package orchestration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestQueue_FailOrRetry_RequeuesUntilMax(t *testing.T) {
@@ -128,6 +131,50 @@ func TestQueue_SetMetaNilValueDeletesKey(t *testing.T) {
 	}
 	if err := q.SetMeta("b", map[string]any{"gone": nil}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Retries signal completion more often than there are tasks. A fast retry must
+// not leave a finished goroutine blocked after the dispatch loop has exited,
+// which would hang Run in wg.Wait forever.
+func TestRun_FastRetriesDoNotHang(t *testing.T) {
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for i := 0; i < 20; i++ {
+			var seen sync.Map
+			o, err := NewOrchestrator(OrchestratorConfig{
+				Executor: ExecutorFunc(func(_ context.Context, task *Task, _ *SharedMemory) (string, error) {
+					if _, again := seen.LoadOrStore(task.ID, true); !again {
+						return "", errors.New("flaky")
+					}
+					return "ok", nil
+				}),
+				MaxParallel: 1,
+			})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			tasks := make([]*Task, 50)
+			for j := range tasks {
+				tasks[j] = &Task{ID: fmt.Sprintf("t%d", j), AgentType: "general", MaxAttempts: 2}
+			}
+			res, err := o.Run(context.Background(), "goal", tasks)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if res.Completed != len(tasks) {
+				t.Errorf("completed = %d, want %d", res.Completed, len(tasks))
+				return
+			}
+		}
+	}()
+	select {
+	case <-finished:
+	case <-time.After(60 * time.Second):
+		t.Fatal("Run hung after a fast retry")
 	}
 }
 
