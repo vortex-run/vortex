@@ -185,7 +185,7 @@ func (m *MemoryStore) Recent(sessionID string, n int) ([]MemoryMessage, error) {
 // ListSessions returns all sessions, newest-updated first.
 func (m *MemoryStore) ListSessions() ([]SessionInfo, error) {
 	rows, err := m.db.Query(
-		`SELECT id, summary, updated_at FROM sessions ORDER BY updated_at DESC`)
+		`SELECT id, summary, updated_at FROM sessions ORDER BY updated_at DESC, rowid DESC`)
 	if err != nil {
 		return nil, err
 	}
