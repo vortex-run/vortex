@@ -3,6 +3,10 @@
 Thanks for helping. VORTEX is a single-binary Go platform with an embedded
 React dashboard — keep changes focused, tested, and free of secrets.
 
+**New contributors and AI agents:** start with
+[docs/HANDOFF.md](docs/HANDOFF.md) — product, codebase map, and safe-change
+rules from scratch.
+
 ## Prerequisites
 
 - **Go 1.26.9+** (module pins `toolchain go1.26.9`; `GOTOOLCHAIN=auto` downloads it)

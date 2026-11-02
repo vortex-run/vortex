@@ -1,5 +1,8 @@
 # Development
 
+**Cold start / AI agents:** read [HANDOFF.md](HANDOFF.md) first (product map,
+package catalog, pitfalls, vs OpenClaw/Hermes).
+
 ## Prerequisites
 
 - **Go 1.26+**
@@ -13,7 +16,8 @@
 ```bash
 task build              # → ./bin/vortex (version-stamped via -ldflags)
 task test               # unit tests (race detector when a C compiler exists)
-task test:race          # force the race detector (needs cgo)
+task test:race          # force the race detector (needs cgo; 25m timeout)
+task test:race:critical # race smoke: orchestration, agents, a2a, api (10m)
 task test:integration   # integration suite (starts a real vortex process)
 task lint               # golangci-lint over the module
 task vet                # go vet
@@ -24,6 +28,30 @@ Run a single package's tests directly:
 ```bash
 go test -count=1 ./internal/agents/...
 ```
+
+### Windows Firewall and `*.test.exe` prompts
+
+`go test` builds ephemeral binaries under `%TEMP%\go-build*\*\<pkg>.test.exe`
+(e.g. `cmd.test.exe`, `api.test.exe`). Each new cache path looks like a
+**different application** to Windows Defender Firewall, so prompts can repeat
+even when tests only bind **127.0.0.1**.
+
+| Cause | Evidence | Inbound needed? |
+|-------|----------|-----------------|
+| `internal/cmd` `runStart` default listen `:9090` (all interfaces) | `api.DefaultAddr`; fixed in tests via `VORTEX_API_LISTEN=127.0.0.1:0` | No for unit tests |
+| Package tests that call `net.Listen` / `Server.Start` / `httptest.NewServer` | Many `*_test.go` files use `127.0.0.1:0` | No (loopback) |
+| New temp binary path after cache churn | `%TEMP%\go-build…\*.test.exe` | No |
+| Production `vortex start` on `:9090` | Intentional management API | Only if you need LAN access |
+
+Do **not** broadly allow every `*.test.exe`. Prefer Deny, or allow one
+**stable** binary if you must:
+
+```bat
+go test -c -o %TEMP%\vortex-cmd.test.exe ./internal/cmd
+```
+
+Override the management listen address for local smoke tests with
+`VORTEX_API_LISTEN=127.0.0.1:0` (empty = default `:9090`).
 
 ## Project layout
 
@@ -73,10 +101,14 @@ under `internal/` — do not put new product logic in those empty roots.
 
 ## CI
 
-`.github/workflows/ci.yml` runs build, race-enabled unit tests, lint
-(including the `integration` build tag), and the integration suite on every
-push and pull request. `.github/workflows/security.yml` runs `govulncheck` and
-dependency review.
+`.github/workflows/ci.yml` runs build, a bounded race-detector pass on
+orchestration/agents/a2a/api, then race-enabled unit tests for the full module
+(`task test:race`, 25m cap), lint (including the `integration` build tag), and
+the integration suite (`-race`, 900s timeout) on every push and pull request.
+All of that runs on **ubuntu-latest** (Linux + C toolchain for cgo). Local
+Windows dev boxes often lack cgo — use WSL/Linux CI or install gcc/clang for
+`-race`. `.github/workflows/security.yml` runs `govulncheck` and dependency
+review.
 
 ## Releasing
 

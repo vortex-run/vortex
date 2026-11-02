@@ -263,6 +263,9 @@ task lint       # golangci-lint
 Go 1.26+ and [Task](https://taskfile.dev) are required. Details in
 [docs/development.md](docs/development.md).
 
+**Full product + codebase handoff** (for humans and agents):
+[docs/HANDOFF.md](docs/HANDOFF.md).
+
 ---
 
 ## Contributing

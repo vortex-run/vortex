@@ -59,3 +59,7 @@ CLAUDE.md
 # Local release-signing material — never commit
 .secrets/
 
+
+# Local overnight agent ops (checkpoints, locks, reports) — never commit
+.vortex-ops/
+
