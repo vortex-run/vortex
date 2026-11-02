@@ -134,6 +134,10 @@ shell cwd is not left outside the FS trust boundary.
 | `trusted_root` | When set, all local FS tool paths must resolve inside this directory (lexical + symlink checks). Empty = no workspace confinement (approval remains the control). |
 | `auto_mode` | With a `trusted_root`, routine in-scope write/edit/create_project may skip repeated approval prompts. Shell (`run_terminal`) stays approval-gated. Release builds still force shell approval. |
 
+Auto Mode keeps the approval prompt for `vortex.cue` and for paths inside
+`.git`, `.githooks` and `.husky`, because hooks would otherwise run on a later
+approved command. A custom `core.hooksPath` is not detected.
+
 Auto Mode is **not** unrestricted host access. Out-of-scope paths are denied by
 the runtime. There is still no container/namespace isolation for local tools.
 
