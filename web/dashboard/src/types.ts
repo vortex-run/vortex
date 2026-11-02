@@ -78,3 +78,51 @@ export interface HealingStatus {
   slo_alerts: HealingSLOAlert[];
   recovery_stats: { total_events: number; actions_executed: number };
 }
+
+// TeamAgent mirrors api.TeamAgentInfo (GET /api/team/agents).
+export interface TeamAgent {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  capabilities?: string[];
+}
+
+// AgentCatalogEntry mirrors GET /api/agents/catalog entries.
+export interface AgentCatalogEntry {
+  id: string;
+  name: string;
+  role: string;
+  description?: string;
+  version?: string;
+  capabilities?: string[];
+  tools?: string[];
+  permission_profile?: string;
+  eval_notes?: string;
+}
+
+// OrchRun mirrors api.OrchRunSummary — recent runs including done/failed.
+export interface OrchRun {
+  id: string;
+  goal: string;
+  session_id: string;
+  status: string;
+}
+
+// OrchTask mirrors api.OrchTaskInfo (GET /api/orchestration/runs/{id}/tasks).
+export interface OrchTask {
+  id: string;
+  name: string;
+  agent_type: string;
+  input?: string;
+  depends_on?: string[];
+  state: string;
+  result?: string;
+  error?: string;
+  meta?: Record<string, unknown>;
+  max_attempts?: number;
+  attempts?: number;
+  verification_criteria?: string;
+  started_at?: string;
+  finished_at?: string;
+}
