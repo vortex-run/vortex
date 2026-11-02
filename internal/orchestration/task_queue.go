@@ -24,6 +24,11 @@ const (
 	StateFailed   TaskState = "failed"   // finished with an error
 )
 
+// maxTaskAttempts caps how many times a single task may run (initial attempt +
+// bounded retries). Keep this small: retries are for transient executor
+// failures, not unbounded model loops.
+const maxTaskAttempts = 3
+
 // Task is a unit of work with dependencies.
 type Task struct {
 	ID        string         `json:"id"`
@@ -35,6 +40,16 @@ type Task struct {
 	Result    string         `json:"result,omitempty"`
 	Error     string         `json:"error,omitempty"`
 	Meta      map[string]any `json:"meta,omitempty"`
+
+	// MaxAttempts bounds how many times this task may execute (default 1 =
+	// no retry). Values above maxTaskAttempts are rejected at Add/validatePlan.
+	MaxAttempts int `json:"max_attempts,omitempty"`
+	// Attempts is how many times the task has been claimed for execution.
+	Attempts int `json:"attempts,omitempty"`
+	// VerificationCriteria is optional structured verification on task Result
+	// after a successful execute. Supported forms: "nonempty", "contains:<substr>",
+	// "prefix:<substr>". Empty means no check. Free text is rejected as unsupported.
+	VerificationCriteria string `json:"verification_criteria,omitempty"`
 
 	StartedAt  time.Time `json:"started_at,omitempty"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
@@ -68,6 +83,12 @@ func (q *TaskQueue) Add(t *Task) error {
 	if t.State == "" {
 		t.State = StatePending
 	}
+	if t.MaxAttempts <= 0 {
+		t.MaxAttempts = 1
+	}
+	if t.MaxAttempts > maxTaskAttempts {
+		return fmt.Errorf("orchestration: task %q max_attempts %d exceeds cap %d", t.ID, t.MaxAttempts, maxTaskAttempts)
+	}
 	cp := *t
 	q.tasks[t.ID] = &cp
 	q.order = append(q.order, t.ID)
@@ -89,6 +110,7 @@ func (q *TaskQueue) Claim() *Task {
 		switch dep {
 		case depReady:
 			t.State = StateRunning
+			t.Attempts++
 			t.StartedAt = time.Now()
 			cp := *t
 			return &cp
@@ -145,6 +167,35 @@ func (q *TaskQueue) Fail(id, errMsg string) error {
 	return q.finish(id, StateFailed, "", errMsg)
 }
 
+// FailOrRetry marks a task failed, or requeues it as pending when Attempts is
+// still below MaxAttempts. Returns retried=true when the task was put back on
+// the queue for another bounded attempt.
+func (q *TaskQueue) FailOrRetry(id, errMsg string) (retried bool, err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	t, ok := q.tasks[id]
+	if !ok {
+		return false, fmt.Errorf("orchestration: no task %q", id)
+	}
+	limit := t.MaxAttempts
+	if limit <= 0 {
+		limit = 1
+	}
+	if t.Attempts < limit {
+		t.State = StatePending
+		t.Error = errMsg
+		t.Result = ""
+		t.StartedAt = time.Time{}
+		t.FinishedAt = time.Time{}
+		return true, nil
+	}
+	t.State = StateFailed
+	t.Error = errMsg
+	t.Result = ""
+	t.FinishedAt = time.Now()
+	return false, nil
+}
+
 func (q *TaskQueue) finish(id string, state TaskState, result, errMsg string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -156,6 +207,32 @@ func (q *TaskQueue) finish(id string, state TaskState, result, errMsg string) er
 	t.Result = result
 	t.Error = errMsg
 	t.FinishedAt = time.Now()
+	return nil
+}
+
+// SetMeta merges kv into a task's Meta map (creates Meta if needed). A nil
+// value deletes that key, so a later attempt can retract metadata (e.g. a
+// stale verification_error) that an earlier attempt recorded.
+func (q *TaskQueue) SetMeta(id string, kv map[string]any) error {
+	if len(kv) == 0 {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	t, ok := q.tasks[id]
+	if !ok {
+		return fmt.Errorf("orchestration: no task %q", id)
+	}
+	for k, v := range kv {
+		if v == nil {
+			delete(t.Meta, k) // delete on a nil map is a no-op
+			continue
+		}
+		if t.Meta == nil {
+			t.Meta = make(map[string]any, len(kv))
+		}
+		t.Meta[k] = v
+	}
 	return nil
 }
 

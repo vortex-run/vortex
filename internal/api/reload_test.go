@@ -33,7 +33,9 @@ observability: {}
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
-	s := New(":0", testHolder(t), "test", discardLogger())
+	// Loopback-only address string (these tests never call Start; keep the
+	// stored Addr consistent with other API tests that do listen).
+	s := New("127.0.0.1:0", testHolder(t), "test", discardLogger())
 	s.SetReloadFunc(func() error { return nil })
 	s.SetShutdownFunc(func() {})
 	return s

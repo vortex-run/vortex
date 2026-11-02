@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vortex-run/vortex/internal/a2a"
 	"github.com/vortex-run/vortex/internal/agents"
 )
 
 // plannerSystemPrompt instructs the model to decompose a goal into a task DAG.
-const plannerSystemPrompt = `You are a planner that decomposes a goal into a small set of tasks for specialized agents. Available agent types: research, devops, data_pipeline, build_app, general. Respond with ONLY this JSON:
-{"tasks":[{"id":"t1","name":"...","agent":"research","input":"...","depends_on":[]},{"id":"t2","name":"...","agent":"general","input":"...","depends_on":["t1"]}]}
-Rules: ids are unique short strings; depends_on lists ids that must finish first; keep it to 2-6 tasks; no cycles. Return only JSON.`
+const plannerSystemPrompt = `You are a planner that decomposes a goal into a small set of tasks for specialized agents. Available agent types: research, devops, data_pipeline, build_app, general. Alternatively set required_capabilities (and optional permission_profile) for capability-based routing. Respond with ONLY this JSON:
+{"tasks":[{"id":"t1","name":"...","agent":"research","input":"...","depends_on":[],"max_attempts":1,"verification_criteria":"nonempty"},{"id":"t2","name":"...","required_capabilities":["research.web"],"input":"...","depends_on":["t1"],"verification_criteria":"contains:summary"}]}
+Rules: ids are unique short strings; depends_on lists ids that must finish first; keep it to 2-6 tasks; no cycles; max_attempts is optional 1-3 (default 1); verification_criteria is optional and must be one of: omit or empty (skip), "nonempty", "contains:<substr>", "prefix:<substr>" — no free text; use either agent or required_capabilities per task, not both. Return only JSON.`
 
 // maxPlanTasks caps how many tasks a plan may contain.
 const maxPlanTasks = 12
@@ -26,11 +27,23 @@ var validAgentTypes = map[string]bool{
 // Planner decomposes a goal into a Plan (task DAG) using the AI gateway.
 type Planner struct {
 	gateway agents.AIGateway
+	catalog *a2a.Catalog
 }
 
 // NewPlanner constructs a planner over an AI gateway.
 func NewPlanner(gateway agents.AIGateway) *Planner {
 	return &Planner{gateway: gateway}
+}
+
+// SetCatalog overrides the agent registry used for required_capabilities
+// resolution (defaults to a2a.DefaultCatalog()).
+func (p *Planner) SetCatalog(c *a2a.Catalog) { p.catalog = c }
+
+func (p *Planner) catalogOrDefault() *a2a.Catalog {
+	if p.catalog != nil {
+		return p.catalog
+	}
+	return a2a.DefaultCatalog()
 }
 
 // Plan decomposes goal into a validated set of tasks. The returned tasks are
@@ -51,7 +64,7 @@ func (p *Planner) Plan(ctx context.Context, goal string) ([]*Task, error) {
 	if len(tasks) == 0 {
 		return p.fallback(goal), nil
 	}
-	if err := validatePlan(tasks); err != nil {
+	if err := p.validatePlan(tasks); err != nil {
 		return nil, err
 	}
 	return tasks, nil
@@ -70,11 +83,15 @@ func parsePlanTasks(reply string) []*Task {
 	}
 	var raw struct {
 		Tasks []struct {
-			ID        string   `json:"id"`
-			Name      string   `json:"name"`
-			Agent     string   `json:"agent"`
-			Input     string   `json:"input"`
-			DependsOn []string `json:"depends_on"`
+			ID                   string   `json:"id"`
+			Name                 string   `json:"name"`
+			Agent                string   `json:"agent"`
+			RequiredCapabilities []string `json:"required_capabilities"`
+			PermissionProfile    string   `json:"permission_profile"`
+			Input                string   `json:"input"`
+			DependsOn            []string `json:"depends_on"`
+			MaxAttempts          int      `json:"max_attempts"`
+			VerificationCriteria string   `json:"verification_criteria"`
 		} `json:"tasks"`
 	}
 	if err := json.Unmarshal([]byte(js), &raw); err != nil {
@@ -82,16 +99,66 @@ func parsePlanTasks(reply string) []*Task {
 	}
 	tasks := make([]*Task, 0, len(raw.Tasks))
 	for _, r := range raw.Tasks {
-		tasks = append(tasks, &Task{
+		t := &Task{
 			ID: r.ID, Name: r.Name, AgentType: r.Agent,
 			Input: r.Input, DependsOn: r.DependsOn,
-		})
+			MaxAttempts:          r.MaxAttempts,
+			VerificationCriteria: r.VerificationCriteria,
+		}
+		if len(r.RequiredCapabilities) > 0 || strings.TrimSpace(r.PermissionProfile) != "" {
+			setTaskCapabilityMeta(t, r.RequiredCapabilities, r.PermissionProfile)
+		}
+		tasks = append(tasks, t)
 	}
 	return tasks
 }
 
+const (
+	metaRequiredCapabilities = "required_capabilities"
+	metaPermissionProfile    = "permission_profile"
+)
+
+func setTaskCapabilityMeta(t *Task, caps []string, profile string) {
+	if t.Meta == nil {
+		t.Meta = map[string]any{}
+	}
+	if len(caps) > 0 {
+		t.Meta[metaRequiredCapabilities] = caps
+	}
+	if p := strings.TrimSpace(profile); p != "" {
+		t.Meta[metaPermissionProfile] = p
+	}
+}
+
+func taskCapabilityQuery(t *Task) (caps []string, profile string, ok bool) {
+	if t == nil || t.Meta == nil {
+		return nil, "", false
+	}
+	raw, _ := t.Meta[metaRequiredCapabilities].([]string)
+	if raw == nil {
+		if anySlice, ok2 := t.Meta[metaRequiredCapabilities].([]any); ok2 {
+			for _, v := range anySlice {
+				if s, ok3 := v.(string); ok3 && strings.TrimSpace(s) != "" {
+					raw = append(raw, s)
+				}
+			}
+		}
+	}
+	if p, _ := t.Meta[metaPermissionProfile].(string); p != "" {
+		profile = p
+	}
+	if len(raw) == 0 && profile == "" {
+		return nil, "", false
+	}
+	return raw, profile, true
+}
+
 // validatePlan checks IDs, agent types, dependency references, and acyclicity.
 func validatePlan(tasks []*Task) error {
+	return (&Planner{}).validatePlan(tasks)
+}
+
+func (p *Planner) validatePlan(tasks []*Task) error {
 	if len(tasks) == 0 {
 		return fmt.Errorf("orchestration: plan has no tasks")
 	}
@@ -107,8 +174,27 @@ func validatePlan(tasks []*Task) error {
 			return fmt.Errorf("orchestration: duplicate task ID %q", t.ID)
 		}
 		ids[t.ID] = true
-		if t.AgentType != "" && !validAgentTypes[t.AgentType] {
+		caps, profile, useCaps := taskCapabilityQuery(t)
+		if useCaps {
+			if t.AgentType != "" {
+				return fmt.Errorf("orchestration: task %q sets both agent and required_capabilities", t.ID)
+			}
+			_, route, err := p.catalogOrDefault().ResolveOrchestration(a2a.SelectQuery{
+				RequiredCapabilities: caps,
+				PermissionProfile:    profile,
+			})
+			if err != nil {
+				return fmt.Errorf("orchestration: task %q: %w", t.ID, err)
+			}
+			t.AgentType = route
+		} else if t.AgentType != "" && !validAgentTypes[t.AgentType] {
 			return fmt.Errorf("orchestration: task %q has unknown agent type %q", t.ID, t.AgentType)
+		}
+		if t.MaxAttempts < 0 || t.MaxAttempts > maxTaskAttempts {
+			return fmt.Errorf("orchestration: task %q max_attempts %d out of range 0..%d", t.ID, t.MaxAttempts, maxTaskAttempts)
+		}
+		if err := validateVerificationCriteria(t.VerificationCriteria); err != nil {
+			return fmt.Errorf("orchestration: task %q: %w", t.ID, err)
 		}
 	}
 	// Dependencies must reference known tasks.
@@ -130,6 +216,27 @@ func validatePlan(tasks []*Task) error {
 		return fmt.Errorf("orchestration: plan has a dependency cycle")
 	}
 	return nil
+}
+
+// validateVerificationCriteria rejects free-text criteria before runtime execution.
+func validateVerificationCriteria(criteria string) error {
+	criteria = strings.TrimSpace(criteria)
+	if criteria == "" || criteria == "nonempty" {
+		return nil
+	}
+	if strings.HasPrefix(criteria, "contains:") {
+		if strings.TrimPrefix(criteria, "contains:") == "" {
+			return fmt.Errorf("unsupported verification_criteria: empty contains substring")
+		}
+		return nil
+	}
+	if strings.HasPrefix(criteria, "prefix:") {
+		if strings.TrimPrefix(criteria, "prefix:") == "" {
+			return fmt.Errorf("unsupported verification_criteria: empty prefix")
+		}
+		return nil
+	}
+	return fmt.Errorf("unsupported verification_criteria %q (use nonempty, contains:<substr>, or prefix:<substr>)", criteria)
 }
 
 // extractJSONObject returns the first {...} object in s.

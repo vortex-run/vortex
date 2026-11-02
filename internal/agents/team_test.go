@@ -310,6 +310,80 @@ func TestTeam_RetriesOnReviewFailure(t *testing.T) {
 	}
 }
 
+func TestResolveStepRole_CapabilityMatchAndErrors(t *testing.T) {
+	team := newTestTeam(t, &scriptedGateway{}, map[string]string{}, "")
+	role, err := team.resolveStepRole(&TeamStep{RequiredCapabilities: []string{"code.edit"}, Goal: "x"})
+	if err != nil || role != "coder" {
+		t.Fatalf("match: role=%q err=%v", role, err)
+	}
+	_, err = team.resolveStepRole(&TeamStep{
+		RequiredCapabilities: []string{"code.read"},
+		PermissionProfile:    "sandbox",
+		Goal:                 "x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no agent matches") {
+		t.Fatalf("permission mismatch: %v", err)
+	}
+	_, err = team.resolveStepRole(&TeamStep{AgentRole: "coder", RequiredCapabilities: []string{"code.edit"}, Goal: "x"})
+	if err == nil || !strings.Contains(err.Error(), "both agent_role and required_capabilities") {
+		t.Fatalf("mutual exclusion: %v", err)
+	}
+}
+
+// TestTeam_ExecuteStepResolutionFailureNamesStage: a capability-selected step
+// that cannot be resolved fails the run with a non-empty FailedAt and the
+// resolver error (no silent skip, no "failed at  stage").
+func TestTeam_ExecuteStepResolutionFailureNamesStage(t *testing.T) {
+	team := newTestTeam(t, &scriptedGateway{}, map[string]string{}, "")
+	plan := &TeamPlan{Goal: "g", SessionID: "s1", Steps: []TeamStep{
+		{RequiredCapabilities: []string{"research.web"}, Goal: "not on team"},
+	}}
+	res, err := team.Execute(context.Background(), plan, nil)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.Success {
+		t.Fatal("unresolvable capability step must fail the run")
+	}
+	if strings.TrimSpace(res.FailedAt) == "" {
+		t.Errorf("FailedAt must be non-empty, got %q", res.FailedAt)
+	}
+	if !strings.Contains(res.Error, "not registered on the specialist team") {
+		t.Errorf("Error = %q, want resolver error", res.Error)
+	}
+	if !strings.Contains(res.Summary(), "failed at "+res.FailedAt+" stage") {
+		t.Errorf("Summary = %q", res.Summary())
+	}
+
+	both := &TeamPlan{Goal: "g", SessionID: "s2", Steps: []TeamStep{
+		{AgentRole: "coder", RequiredCapabilities: []string{"code.edit"}, Goal: "x"},
+	}}
+	res, _ = team.Execute(context.Background(), both, nil)
+	if res.Success || res.FailedAt != "coder" || !strings.Contains(res.Error, "both agent_role") {
+		t.Errorf("both-set step: success=%v failedAt=%q err=%q", res.Success, res.FailedAt, res.Error)
+	}
+}
+
+// TestDefaultCatalog_AdvertisedToolsAreRealTools: every tool name a catalog
+// manifest advertises must be a real coordinator tool, so the static registry
+// never describes a tool the runtime does not have.
+func TestDefaultCatalog_AdvertisedToolsAreRealTools(t *testing.T) {
+	known := map[string]bool{}
+	for _, tool := range []interface{ Name() string }{
+		ReadLocalFileTool{}, WriteLocalFileTool{}, EditFileTool{}, ListDirectoryTool{},
+		RunTerminalTool{}, GitDiffTool{}, GitStatusTool{}, HTTPGetTool{},
+	} {
+		known[tool.Name()] = true
+	}
+	for _, m := range a2a.DefaultCatalog().List() {
+		for _, name := range m.Tools {
+			if !known[name] {
+				t.Errorf("catalog %q advertises unknown tool %q", m.ID, name)
+			}
+		}
+	}
+}
+
 func TestTeamResult_Summary(t *testing.T) {
 	ok := (&TeamResult{Success: true, Files: []string{"main.py"}, TestsPassed: 12, ReviewScore: 9}).Summary()
 	for _, want := range []string{"✓ Task complete", "main.py", "12 passing", "9/10 (approved)"} {
