@@ -109,9 +109,8 @@ func telegramFromFile() (token string, chatID int64, ok bool) {
 // paths (where the Code Agent writes files). It honours VORTEX_WORK_DIR so the
 // server can be pointed at a project directory (e.g. the one the user opens with
 // `vortex code`), falling back to the process working directory. It is shown in
-// the TUI top bar; the agent's FS/terminal tools have no path confinement (the
-// approval gate is the security control), so this never restricts where files
-// may be written.
+// the TUI top bar. Optional agents.local_tools.trusted_root in vortex.cue may
+// confine local FS tools; otherwise the approval gate is the primary control.
 func resolveWorkingDir() string {
 	if dir := strings.TrimSpace(os.Getenv("VORTEX_WORK_DIR")); dir != "" {
 		if abs, err := filepath.Abs(dir); err == nil {
@@ -286,7 +285,15 @@ func envTrue(name string) bool {
 // collaboration layer: a MessageBus for inter-agent visibility, a
 // CheckpointManager for human review between steps, the collaboration API
 // endpoints, and (when configured) the Telegram team bridge.
-func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, gateway agents.AIGateway, notifier *messaging.Router, telegram *messaging.TelegramBot, workDir string, display *startup.Display, log *slog.Logger) {
+func resolveLocalFSConfig(cfg *config.Config, workDir string) (agents.LocalFSConfig, error) {
+	trusted, auto, err := cfg.Agents.LocalTools.ResolveLocalTools(workDir)
+	if err != nil {
+		return agents.LocalFSConfig{}, err
+	}
+	return agents.LocalFSFromRuntime(workDir, trusted, auto), nil
+}
+
+func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, gateway agents.AIGateway, notifier *messaging.Router, telegram *messaging.TelegramBot, workDir string, localFS agents.LocalFSConfig, display *startup.Display, log *slog.Logger) {
 	a2aServer := a2a.NewAgentServer()
 	baseURL := "http://localhost" + portSuffix(apiSrv.Addr())
 	a2aClient := a2a.NewAgentClient(baseURL, "coordinator")
@@ -301,7 +308,7 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 
 	// Trusted tool registry for the specialists (file ops without approval;
 	// terminal/commit still gated).
-	tools, terr := agents.NewTrustedToolRegistry(agents.LocalFSConfig{Root: workDir})
+	tools, terr := agents.NewTrustedToolRegistry(localFS)
 	if terr != nil {
 		log.Warn("agent team disabled: tool registry failed", "err", terr)
 		return
@@ -488,6 +495,17 @@ func routeNames(cfg *config.Config) []string {
 	return out
 }
 
+// managementAPIListenAddr returns the management HTTP listen address.
+// Default is api.DefaultAddr (":9090", all interfaces). Override with
+// VORTEX_API_LISTEN (e.g. "127.0.0.1:0" in unit tests) so Windows Firewall is
+// not prompted for a wildcard bind from ephemeral go test binaries.
+func managementAPIListenAddr() string {
+	if v := strings.TrimSpace(os.Getenv("VORTEX_API_LISTEN")); v != "" {
+		return v
+	}
+	return api.DefaultAddr
+}
+
 // runStart performs the start sequence. ctx controls shutdown: cancelling it
 // (or a SIGTERM/SIGINT) triggers a graceful stop. It is separated from the
 // cobra command so tests can drive it with a cancellable context instead of
@@ -568,7 +586,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		})
 	}
 
-	apiSrv := api.New(api.DefaultAddr, cfgMgr.Holder(), version, log)
+	apiSrv := api.New(managementAPIListenAddr(), cfgMgr.Holder(), version, log)
 	apiSrv.SetAuditLog(auditLog)
 
 	// Authentication: load (or start) the API-key store and seed the RBAC roles,
@@ -924,6 +942,8 @@ func runStart(ctx context.Context, pidfile string) error {
 		} else {
 			orchStore = rs
 			mgr.OnShutdown("orchestration-store", func(context.Context) error { return rs.Close() })
+			// Read-only dashboard/API surface for recent runs (running/done/failed).
+			apiSrv.SetOrchStoreProvider(&api.OrchRunStoreAdapter{Store: rs})
 		}
 	}
 	orchestrateFn := buildOrchestration(ctx, gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics, orchStore)
@@ -938,7 +958,13 @@ func runStart(ctx context.Context, pidfile string) error {
 			workflowStore = ws
 		}
 	}
-	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), resolveWorkingDir(), clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
+	workDir := resolveWorkingDir()
+	localFS, lerr := resolveLocalFSConfig(cfg, workDir)
+	if lerr != nil {
+		display.StepFail("Configuration", lerr.Error())
+		return fmt.Errorf("config invalid, refusing to start: %w", lerr)
+	}
+	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), workDir, localFS, clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
 		apiSrv.SetAgentRuntime(adapter)
@@ -963,7 +989,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		// Specialist agent team (agent teams): coder → tester → reviewer over
 		// A2A. Enabled by --team or VORTEX_TEAM_MODE=true.
 		if teamMode || envTrue("VORTEX_TEAM_MODE") {
-			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, msg.telegram, resolveWorkingDir(), display, log)
+			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, msg.telegram, workDir, localFS, display, log)
 		}
 	}
 
@@ -1638,7 +1664,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 // sandboxed tool registry wired to the audit log, a coordinator (using the
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
-func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
+func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, localFS agents.LocalFSConfig, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -1664,12 +1690,11 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		sandboxed = sandboxed.WithEffectLedger(ledger)
 	}
 
-	// Local filesystem + terminal tools (real machine access, approval-gated),
-	// confined to the working directory so writes/cwd stay inside the user's
-	// project tree. Registered in their own registry to avoid read_file/
-	// write_file name collisions with the sandbox builtins.
+	// Local filesystem + terminal tools (real machine access, approval-gated).
+	// Optional agents.local_tools.trusted_root confines paths; auto_mode may
+	// waive repeated in-scope file approvals only inside that root.
 	localRegistry := agents.NewToolRegistry()
-	if err := agents.RegisterLocalTools(localRegistry, agents.LocalFSConfig{Root: workingDir}); err != nil {
+	if err := agents.RegisterLocalTools(localRegistry, localFS); err != nil {
 		log.Warn("local agent tools disabled: registration failed", "err", err)
 		localRegistry = nil
 	}

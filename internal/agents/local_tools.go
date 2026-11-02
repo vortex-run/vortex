@@ -24,9 +24,11 @@ import (
 // always-blocked pattern (e.g. rm -rf /, a fork bomb, formatting a disk, or
 // writing into a Windows system directory). These are refused EVEN WITH user
 // approval — they are non-recoverable system destruction, not normal edits.
-// There is no path/working-directory confinement: the approval gate is the
-// security control (the Claude Code model). Any other path is allowed once the
-// user approves the action.
+// When TrustedRoot is unset there is no path/working-directory confinement:
+// the approval gate is the security control (the Claude Code model). When
+// TrustedRoot is set, resolveLocal enforces workspace containment (including
+// symlink escape checks). Auto Mode may waive routine in-scope approvals only
+// inside that trusted root; it never expands permissions.
 var ErrDangerousAction = fmt.Errorf("agents: action blocked (catastrophic system destruction)")
 
 // dangerousCommandPatterns are commands refused even after approval.
@@ -77,23 +79,27 @@ func isProtectedPath(p string) bool {
 	return false
 }
 
-// LocalFSConfig configures the local FS/terminal tools. There is NO path
-// confinement — the approval gate is the security model. Root is informational
-// only: it is the base for resolving *relative* paths (defaults to the process
-// working directory) and is shown in the TUI top bar.
+// LocalFSConfig configures the local FS/terminal tools.
 type LocalFSConfig struct {
-	// Root is the base for resolving relative paths (default: os.Getwd). It does
-	// NOT restrict where files may be written; absolute paths anywhere are
-	// allowed once the user approves the action.
+	// Root is the base for resolving relative paths (default: os.Getwd).
 	Root string
+	// TrustedRoot, when non-empty, confines all resolved paths to that
+	// directory after symlink evaluation. Empty means no workspace
+	// confinement (approval remains the primary control).
+	TrustedRoot string
+	// AutoMode, when true with a TrustedRoot, allows routine in-scope
+	// write/edit/create_project actions without a repeated approval prompt.
+	// Shell execution and release-build gates are unaffected. The runtime
+	// enforces the boundary — prompts/models cannot expand it.
+	AutoMode bool
 	// RequireApproval gates mutating tools (default true via NewLocalTools).
 	RequireApproval bool
 }
 
 // resolveLocal resolves p to an absolute path. Relative paths resolve against
-// Root (or the process cwd). Absolute paths are accepted as-is. No path is
-// rejected for being "outside" anything — only catastrophic system paths are
-// blocked, by isProtectedPath at the write site.
+// Root (or the process cwd). When TrustedRoot is set, the result must stay
+// inside that workspace (lexical + symlink checks). Catastrophic system paths
+// remain blocked separately by isProtectedPath at write sites.
 func (cfg LocalFSConfig) resolveLocal(p string) (string, error) {
 	if p == "" {
 		p = "."
@@ -105,7 +111,11 @@ func (cfg LocalFSConfig) resolveLocal(p string) (string, error) {
 		}
 		p = filepath.Join(base, p)
 	}
-	return filepath.Abs(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return containInTrustedRoot(cfg.TrustedRoot, abs)
 }
 
 // --- ListDirectoryTool (read-only) ------------------------------------------
@@ -217,7 +227,8 @@ func (t WriteLocalFileTool) Execute(_ context.Context, params map[string]any) (a
 	if isProtectedPath(abs) || isProtectedPath(p) {
 		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
 	}
-	if t.RequireApproval {
+	needApproval := t.RequireApproval && !t.cfg.waivesApproval(abs)
+	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
 			Description: "create/overwrite file " + abs,
@@ -287,7 +298,8 @@ func (t EditFileTool) Execute(_ context.Context, params map[string]any) (any, er
 	if !strings.Contains(string(data), oldStr) {
 		return nil, fmt.Errorf("agents: old_str not found in %s", abs)
 	}
-	if t.RequireApproval {
+	needApproval := t.RequireApproval && !t.cfg.waivesApproval(abs)
+	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
 			Description: "edit file " + abs,
@@ -344,6 +356,15 @@ func (t RunTerminalTool) Execute(ctx context.Context, params map[string]any) (an
 		resolvedCwd, err = t.cfg.resolveLocal(cwd)
 		if err != nil {
 			return nil, err
+		}
+	} else if t.cfg.TrustedRoot != "" {
+		// Empty cwd defaults to Root; when TrustedRoot is set, refuse a Root
+		// that sits outside the trust boundary (misconfiguration / legacy).
+		if _, cerr := containInTrustedRoot(t.cfg.TrustedRoot, resolvedCwd); cerr != nil {
+			resolvedCwd, err = containInTrustedRoot(t.cfg.TrustedRoot, t.cfg.TrustedRoot)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	// Gate unless a human already approved THIS action; release builds ignore
@@ -464,7 +485,8 @@ func (t CreateProjectTool) Execute(_ context.Context, params map[string]any) (an
 	}
 	files := projectFiles(name, typ, description)
 
-	if t.RequireApproval {
+	needApproval := t.RequireApproval && !t.cfg.waivesApproval(dir)
+	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
 			Description: fmt.Sprintf("create %s project %q at %s", typ, name, dir),

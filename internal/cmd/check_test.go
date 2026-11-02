@@ -78,6 +78,61 @@ observability: {}
 	}
 }
 
+// TestCheckRejectsLocalToolsStartWouldRefuse is the regression for `check`
+// reporting "is valid" on a config that `start` refuses: agents.local_tools is
+// schema-valid as strings, but start also resolves trusted_root (must exist, be
+// a directory, and contain the work dir). check must apply the same rule.
+func TestCheckRejectsLocalToolsStartWouldRefuse(t *testing.T) {
+	work := t.TempDir()
+	t.Setenv("VORTEX_WORK_DIR", work)
+
+	// trusted_root points at a directory that does not exist.
+	body := checkValidConfig + "\nagents: {local_tools: {trusted_root: \"" +
+		strings.ReplaceAll(filepath.Join(work, "missing"), `\`, `\\`) + "\"}}\n"
+	out, err := runCheck(t, writeCheckConfig(t, body))
+	if err == nil {
+		t.Fatalf("expected check to fail for missing trusted_root, output:\n%s", out)
+	}
+	if !strings.Contains(out, "agents.local_tools") {
+		t.Errorf("output should name agents.local_tools:\n%s", out)
+	}
+	if strings.Contains(out, "is valid") {
+		t.Errorf("output must not claim validity:\n%s", out)
+	}
+
+	// Disjoint trusted_root (does not contain the work dir) is also refused.
+	other := t.TempDir()
+	body = checkValidConfig + "\nagents: {local_tools: {trusted_root: \"" +
+		strings.ReplaceAll(other, `\`, `\\`) + "\"}}\n"
+	out, err = runCheck(t, writeCheckConfig(t, body))
+	if err == nil {
+		t.Fatalf("expected check to fail for disjoint trusted_root, output:\n%s", out)
+	}
+	if !strings.Contains(out, "agents.local_tools") {
+		t.Errorf("output should name agents.local_tools:\n%s", out)
+	}
+}
+
+// TestCheckAcceptsLocalToolsContainingWorkDir: a trusted_root that contains the
+// work dir passes and is reported on the agents line.
+func TestCheckAcceptsLocalToolsContainingWorkDir(t *testing.T) {
+	trusted := t.TempDir()
+	work := filepath.Join(trusted, "work")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VORTEX_WORK_DIR", work)
+	body := checkValidConfig + "\nagents: {local_tools: {trusted_root: \"" +
+		strings.ReplaceAll(trusted, `\`, `\\`) + "\", auto_mode: true}}\n"
+	out, err := runCheck(t, writeCheckConfig(t, body))
+	if err != nil {
+		t.Fatalf("expected success, got %v:\n%s", err, out)
+	}
+	if !strings.Contains(out, "is valid") || !strings.Contains(out, "auto_mode=true") {
+		t.Errorf("output should be valid and show auto_mode:\n%s", out)
+	}
+}
+
 func TestCheckWrongTypeReportsLineNumber(t *testing.T) {
 	body := "cluster: {\n  name: \"c\"\n  gossip_port: 99999\n}\ntls: {acme_email: \"a@b.com\"}\nroutes: []\nsecurity: {}\nsecrets: {}\nobservability: {}\n"
 	out, err := runCheck(t, writeCheckConfig(t, body))

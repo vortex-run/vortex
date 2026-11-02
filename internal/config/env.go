@@ -74,4 +74,8 @@ func applyEnvOverrides(cfg *Config, env map[string]string) {
 	boolv("OBSERVABILITY_TRACING", &cfg.Observability.Tracing)
 	str("OBSERVABILITY_TRACE_ENDPOINT", &cfg.Observability.TraceEndpoint)
 	str("OBSERVABILITY_LOG_LEVEL", &cfg.Observability.LogLevel)
+
+	// agents.local_tools
+	str("AGENTS_LOCAL_TOOLS_TRUSTED_ROOT", &cfg.Agents.LocalTools.TrustedRoot)
+	boolv("AGENTS_LOCAL_TOOLS_AUTO_MODE", &cfg.Agents.LocalTools.AutoMode)
 }

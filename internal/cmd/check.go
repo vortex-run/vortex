@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vortex-run/vortex/internal/agents"
 	"github.com/vortex-run/vortex/internal/config"
 )
 
@@ -26,7 +27,16 @@ func newCheckCommand() *cobra.Command {
 				// silenced so only our formatted lines show.
 				return errCheckFailed
 			}
-			printCheckOK(cmd, cfg)
+			// agents.local_tools is schema-valid as plain strings but `start`
+			// also resolves trusted_root against the work dir (exists, is a
+			// directory, contains the work dir). Run the same check here so
+			// `check` cannot say "is valid" for a config `start` will refuse.
+			localFS, lerr := resolveLocalFSConfig(cfg, resolveWorkingDir())
+			if lerr != nil {
+				fmt.Fprintf(cmd.OutOrStderr(), "✗ agents.local_tools: %v\n", lerr)
+				return errCheckFailed
+			}
+			printCheckOK(cmd, cfg, localFS)
 			return nil
 		},
 	}
@@ -35,7 +45,7 @@ func newCheckCommand() *cobra.Command {
 // errCheckFailed signals a validation failure whose detail was already printed.
 var errCheckFailed = errors.New("config validation failed")
 
-func printCheckOK(cmd *cobra.Command, cfg *config.Config) {
+func printCheckOK(cmd *cobra.Command, cfg *config.Config, localFS agents.LocalFSConfig) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "✓ cluster       (%s, %d nodes)\n", cfg.Cluster.Name, len(cfg.Cluster.Nodes))
 	fmt.Fprintf(out, "✓ tls           (%s, min %s)\n", cfg.TLS.Provider, cfg.TLS.MinVersion)
@@ -43,6 +53,11 @@ func printCheckOK(cmd *cobra.Command, cfg *config.Config) {
 	fmt.Fprintln(out, "✓ security")
 	fmt.Fprintf(out, "✓ secrets       (%d keys)\n", len(cfg.Secrets.Keys))
 	fmt.Fprintln(out, "✓ observability")
+	trusted := localFS.TrustedRoot
+	if trusted == "" {
+		trusted = "none"
+	}
+	fmt.Fprintf(out, "✓ agents        (local_tools: trusted_root=%s, auto_mode=%t)\n", trusted, localFS.AutoMode)
 	fmt.Fprintf(out, "%s is valid (hash: %s)\n", flags.configPath, shortHash(cfg.Hash()))
 }
 
