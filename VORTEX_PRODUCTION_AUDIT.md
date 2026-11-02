@@ -7,6 +7,30 @@
 
 ---
 
+## Status addendum — 2026-11-02 (corrections and October sprint)
+
+**Scope:** findings whose status below is out of date, checked against the code
+on `main`. Findings not listed keep the status in the 2026-07-22 table.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| **H4** unsigned self-update | **Implemented; no signed release yet** | `ReleaseSigningPublicKey` is pinned in `internal/update/signature.go`. The newest release, v0.3.0, has `checksums.txt` but no `checksums.txt.sig`, so the signing path has not been proven on a real release. |
+| **I6 / N4** approval gate zero value | **Fixed in release builds** | `approvalAlwaysRequired` is true under the `release` build tag, which `.goreleaser.yaml` sets, and `tools.go` and `local_tools.go` check it. Development builds can still waive the gate by design; CI tests both. |
+| **I1** documentation | **Partial** | `docs/openapi.yaml` now exists. There are still no runbooks. |
+
+### New finding
+
+**N5 — Retries could hang an orchestration run forever.** *Fixed (#40).*
+Introduced by the October sprint (#37), which added task retries. `Orchestrator.Run`
+buffered its completion channel to one signal per task, but a retried task signals
+once per attempt. A sender could block on the full buffer after the dispatch loop
+had exited, leaving `Run` stuck in `wg.Wait()`. #37's CI passed because the hang
+depends on timing; it surfaced as a 25-minute test timeout on later PRs. It never
+reached a release: the newest is v0.3.0, published before the sprint.
+`TestRun_FastRetriesDoNotHang` reproduces it.
+
+---
+
 ## Re-audit addendum — 2026-07-22 (post-remediation status pass)
 
 **Scope:** verification of every original finding against `main` after the
