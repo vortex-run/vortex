@@ -252,18 +252,19 @@ func (c *CodeServer) IsRunning() bool {
 // code-server backend, preserving WebSocket upgrades (used by code-server for
 // live updates).
 func (c *CodeServer) ProxyHandler() http.Handler {
-	// The URL host is only a label: every connection goes through dial. The
-	// outgoing Host header stays the client's, which code-server's WebSocket
-	// origin check compares against.
-	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "code-server"})
-	director := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		director(r)
+	// The URL host is only a label: every connection goes through dial.
+	target := &url.URL{Scheme: "http", Host: "code-server"}
+	proxy := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(target)
+		// SetURL sets Host to the target's; keep the client's, which
+		// code-server's WebSocket origin check compares against.
+		pr.Out.Host = pr.In.Host
+		pr.SetXForwarded()
 		// The caller's VORTEX key is not code-server's business (or its
 		// extensions').
-		r.Header.Del("Authorization")
-		r.Header.Del("X-API-Key")
-	}
+		pr.Out.Header.Del("Authorization")
+		pr.Out.Header.Del("X-API-Key")
+	}}
 	// No Proxy field: HTTP_PROXY must not apply to a local backend.
 	proxy.Transport = &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
