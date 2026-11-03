@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/pkg/safedial"
 )
 
 // maxDataBytes caps how much a remote/inline source may provide (16 MiB).
@@ -38,9 +40,20 @@ type Reader struct {
 	client *http.Client
 }
 
-// NewReader constructs a reader with a 20s HTTP timeout.
-func NewReader() *Reader {
-	return &Reader{client: &http.Client{Timeout: 20 * time.Second}}
+// NewReader constructs a reader with a 20s HTTP timeout. URLs come from API
+// callers and from the agent (so from model output and whatever it read), and
+// the fetched body is returned as a dataset, so the client is the SSRF-safe
+// dialer used by research (production audit H2): no loopback, private,
+// link-local or cloud-metadata targets, re-checked on every redirect.
+// Without it, a source of http://169.254.169.254/… returned cloud
+// credentials, and http://127.0.0.1:9090/… reached control-plane routes that
+// trust loopback.
+func NewReader() *Reader { return newReader(false) }
+
+// newReader allows loopback targets iff allowLoopback (tests reaching
+// httptest servers). Production always passes false.
+func newReader(allowLoopback bool) *Reader {
+	return &Reader{client: safedial.Client(safedial.Config{Timeout: 20 * time.Second, AllowLoopback: allowLoopback})}
 }
 
 // ReadCSV parses CSV bytes into a Dataset. The first row is the header.
