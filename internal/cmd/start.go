@@ -2231,7 +2231,7 @@ func buildHealing(ctx context.Context, cfg *config.Config, apiSrv *api.Server,
 		if r.Listen <= 0 {
 			continue
 		}
-		addr := fmt.Sprintf("127.0.0.1:%d", r.Listen)
+		addr := edgeLocalAddr(r.Listen)
 		checks = append(checks, healing.HealthCheck{
 			Name: r.Name, Kind: healing.KindRoute, Target: addr,
 			Interval: 30 * time.Second, Timeout: 5 * time.Second, Threshold: 3,
@@ -2784,7 +2784,7 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 			dbRoutes = append(dbRoutes, studio.DBRoute{
 				Name:       rc.Name,
 				Kind:       studio.KindForPort(rc.Listen),
-				ListenAddr: fmt.Sprintf("127.0.0.1:%d", rc.Listen),
+				ListenAddr: edgeLocalAddr(rc.Listen),
 			})
 		}
 	}
@@ -3063,6 +3063,18 @@ func tlsChallengeHandler(tlsMgr *vtls.Manager, cfg *config.Config) http.Handler 
 // means all interfaces. Operators use it to keep the edge on one address;
 // tests set 127.0.0.1 so they don't open ports to the network.
 func edgeBindHost() string { return strings.TrimSpace(os.Getenv("VORTEX_EDGE_BIND_HOST")) }
+
+// edgeLocalAddr is where this process reaches its own route listener on
+// port: loopback when the edge binds all interfaces, else the bind host
+// (with VORTEX_EDGE_BIND_HOST=10.0.0.5 nothing listens on 127.0.0.1, so
+// health checks there would report every route down).
+func edgeLocalAddr(port int) string {
+	host := edgeBindHost()
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
 
 // startChallengeServer serves the ACME HTTP-01 challenge handler on :80 and
 // registers its shutdown with the lifecycle manager.
