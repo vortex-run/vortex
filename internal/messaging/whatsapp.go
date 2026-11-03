@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
@@ -22,8 +24,32 @@ type WhatsAppConfig struct {
 	AccessToken   string // from env VORTEX_WA_TOKEN
 	VerifyToken   string // webhook GET verification (hub.verify_token)
 	AppSecret     string // for X-Hub-Signature-256 HMAC verification
-	BaseURL       string // override Graph API base (tests)
-	Client        *http.Client
+	// AllowedNumbers lists the sender WhatsApp IDs (phone numbers, digits only)
+	// whose messages reach the agent. Empty means allow none, mirroring
+	// Telegram: a valid Meta signature proves Meta delivered a message, not
+	// that its sender may drive the agent.
+	AllowedNumbers []string
+	BaseURL        string // override Graph API base (tests)
+	Client         *http.Client
+}
+
+// InboundEnabled reports whether the inbound webhook can authenticate
+// requests. Without an app secret it cannot, so the caller must not mount it.
+func (c WhatsAppConfig) InboundEnabled() bool { return c.AppSecret != "" }
+
+// InboundEnabled reports whether this bot's inbound webhook can authenticate.
+func (wb *WhatsAppBot) InboundEnabled() bool { return wb.cfg.InboundEnabled() }
+
+// NormalizeWhatsAppNumber strips everything but digits, so "+1 (555) 010-0000"
+// and "15550100000" compare equal to the wa_id Meta sends in webhooks.
+func NormalizeWhatsAppNumber(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // WhatsAppBot is a WhatsApp Cloud API client + webhook handler.
@@ -129,11 +155,13 @@ func (wb *WhatsAppBot) uploadMedia(ctx context.Context, data []byte) (string, er
 }
 
 // verifySignature validates the X-Hub-Signature-256 header (HMAC-SHA256 of the
-// raw body keyed by the app secret). When no app secret is configured it
-// returns true (tests/back-compat); production wiring always sets one.
+// raw body keyed by the app secret). It fails closed: with no app secret
+// nothing can be verified, so nothing is accepted. The webhook route is public
+// (no API key) and feeds the agent runtime, so accepting unsigned requests
+// would let anyone on the network drive the agent.
 func (wb *WhatsAppBot) verifySignature(body []byte, header string) bool {
 	if wb.cfg.AppSecret == "" {
-		return true
+		return false
 	}
 	const prefix = "sha256="
 	if len(header) <= len(prefix) || header[:len(prefix)] != prefix {
@@ -196,19 +224,46 @@ func (wb *WhatsAppBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 	})
 }
 
-// handleVerification answers Meta's GET verification challenge.
+// handleVerification answers Meta's GET verification challenge. An empty
+// configured token matches nothing (otherwise "hub.verify_token=" would pass),
+// and the echoed challenge is served as plain text with sniffing disabled so a
+// crafted challenge can't be rendered as HTML on the API origin.
 func (wb *WhatsAppBot) handleVerification(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if q.Get("hub.mode") == "subscribe" && q.Get("hub.verify_token") == wb.cfg.VerifyToken {
+	want := wb.cfg.VerifyToken
+	got := q.Get("hub.verify_token")
+	if want != "" && q.Get("hub.mode") == "subscribe" &&
+		subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1 {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = io.WriteString(w, q.Get("hub.challenge"))
 		return
 	}
 	http.Error(w, "verification failed", http.StatusForbidden)
 }
 
-// dispatch submits text to the runtime and replies to the sender.
+// senderAllowed reports whether from is on the allow-list (empty = none).
+func (wb *WhatsAppBot) senderAllowed(from string) bool {
+	from = NormalizeWhatsAppNumber(from)
+	if from == "" {
+		return false
+	}
+	for _, n := range wb.cfg.AllowedNumbers {
+		if NormalizeWhatsAppNumber(n) == from {
+			return true
+		}
+	}
+	return false
+}
+
+// dispatch submits text to the runtime and replies to the sender. Senders not
+// on the allow-list are dropped without a reply, so the bot doesn't confirm it
+// exists to strangers.
 func (wb *WhatsAppBot) dispatch(ctx context.Context, runtime *agents.Runtime, from, text string) {
 	if runtime == nil || text == "" || from == "" {
+		return
+	}
+	if !wb.senderAllowed(from) {
 		return
 	}
 	ch, err := runtime.Submit(ctx, text, "whatsapp:"+from)

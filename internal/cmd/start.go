@@ -2537,8 +2537,9 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 	if pid, tok := os.Getenv("VORTEX_WA_PHONE_ID"), os.Getenv("VORTEX_WA_TOKEN"); pid != "" && tok != "" {
 		bot, err := messaging.NewWhatsAppBot(messaging.WhatsAppConfig{
 			PhoneNumberID: pid, AccessToken: tok,
-			VerifyToken: os.Getenv("VORTEX_WA_VERIFY_TOKEN"),
-			AppSecret:   os.Getenv("VORTEX_WA_APP_SECRET"),
+			VerifyToken:    os.Getenv("VORTEX_WA_VERIFY_TOKEN"),
+			AppSecret:      os.Getenv("VORTEX_WA_APP_SECRET"),
+			AllowedNumbers: splitCSV(os.Getenv("VORTEX_WA_ALLOWED_NUMBERS")),
 		})
 		if err != nil {
 			log.Warn("whatsapp disabled", "err", err)
@@ -2588,27 +2589,48 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 // registerMessagingWebhooks mounts the configured platform webhooks with their
 // own per-IP rate limits (Telegram 30/min, WhatsApp 30/min, Slack 60/min).
 func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *agents.Runtime, log *slog.Logger) {
+	specs := messagingWebhookSpecs(m, rt, log)
+	if len(specs) > 0 {
+		apiSrv.SetWebhooks(specs)
+		log.Info("messaging webhooks registered", "count", len(specs))
+	}
+	registerTelegramDelivery(apiSrv, m, rt, log)
+}
+
+// messagingWebhookSpecs returns the inbound webhook routes to mount.
+func messagingWebhookSpecs(m messagingComponents, rt *agents.Runtime, log *slog.Logger) []api.WebhookSpec {
 	var specs []api.WebhookSpec
 	if m.telegram != nil {
 		specs = append(specs, api.WebhookSpec{
 			Path: "/webhook/telegram", Handler: m.telegram.HandleWebhook(rt), RPM: 30,
 		})
 	}
+	// The WhatsApp and Slack inbound routes are public (no API key) and feed
+	// the agent runtime, so they are mounted only when their platform secret
+	// is configured. Outbound alerts keep working either way.
 	if m.whatsapp != nil {
-		specs = append(specs, api.WebhookSpec{
-			Path: "/webhook/whatsapp", Handler: m.whatsapp.HandleWebhook(rt), RPM: 30,
-		})
+		if m.whatsapp.InboundEnabled() {
+			specs = append(specs, api.WebhookSpec{
+				Path: "/webhook/whatsapp", Handler: m.whatsapp.HandleWebhook(rt), RPM: 30,
+			})
+		} else {
+			log.Warn("whatsapp inbound webhook not mounted: set VORTEX_WA_APP_SECRET to accept messages (outbound still works)")
+		}
 	}
 	if m.slack != nil {
-		specs = append(specs, api.WebhookSpec{
-			Path: "/webhook/slack", Handler: m.slack.HandleSlashCommand(rt), RPM: 60,
-		})
+		if m.slack.InboundEnabled() {
+			specs = append(specs, api.WebhookSpec{
+				Path: "/webhook/slack", Handler: m.slack.HandleSlashCommand(rt), RPM: 60,
+			})
+		} else {
+			log.Warn("slack slash-command webhook not mounted: set VORTEX_SLACK_SIGNING_SECRET to accept commands (outbound alerts still work)")
+		}
 	}
-	if len(specs) > 0 {
-		apiSrv.SetWebhooks(specs)
-		log.Info("messaging webhooks registered", "count", len(specs))
-	}
+	return specs
+}
 
+// registerTelegramDelivery wires Telegram's command hooks and delivery mode.
+func registerTelegramDelivery(apiSrv *api.Server, m messagingComponents, rt *agents.Runtime, log *slog.Logger) {
 	// Telegram: wire built-in command hooks, register the command menu, and pick
 	// a delivery mode (polling for local testing, webhook for production). The
 	// network calls (setMyCommands, setWebhook) run in the BACKGROUND so a slow
@@ -2789,6 +2811,18 @@ func parseInt64List(s string) []int64 {
 	for _, part := range strings.Split(s, ",") {
 		if n, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
 			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// splitCSV splits a comma-separated list, trimming spaces and dropping empty
+// entries. Used for VORTEX_WA_ALLOWED_NUMBERS.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
 		}
 	}
 	return out

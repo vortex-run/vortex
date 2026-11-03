@@ -86,6 +86,28 @@ used by `vortex reload`/`stop`) are allowed from loopback without a key by
 default. **Behind a same-host reverse proxy, set `VORTEX_TRUST_LOOPBACK=false`**
 so every request presenting a loopback address must still carry a credential.
 
+## Messaging webhooks
+
+`/webhook/telegram`, `/webhook/whatsapp` and `/webhook/slack` are public (no
+API key, per-IP rate limited) and pass messages to the agent runtime, so each
+authenticates the platform itself and fails closed:
+
+- **Telegram:** only chat IDs in `VORTEX_TELEGRAM_ALLOWED_IDS` are served;
+  empty allows nobody.
+- **WhatsApp:** requests must carry a valid `X-Hub-Signature-256` for
+  `VORTEX_WA_APP_SECRET`. The route isn't mounted without the secret. Only
+  senders in `VORTEX_WA_ALLOWED_NUMBERS` reach the agent (empty allows
+  nobody), because a valid signature proves Meta delivered a message, not
+  that its sender may drive your agent.
+- **Slack:** requests must carry a valid, fresh (±5 min) signature for
+  `VORTEX_SLACK_SIGNING_SECRET`. The route isn't mounted without the secret.
+  Anyone in the Slack workspace that installed the app can use the slash
+  command.
+
+Command approval prompts go to the operator's configured Telegram chat, not
+back to whoever sent the message, so a webhook sender can't approve their own
+commands.
+
 ## Agent sandbox
 
 - Sandbox filesystem tools confine writes to a sandbox dir (lexical + symlink

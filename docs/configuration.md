@@ -122,6 +122,13 @@ observability: {
 | `VORTEX_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
 | `VORTEX_AZURE_OPENAI_KEY` / `_ENDPOINT` / `_DEPLOYMENT` | Azure OpenAI. |
 | `VORTEX_TELEGRAM_TOKEN`, `VORTEX_TELEGRAM_DEFAULT_CHAT` | Telegram bot. |
+| `VORTEX_TELEGRAM_ALLOWED_IDS` | Comma-separated chat IDs allowed to command the bot. Empty allows nobody. |
+| `VORTEX_WA_PHONE_ID`, `VORTEX_WA_TOKEN` | WhatsApp Cloud API (outbound messages and alerts). |
+| `VORTEX_WA_APP_SECRET` | Verifies `X-Hub-Signature-256` on inbound messages. **Required for `/webhook/whatsapp` to be mounted**; without it, WhatsApp is outbound-only. |
+| `VORTEX_WA_VERIFY_TOKEN` | Token for Meta's webhook verification handshake. An empty token never matches. |
+| `VORTEX_WA_ALLOWED_NUMBERS` | Comma-separated sender numbers allowed to drive the agent (any formatting; digits are compared). Empty allows nobody: a valid signature only proves Meta delivered the message. |
+| `VORTEX_SLACK_WEBHOOK` | Slack incoming webhook for outbound alerts. |
+| `VORTEX_SLACK_SIGNING_SECRET` | Verifies slash-command requests. **Required for `/webhook/slack` to be mounted**; without it, Slack is outbound-only. |
 | `VORTEX_SECRET_STORE`, `VORTEX_AUDIT_LOG`, `VORTEX_MTLS_STORE` | Relocate on-disk state. |
 
 Environment variables always take precedence over the saved `vortex setup`

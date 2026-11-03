@@ -110,6 +110,25 @@ func TestSlack_SlashVerifiesSignature(t *testing.T) {
 	}
 }
 
+func TestSlack_NoSigningSecretRejectsEverything(t *testing.T) {
+	now := time.Now()
+	bot := newSignedSlackBot(t, "", now)
+	if bot.InboundEnabled() {
+		t.Fatal("InboundEnabled() = true without a signing secret")
+	}
+	rt := startStubRuntime(t)
+
+	// An attacker can compute an HMAC with an empty key, so a request "signed"
+	// that way must not pass when no secret is configured.
+	req := slashRequest(t, "", "status", now)
+	rec := httptest.NewRecorder()
+	bot.HandleSlashCommand(rt).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status with no signing secret = %d, want 401", rec.Code)
+	}
+}
+
 func TestSlack_SlashRejectsInvalidSignature(t *testing.T) {
 	now := time.Now()
 	bot := newSignedSlackBot(t, "shh", now)

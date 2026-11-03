@@ -29,6 +29,14 @@ type SlackConfig struct {
 	now func() time.Time
 }
 
+// InboundEnabled reports whether slash commands can be authenticated. Outbound
+// alerts only need WebhookURL; the inbound route needs the signing secret, so
+// the caller must not mount it without one.
+func (c SlackConfig) InboundEnabled() bool { return c.SigningSecret != "" }
+
+// InboundEnabled reports whether this bot's slash-command route can authenticate.
+func (s *SlackBot) InboundEnabled() bool { return s.cfg.InboundEnabled() }
+
 // SlackBot is a Slack client + slash-command handler.
 type SlackBot struct {
 	cfg    SlackConfig
@@ -103,11 +111,12 @@ func (s *SlackBot) postWebhook(ctx context.Context, payload any) error {
 
 // verifySignature validates the Slack request signature: it recomputes
 // v0=HMAC-SHA256(signingSecret, "v0:"+ts+":"+body) and compares in constant
-// time, rejecting stale timestamps (>5 min) to bound replay. With no signing
-// secret configured it returns true (tests); production always sets one.
+// time, rejecting stale timestamps (>5 min) to bound replay. It fails closed:
+// with no signing secret nothing can be verified, so nothing is accepted. The
+// slash-command route is public (no API key) and feeds the agent runtime.
 func (s *SlackBot) verifySignature(body []byte, timestamp, signature string) bool {
 	if s.cfg.SigningSecret == "" {
-		return true
+		return false
 	}
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
