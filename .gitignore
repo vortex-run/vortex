@@ -63,3 +63,6 @@ CLAUDE.md
 # Local overnight agent ops (checkpoints, locks, reports) — never commit
 .vortex-ops/
 
+
+# Generated at release time by scripts/licenses (goreleaser before hook).
+/THIRD_PARTY_LICENSES

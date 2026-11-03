@@ -18,6 +18,12 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # License and NOTICE texts of every bundled Go module and dashboard npm
+    # package (MIT/BSD require them in binary distributions; Apache-2.0
+    # requires NOTICE files to be passed on). Fails if any dependency ships
+    # no license. The release workflow runs `npm ci` first, so node_modules
+    # is present.
+    - go run ./scripts/licenses -o THIRD_PARTY_LICENSES
 
 builds:
   - id: vortex
@@ -57,6 +63,7 @@ archives:
         formats: [zip]
     files:
       - LICENSE
+      - THIRD_PARTY_LICENSES
       - README.md
       - vortex.cue
 
@@ -146,6 +153,8 @@ nfpms:
         type: config|noreplace
       - src: LICENSE
         dst: /usr/share/doc/vortex/LICENSE
+      - src: THIRD_PARTY_LICENSES
+        dst: /usr/share/doc/vortex/THIRD_PARTY_LICENSES
 
 # Homebrew cask (M20). Published to vortex-run/homebrew-tap on release.
 # (GoReleaser replaced the deprecated `brews:` formula block with casks.)

@@ -117,6 +117,19 @@ Releases are cut by pushing a `v*` tag, which triggers
 `checksums.txt` + SBOMs + Ed25519 signature). See
 [security.md](security.md#release-signing) for the signing key setup.
 
+Every archive and OS package ships `THIRD_PARTY_LICENSES`, the license and
+NOTICE texts of each Go module and production dashboard npm package in the
+binary. GoReleaser generates it with `go run ./scripts/licenses`, which fails
+the release if a dependency ships no license file. If that happens, check the
+package and either add it to `knownLicenseless` in `scripts/licenses/main.go`
+with where its license is declared, or replace the dependency. To check
+locally (needs `npm ci` in `web/dashboard`):
+
+```bash
+go run ./scripts/licenses -o THIRD_PARTY_LICENSES
+goreleaser release --snapshot --clean --skip=publish,sign,sbom
+```
+
 ```bash
 task tag VERSION=v0.3.0
 ```
