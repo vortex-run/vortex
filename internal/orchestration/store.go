@@ -342,7 +342,7 @@ func (s *RunStore) MarkResumed(runID string) (int, error) {
 // ListIncomplete returns resumable runs (status running), oldest first.
 func (s *RunStore) ListIncomplete() ([]RunInfo, error) {
 	rows, err := s.db.Query(
-		`SELECT id, goal, session_id, status FROM orch_runs WHERE status=? ORDER BY created_at ASC`,
+		`SELECT id, goal, session_id, status FROM orch_runs WHERE status=? ORDER BY created_at ASC, rowid ASC`,
 		RunRunning)
 	if err != nil {
 		return nil, err
@@ -361,8 +361,11 @@ func (s *RunStore) ListIncomplete() ([]RunInfo, error) {
 
 // ListRecent returns runs ordered by updated_at descending (newest first).
 // Terminal and in-progress runs are included. limit <= 0 returns all runs.
+// updated_at has millisecond resolution, so rowid (insertion order) breaks
+// ties; without it same-millisecond runs come back in an unspecified order
+// and a LIMIT can drop a different run on each call.
 func (s *RunStore) ListRecent(limit int) ([]RunInfo, error) {
-	q := `SELECT id, goal, session_id, status FROM orch_runs ORDER BY updated_at DESC`
+	q := `SELECT id, goal, session_id, status FROM orch_runs ORDER BY updated_at DESC, rowid DESC`
 	args := []any{}
 	if limit > 0 {
 		q += ` LIMIT ?`
