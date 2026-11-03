@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vortex-run/vortex/pkg/pidfile"
+
 	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/trace"
@@ -665,7 +667,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		return apiSrv.Shutdown(ctx)
 	})
 	mgr.OnShutdown("pidfile", func(context.Context) error {
-		return os.Remove(pidfile)
+		return removeOwnPIDFile(pidfile)
 	})
 
 	// In-memory log ring buffer feeding GET /api/logs (the TUI log viewer).
@@ -3161,12 +3163,24 @@ func startChallengeServer(mgr *lifecycle.Manager, h http.Handler, log *slog.Logg
 	mgr.OnShutdown("acme-challenge", func(c context.Context) error { return srv.Shutdown(c) })
 }
 
-// writePIDFile writes the current process ID to path as plain text. The richer
-// stale-lock-aware logic lives in pkg/pidfile (used by stop/status/reload).
+// writePIDFile claims path for this process. It refuses when the file names
+// a live process and replaces a stale one (a crashed run). It used to
+// overwrite the file unconditionally: a second `vortex start` replaced the
+// running server's PID with its own, then failed on the busy ports and
+// exited, after which `vortex status` and `vortex stop` reported "not
+// running" for a server that was still serving.
 func writePIDFile(path string) error {
-	pid := strconv.Itoa(os.Getpid())
-	if err := os.WriteFile(path, []byte(pid+"\n"), 0o644); err != nil {
+	if err := pidfile.Write(path); err != nil {
 		return fmt.Errorf("writing pidfile %s: %w", path, err)
 	}
 	return nil
+}
+
+// removeOwnPIDFile deletes path only if it still names this process, so a
+// shutdown never removes another instance's pidfile.
+func removeOwnPIDFile(path string) error {
+	if pid, err := pidfile.Read(path); err != nil || pid != os.Getpid() {
+		return nil
+	}
+	return pidfile.Remove(path)
 }

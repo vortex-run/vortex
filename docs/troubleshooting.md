@@ -54,6 +54,12 @@ API keys and secrets in your user config and cache directories, found from
 programs with none of these set. Set `HOME` to a directory only the VORTEX
 user can write; VORTEX won't fall back to the shared temp directory.
 
+**`vortex is already running (pid N)`.** Another `vortex start` owns the
+pidfile (`vortex.pid` by default, or `--pidfile`). Stop it with `vortex stop`,
+or use a different pidfile for a second instance. A pidfile left by a crash is
+replaced automatically when its process is gone; if the OS has since reused
+that PID for an unrelated process, delete the file.
+
 **A route's port is taken during `vortex reload`.** The reload is refused, the
 previous routes keep running, and `vortex reload` prints the bind error.
 
