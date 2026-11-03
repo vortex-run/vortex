@@ -619,14 +619,36 @@ var safeEnvVars = map[string]bool{
 	"NUMBER_OF_PROCESSORS": true, "PROCESSOR_ARCHITECTURE": true,
 }
 
+// buildEnvVars are the extra variables toolchain builds need on top of
+// safeEnvVars: where Go, Gradle, the Android SDK, Java and Flutter keep their
+// caches and SDKs, and how to reach module proxies. None of them hold
+// VORTEX's own secrets.
+var buildEnvVars = map[string]bool{
+	"GOPATH": true, "GOCACHE": true, "GOMODCACHE": true, "GOPROXY": true,
+	"GOPRIVATE": true, "GONOPROXY": true, "GONOSUMDB": true, "GOSUMDB": true,
+	"GOTOOLCHAIN": true, "GOFLAGS": true, "CGO_ENABLED": true,
+	"ANDROID_HOME": true, "ANDROID_SDK_ROOT": true, "JAVA_HOME": true,
+	"FLUTTER_ROOT": true, "PUB_CACHE": true, "GRADLE_USER_HOME": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+}
+
 // scrubbedEnv returns the minimal environment for agent-executed commands:
 // only the allowlisted variables above survive, by exact (case-insensitive)
 // name match.
-func scrubbedEnv() []string {
+func scrubbedEnv() []string { return filterEnv(safeEnvVars, nil) }
+
+// BuildEnv returns the environment for building and testing generated
+// projects (Forge): the scrubbed agent environment plus toolchain variables.
+// Generated build scripts and tests run with it, so it must not carry provider
+// keys, bot tokens or the master key either.
+func BuildEnv() []string { return filterEnv(safeEnvVars, buildEnvVars) }
+
+func filterEnv(allow, extra map[string]bool) []string {
 	var out []string
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if safeEnvVars[strings.ToUpper(name)] {
+		up := strings.ToUpper(name)
+		if allow[up] || extra[up] {
 			out = append(out, kv)
 		}
 	}

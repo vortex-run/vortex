@@ -9,8 +9,9 @@ that owns your edge (reverse proxy, TLS, QUIC), your security (mTLS, API keys,
 OPA policy, a tamper-evident audit log), your observability (Prometheus,
 OTel), and an AI agent runtime that can read, write, and run things on your
 machine, build apps, run research, and manage your servers. Every shell
-command the agent wants to run waits for your approval. Control it from a
-terminal dashboard, a browser, or Telegram on your phone.
+command the agent proposes waits for your approval (app builds you ask Forge
+for are the exception; see the limitations below). Control it from a terminal
+dashboard, a browser, or Telegram on your phone.
 
 ```
 $ curl -fsSL https://vortex.run/install | sh
@@ -97,6 +98,10 @@ these before you deploy it:
 - **API key roles below admin aren't enforced yet.** Only admin-only routes
   check a role; any valid key can use the other routes. Issue keys only to
   people you'd trust with the agent.
+- **Forge builds run generated code without a per-command prompt.** When you
+  ask Forge for an app, it compiles the generated project (`go build`, or
+  `flutter build apk`, which runs the generated Gradle scripts) in a temporary
+  directory with secrets removed from the environment, but not in a sandbox.
 - **WhatsApp and Slack are webhook adapters**, not full channels; Telegram is
   the primary phone interface.
 

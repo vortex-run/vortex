@@ -136,6 +136,16 @@ commands.
   (approved shell is still not a full OS jail).
 - The **approval gate** is the primary control for machine-touching actions —
   keep it enabled for unattended runs.
+- **Forge** (app builds you request) is the exception: it compiles the
+  generated project without a per-command prompt. `go build` doesn't run
+  project code; `flutter build apk` runs the project's Gradle scripts, which
+  the AI wrote. Builds run in a temporary directory with the same scrubbed
+  environment as agent tools plus toolchain settings (Go/Gradle/Android/Java/
+  Flutter paths and proxies), with no provider keys, tokens or master key. They
+  are not sandboxed.
+- DevOps package names, domains and upstreams are validated before they are
+  shown for approval or sent to a host (no shell or nginx injection, no path
+  traversal).
 - `http_get` and the research fetcher use an **SSRF-safe dialer** that resolves
   once, validates every candidate IP (blocking loopback/RFC1918/link-local/
   metadata), dials the pinned IP, and re-validates every redirect hop —
