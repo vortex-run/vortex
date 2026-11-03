@@ -55,11 +55,20 @@ configured. Control-plane routes (`/internal/reload`, dashboard data under
 
 ## Audit log
 
-A tamper-proof, append-only log HMAC-chains every security-relevant event: each
-entry's hash covers the previous entry's hash, so deleting, reordering, or
-modifying any entry breaks the chain. `vortex audit verify` detects tampering;
-`vortex audit report` produces compliance reports (markdown/JSON/CSV); the log
-auto-archives to gzip at 100 MB and prunes archives after two years.
+A tamper-evident, append-only log HMAC-chains every security-relevant event:
+each entry's hash covers the previous entry's hash, so deleting, reordering,
+or modifying any entry breaks the chain. `vortex audit verify` detects
+tampering; `vortex audit report` produces compliance reports
+(markdown/JSON/CSV); the log auto-archives to gzip at 100 MB and prunes
+archives after two years.
+
+Each entry's hash covers its sequence number, timestamp, actor, action,
+resource and (for entries marked `"v":2`) its `detail`: tool outcomes and
+errors, Studio SQL queries, issued key owners, config hashes. Entries written
+before v2 have no `v` field; their `detail` isn't covered, though everything
+else is, and they keep verifying alongside newer entries. The chain detects
+changes by anyone without the HMAC key; it doesn't stop someone from deleting
+the whole file, so ship the log off the host if you need that.
 
 ## Transport security
 

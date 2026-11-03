@@ -37,7 +37,15 @@ type Entry struct {
 	Resource  string         `json:"resource"` // what was acted on
 	Detail    map[string]any `json:"detail,omitempty"`
 	Hash      string         `json:"hash"`
+	// V is the hash format. 0 (absent; entries written before v2) covers
+	// seq, timestamp, actor, action and resource but NOT Detail. 2 also
+	// covers a canonical encoding of Detail, so outcomes, queries and other
+	// details can't be edited without breaking the chain.
+	V int `json:"v,omitempty"`
 }
+
+// hashVersion is the format new entries are written with.
+const hashVersion = 2
 
 // Log is an append-only audit log backed by a newline-delimited JSON file. It is
 // safe for concurrent Append calls.
@@ -100,20 +108,64 @@ func (l *Log) computeHash(prevHash string, seq uint64, ts time.Time, actor, acti
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+// entryHash returns the chain hash for e under its own format version.
+func (l *Log) entryHash(prevHash string, e Entry) (string, error) {
+	switch e.V {
+	case 0:
+		return l.computeHash(prevHash, e.Seq, e.Timestamp, e.Actor, e.Action, e.Resource), nil
+	case 2:
+		detail, err := canonicalDetail(e.Detail)
+		if err != nil {
+			return "", err
+		}
+		mac := hmac.New(sha256.New, l.key)
+		const sep = "\x1f"
+		mac.Write([]byte("v2" + sep + prevHash + sep +
+			strconv.FormatUint(e.Seq, 10) + sep +
+			strconv.FormatInt(e.Timestamp.UTC().UnixNano(), 10) + sep +
+			e.Actor + sep + e.Action + sep + e.Resource + sep))
+		mac.Write(detail)
+		return hex.EncodeToString(mac.Sum(nil)), nil
+	default:
+		return "", fmt.Errorf("audit: entry %d has unknown hash version %d", e.Seq, e.V)
+	}
+}
+
+// canonicalDetail encodes detail the way it reads back from the log: JSON
+// round-tripped through map[string]any, which json.Marshal emits with sorted
+// keys. Appending and verifying both go through it, so struct field order and
+// numeric types can't make the same detail hash differently. Empty is nil.
+func canonicalDetail(detail map[string]any) ([]byte, error) {
+	if len(detail) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return nil, fmt.Errorf("audit: encoding detail: %w", err)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil, fmt.Errorf("audit: decoding detail: %w", err)
+	}
+	return json.Marshal(generic)
+}
+
 // Append writes a new entry to the log with the next sequence number and a hash
 // chaining it to the previous entry. It is safe for concurrent use.
 func (l *Log) Append(_ context.Context, actor, action, resource string, detail map[string]any) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	seq := l.lastSeq + 1
-	ts := time.Now().UTC()
-	hash := l.computeHash(l.lastHash, seq, ts, actor, action, resource)
-
 	entry := Entry{
-		Seq: seq, Timestamp: ts, Actor: actor, Action: action,
-		Resource: resource, Detail: detail, Hash: hash,
+		Seq: l.lastSeq + 1, Timestamp: time.Now().UTC(), Actor: actor, Action: action,
+		Resource: resource, Detail: detail, V: hashVersion,
 	}
+	hash, err := l.entryHash(l.lastHash, entry)
+	if err != nil {
+		return err
+	}
+	entry.Hash = hash
+	seq := entry.Seq
 	line, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("audit: encoding entry: %w", err)
@@ -163,7 +215,10 @@ func (l *Log) verifyLocked(entries []Entry) error {
 		if e.Seq != expectSeq {
 			return fmt.Errorf("audit: chain broken at entry %d: expected seq %d, got %d (entry deleted or reordered)", expectSeq, expectSeq, e.Seq)
 		}
-		want := l.computeHash(prevHash, e.Seq, e.Timestamp, e.Actor, e.Action, e.Resource)
+		want, err := l.entryHash(prevHash, e)
+		if err != nil {
+			return fmt.Errorf("audit: chain broken at entry %d: %w", e.Seq, err)
+		}
 		if !hmac.Equal([]byte(want), []byte(e.Hash)) {
 			// Every hash is an HMAC under the log's key, so a wrong key makes
 			// the FIRST entry mismatch — indistinguishable, from the hash

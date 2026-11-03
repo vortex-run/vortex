@@ -333,7 +333,12 @@ func (l *Log) Rekey(newKey []byte) error {
 	var buf strings.Builder
 	prevHash := ""
 	for _, e := range entries {
-		e.Hash = next.computeHash(prevHash, e.Seq, e.Timestamp, e.Actor, e.Action, e.Resource)
+		// Each entry keeps its own hash format version; only the key changes.
+		h, herr := next.entryHash(prevHash, e)
+		if herr != nil {
+			return fmt.Errorf("audit: rekey entry %d: %w", e.Seq, herr)
+		}
+		e.Hash = h
 		line, merr := json.Marshal(e)
 		if merr != nil {
 			return fmt.Errorf("audit: rekey encoding entry %d: %w", e.Seq, merr)
