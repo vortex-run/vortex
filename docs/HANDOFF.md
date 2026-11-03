@@ -374,6 +374,7 @@ cd web/dashboard && npm ci && npm run lint && npm run build && npm run audit:ci
 | 11 | `CONTRIBUTING.md` / `SECURITY.md` | Community + vuln reporting |
 | 12 | `docs/IP_NOTES.md` | Patent counsel note (maintainers) |
 | 13 | `docs/runbooks.md` | Operator incident and recovery steps |
+| 14 | `docs/troubleshooting.md` | Common setup problems, state locations, messaging and approval gotchas |
 
 ---
 

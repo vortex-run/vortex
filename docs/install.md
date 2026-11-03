@@ -110,3 +110,5 @@ vortex status         # confirm it is running
 ```
 
 See [configuration.md](configuration.md) to tailor `vortex.cue`.
+
+If something doesn't work, see [troubleshooting.md](troubleshooting.md).

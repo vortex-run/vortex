@@ -107,7 +107,9 @@ The self-assessment audit, with every open finding, is in
 
 ## Installation
 
-See [docs/install.md](docs/install.md) for the full guide. In short:
+See [docs/install.md](docs/install.md) for the full guide and
+[docs/troubleshooting.md](docs/troubleshooting.md) if something doesn't work.
+In short:
 
 **Linux / macOS:**
 ```bash
