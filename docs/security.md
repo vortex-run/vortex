@@ -39,8 +39,10 @@ vortex secret set jwt_secret '...' --expires-in 90d --rotate-every 30d
 API keys are bcrypt-hashed (with a SHA-256 prehash to fit bcrypt's 72-byte
 limit); plaintext is shown once and never stored. The store is written
 atomically on every issue/revoke. Keys carry RBAC roles (`admin`, `operator`,
-`viewer`, `readonly`), but today only admin-only routes (`/api/keys`) check a
-role. Every other authenticated route accepts any valid key, so a `viewer` or
+`viewer`, `readonly`), but today only admin-only routes check a role:
+`/api/keys`, and Studio (`/studio/`, enabled by `VORTEX_STUDIO_WORKSPACE`),
+whose terminal is a shell that doesn't go through the approval gate. Every
+other authenticated route accepts any valid key, so a `viewer` or
 `readonly` key can still run agents, approve checkpoints, and write files
 through them. Do not issue non-admin keys to anyone you would not trust with
 those actions. This is tracked as N6 in `VORTEX_PRODUCTION_AUDIT.md`.
