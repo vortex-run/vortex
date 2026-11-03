@@ -22,7 +22,30 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	if info.Version == "" {
 		info.Version = s.version
 	}
+	s.reloadMu.Lock()
+	info.LastReload = s.lastReload
+	s.reloadMu.Unlock()
 	s.writeJSON(w, http.StatusOK, info)
+}
+
+// ReloadStatus is the outcome of the most recent config reload.
+type ReloadStatus struct {
+	At    time.Time `json:"at"`
+	OK    bool      `json:"ok"`
+	Error string    `json:"error,omitempty"`
+}
+
+// RecordReload stores a reload's outcome for GET /api/status. `vortex
+// reload` on Unix signals the server and has no other way to learn whether
+// the file was accepted and the routes changed.
+func (s *Server) RecordReload(err error) {
+	st := &ReloadStatus{At: time.Now().UTC(), OK: err == nil}
+	if err != nil {
+		st.Error = err.Error()
+	}
+	s.reloadMu.Lock()
+	s.lastReload = st
+	s.reloadMu.Unlock()
 }
 
 // handleSecretsStatus returns declared secrets with set/unset state, never

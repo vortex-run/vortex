@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vortex-run/vortex/internal/audit"
@@ -96,6 +97,9 @@ type Server struct {
 	webhooks map[string]http.Handler
 	// studioHandler serves the VORTEX Studio tree under /studio/ (auth-gated).
 	studioHandler http.Handler
+
+	reloadMu   sync.Mutex
+	lastReload *ReloadStatus // see RecordReload
 	// forgeRuntime backs the /api/forge endpoints. Optional; nil yields 503.
 	forgeRuntime ForgeRuntime
 	// logBuffer backs GET /api/logs (recent structured log lines). Optional.
@@ -196,6 +200,8 @@ type StatusInfo struct {
 	WorkingDir      string   `json:"working_dir"`
 	Routes          int      `json:"routes"`
 	RouteNames      []string `json:"route_names,omitempty"`
+	// LastReload is nil until the first reload.
+	LastReload *ReloadStatus `json:"last_reload,omitempty"`
 }
 
 // SecretStatus is one declared secret's set/unset state (never its value).

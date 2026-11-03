@@ -630,8 +630,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// the outcome back to tell `vortex reload` the truth. dp is set once the
 	// data plane exists, below.
 	var dpRef atomic.Pointer[dataPlane]
-	apiSrv.SetReloadFunc(func() error {
-		mgr.Reload()
+	reloadOutcome := func() error {
 		if err := cfgMgr.LastReloadError(); err != nil {
 			return err
 		}
@@ -641,6 +640,10 @@ func runStart(ctx context.Context, pidfile string) error {
 			}
 		}
 		return nil
+	}
+	apiSrv.SetReloadFunc(func() error {
+		mgr.Reload()
+		return reloadOutcome()
 	})
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
 	apiSrv.Start()
@@ -846,6 +849,12 @@ func runStart(ctx context.Context, pidfile string) error {
 		if rerr := dp.rebuild(cfgMgr.Holder()); rerr != nil {
 			log.Error("proxy rebuild after reload failed, keeping previous routes", "err", rerr)
 		}
+		return nil
+	})
+	// Registered last, so it sees every hook's outcome: published in
+	// /api/status for `vortex reload` after a SIGHUP, which has no reply.
+	mgr.OnReload("reload-status", func(context.Context) error {
+		apiSrv.RecordReload(reloadOutcome())
 		return nil
 	})
 
