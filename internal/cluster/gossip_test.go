@@ -8,16 +8,32 @@ import (
 	"time"
 )
 
-// freeUDPPort returns a free port (memberlist uses both TCP and UDP on it).
+// freeUDPPort returns a loopback port that is free for both TCP and UDP
+// (memberlist binds both on the same port). A port that is free for TCP can
+// still be unusable for UDP: Windows reserves dynamic UDP ranges (see
+// `netsh int ipv4 show excludedportrange protocol=udp`), and binding inside
+// one fails with "access forbidden". So the UDP side is probed too, and
+// another port is tried when it fails.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	var lastErr error
+	for range 50 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		u, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		_ = l.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = u.Close()
+		return port
 	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	return port
+	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)
+	return 0
 }
 
 // newGossipNode builds a single gossip node bound to loopback on a free port.
