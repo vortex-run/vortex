@@ -176,12 +176,21 @@ func (l *Log) Append(_ context.Context, actor, action, resource string, detail m
 		return fmt.Errorf("audit: opening log for append: %w", err)
 	}
 	_, werr := f.Write(append(line, '\n'))
+	// Flush to stable storage before reporting success: an audit entry that
+	// a power cut can silently drop is not much of a record. Audit appends
+	// happen per agent action or API change, not per proxied request.
+	var syncErr error
+	if werr == nil {
+		syncErr = f.Sync()
+	}
 	info, serr := f.Stat()
 	_ = f.Close()
 	if werr != nil {
 		return fmt.Errorf("audit: writing entry: %w", werr)
 	}
 
+	// The line is in the file even if Sync failed, so the chain tail must
+	// advance either way; otherwise the next entry would reuse this seq.
 	l.lastSeq = seq
 	l.lastHash = hash
 
@@ -190,6 +199,9 @@ func (l *Log) Append(_ context.Context, actor, action, resource string, detail m
 	// must never fail the append that triggered it.
 	if serr == nil && info.Size() > ArchiveThreshold {
 		_, _ = l.archiveLocked()
+	}
+	if syncErr != nil {
+		return fmt.Errorf("audit: syncing entry %d to disk: %w", seq, syncErr)
 	}
 	return nil
 }
