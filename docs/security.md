@@ -161,7 +161,8 @@ commands.
 - DevOps package names, domains and upstreams are validated before they are
   shown for approval or sent to a host (no shell or nginx injection, no path
   traversal).
-- `http_get` and the research fetcher use an **SSRF-safe dialer** that resolves
+- The research fetcher, data pipeline and `http_get` tool (not yet reachable
+  from chat) use an **SSRF-safe dialer** that resolves
   once, validates every candidate IP (blocking loopback/RFC1918/link-local/
   metadata), dials the pinned IP, and re-validates every redirect hop —
   defeating DNS rebinding.

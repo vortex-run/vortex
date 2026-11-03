@@ -127,6 +127,12 @@ for approval in the TUI instead.
 else. That's expected. Use the `/api/agents/...` routes (with an API key) to
 inspect the team.
 
+**The tester reports "could not run tests: … requires human approval".**
+Known limitation: in team mode the terminal tool stays approval-gated, but
+the team has no way to ask for that approval, so the tester can't run tests
+and the coder's build check is skipped. Run tests yourself (or through the
+regular agent, which asks for approval) until this is fixed.
+
 ## Tests on Windows
 
 - Run Go commands with `TMP`/`TEMP`/`GOTMPDIR` on a drive with free space;

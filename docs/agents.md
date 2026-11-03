@@ -28,12 +28,15 @@ A daily USD budget can cap spend; usage is visible at `/api/ai/cost`.
 
 ### Code & files
 
-The agent has tools for reading/writing files, running whitelisted commands,
-HTTP fetches (SSRF-protected), and **LSP diagnostics** (`lsp_diagnostics`),
-which surface errors/warnings from a language server (gopls, pylsp,
-typescript-language-server, rust-analyzer) when installed. Filesystem and
-terminal actions are **approval-gated** — the agent asks before touching your
-machine.
+The agent has tools for listing, reading, searching, writing and editing files,
+running terminal commands, git status/diff/add/commit, and undoing its last
+write. Writes and terminal commands are **approval-gated**: the agent asks
+before touching your machine. Tools are chosen from your request (commands
+and keywords), not by the model itself, and the model doesn't see tool output.
+
+Not reachable from chat yet: an `http_get` tool (web fetching happens inside
+the research agent) and **LSP diagnostics** (`lsp_diagnostics`). Both exist in
+the code but nothing routes requests to them.
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 
