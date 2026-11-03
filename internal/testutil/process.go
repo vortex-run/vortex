@@ -143,6 +143,11 @@ func (p *VortexProcess) env() []string {
 		"APPDATA="+p.ConfigHome,
 		"LocalAppData="+p.ConfigHome,
 		"LOCALAPPDATA="+p.ConfigHome,
+		// Keep every listener on loopback: tests talk to 127.0.0.1 only, and
+		// binding all interfaces opens ports to the network (and raises a
+		// Windows Firewall prompt per freshly built binary).
+		"VORTEX_API_LISTEN=127.0.0.1:9090",
+		"VORTEX_EDGE_BIND_HOST=127.0.0.1",
 	)
 }
 

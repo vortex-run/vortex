@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1081,6 +1082,7 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 		Metrics: d.metrics, Tracer: d.tracer,
 		Runtime: d.pluginRT, PluginRegistry: d.pluginReg,
 		Registry: d.tenantReg, Enforcer: d.tenantEnf, Logger: d.log,
+		BindHost: edgeBindHost(),
 	})
 	if err != nil {
 		return err
@@ -3056,10 +3058,16 @@ func tlsChallengeHandler(tlsMgr *vtls.Manager, cfg *config.Config) http.Handler 
 	return tlsMgr.ChallengeHandler()
 }
 
+// edgeBindHost is the interface the edge (route listeners and the ACME
+// challenge server) binds, from VORTEX_EDGE_BIND_HOST. Empty, the default,
+// means all interfaces. Operators use it to keep the edge on one address;
+// tests set 127.0.0.1 so they don't open ports to the network.
+func edgeBindHost() string { return strings.TrimSpace(os.Getenv("VORTEX_EDGE_BIND_HOST")) }
+
 // startChallengeServer serves the ACME HTTP-01 challenge handler on :80 and
 // registers its shutdown with the lifecycle manager.
 func startChallengeServer(mgr *lifecycle.Manager, h http.Handler, log *slog.Logger) {
-	srv := &http.Server{Addr: ":80", Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: net.JoinHostPort(edgeBindHost(), "80"), Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Warn("ACME challenge server stopped", "err", err)
