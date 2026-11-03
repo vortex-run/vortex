@@ -84,6 +84,23 @@ sudo systemctl start vortex
 vortex service generate --format systemd
 ```
 
+`service install` (systemd or OpenRC):
+
+- creates the unprivileged system user `vortex` with home `/var/lib/vortex`
+  if it doesn't exist (`useradd`, or `adduser` on BusyBox/Alpine). The home
+  is the service's working directory, so it's also the agent's default
+  workspace, and the user's state (keys, audit log, secrets) lives under it.
+- grants the service only `CAP_NET_BIND_SERVICE`, so it can listen on :80
+  and :443 without running as root.
+- applies systemd hardening that doesn't get in VORTEX's way: no new
+  privileges, read-only kernel tunables/modules/logs/cgroups, no SUID/SGID,
+  native syscalls only. The agent can still work on the host (with
+  approval); it isn't sandboxed.
+
+Self-update can't replace a binary the `vortex` user doesn't own (for
+example `/usr/bin/vortex` from a package). Update packaged installs with your
+package manager.
+
 ## First run
 
 ```bash

@@ -17,6 +17,7 @@ type SystemdConfig struct {
 	Group       string // system group the service runs as
 	Description string // unit description
 	After       string // ordering dependency (e.g. network-online.target)
+	Home        string // service user's home and working directory
 }
 
 // DefaultSystemdConfig returns a SystemdConfig with production defaults filled
@@ -29,6 +30,7 @@ func DefaultSystemdConfig(execPath, configPath string) SystemdConfig {
 		Group:       "vortex",
 		Description: "VORTEX — autonomous infra platform",
 		After:       "network-online.target",
+		Home:        ServiceHome,
 	}
 }
 
@@ -36,6 +38,18 @@ func DefaultSystemdConfig(execPath, configPath string) SystemdConfig {
 // VORTEX's config hot-reload; Restart=on-failure with RestartSec gives crash
 // resilience; the LimitNOFILE/NPROC raise the file-descriptor and process
 // ceilings a network proxy needs.
+//
+// The service runs as an unprivileged user, so it is granted exactly one
+// capability, CAP_NET_BIND_SERVICE, to bind the edge's :80/:443. The
+// hardening directives below only remove things VORTEX never needs (kernel
+// tunables, modules, logs, cgroup writes, SUID/SGID, realtime, foreign
+// syscall ABIs). Deliberately absent, because they would break the product:
+// MemoryDenyWriteExecute (the WASM plugin runtime compiles to native code),
+// ProtectSystem/ProtectHome (the agent operates on the host, with approval),
+// RestrictNamespaces (rootless container builds), and ProtectClock/
+// PrivateDevices (they restrict /dev, which the Studio terminal's ptys need).
+// WorkingDirectory is the service home, so the agent's default workspace is
+// /var/lib/vortex rather than /.
 const systemdTemplate = `[Unit]
 Description={{.Description}}
 After={{.After}}
@@ -45,6 +59,7 @@ Wants={{.After}}
 Type=simple
 User={{.User}}
 Group={{.Group}}
+WorkingDirectory={{.Home}}
 ExecStart={{.ExecPath}} start --config {{.ConfigPath}}
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
@@ -54,6 +69,18 @@ StandardError=journal
 SyslogIdentifier=vortex
 LimitNOFILE=65536
 LimitNPROC=65536
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

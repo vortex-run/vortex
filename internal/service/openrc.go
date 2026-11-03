@@ -13,6 +13,7 @@ type OpenRCConfig struct {
 	User       string // user the service runs as
 	PidFile    string // pidfile path
 	LogFile    string // combined stdout/stderr log path
+	Home       string // working directory (the service user's home)
 }
 
 // DefaultOpenRCConfig returns an OpenRCConfig with production defaults.
@@ -23,6 +24,7 @@ func DefaultOpenRCConfig(execPath, configPath string) OpenRCConfig {
 		User:       "vortex",
 		PidFile:    "/run/vortex/vortex.pid",
 		LogFile:    "/var/log/vortex/vortex.log",
+		Home:       ServiceHome,
 	}
 }
 
@@ -37,6 +39,9 @@ command={{.ExecPath}}
 command_args="start --config {{.ConfigPath}}"
 command_user={{.User}}
 command_background=true
+directory={{.Home}}
+# Bind :80/:443 as the unprivileged user (OpenRC 0.45+; older ignore it).
+capabilities="^cap_net_bind_service"
 pidfile={{.PidFile}}
 output_log={{.LogFile}}
 error_log={{.LogFile}}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -26,6 +27,76 @@ const (
 	systemdUnitPath = "/etc/systemd/system/vortex.service"
 	openrcInitPath  = "/etc/init.d/vortex"
 )
+
+// ServiceUser and ServiceHome are the unprivileged account the Linux service
+// runs as and its home (also the working directory, so the agent's default
+// workspace is not /).
+const (
+	ServiceUser = "vortex"
+	ServiceHome = "/var/lib/vortex"
+)
+
+// Seams for tests: user lookup, PATH lookup, and command execution.
+var (
+	userExists = func(name string) bool { _, err := user.Lookup(name); return err == nil }
+	lookPath   = exec.LookPath
+	runCmd     = run
+)
+
+// ensureServiceUser creates the system account the unit runs as. Without it
+// systemd refuses to start the service (status 217/USER) and OpenRC's
+// start-stop-daemon fails. An existing account is left as it is, apart from
+// making sure its home exists and belongs to it.
+func ensureServiceUser(cfg InstallConfig) error {
+	out := cfg.out()
+	if userExists(ServiceUser) {
+		if cfg.DryRun {
+			fmt.Fprintf(out, "[dry-run] user %s exists; would ensure %s exists and is owned by it\n", ServiceUser, ServiceHome)
+			return nil
+		}
+		return ensureServiceHome()
+	}
+	var cmds [][]string
+	switch {
+	case lookPathOK("useradd"):
+		cmds = [][]string{{"useradd", "--system", "--user-group", "--home-dir", ServiceHome,
+			"--create-home", "--shell", "/usr/sbin/nologin", ServiceUser}}
+	case lookPathOK("adduser") && lookPathOK("addgroup"): // BusyBox (Alpine)
+		cmds = [][]string{
+			{"addgroup", "-S", ServiceUser},
+			{"adduser", "-S", "-D", "-h", ServiceHome, "-s", "/sbin/nologin", "-G", ServiceUser, ServiceUser},
+		}
+	default:
+		if cfg.DryRun {
+			fmt.Fprintf(out, "[dry-run] would create system user %s (home %s), but neither useradd nor adduser is on PATH here\n", ServiceUser, ServiceHome)
+			return nil
+		}
+		return fmt.Errorf("creating service user %q: neither useradd nor adduser is available; create it manually with home %s", ServiceUser, ServiceHome)
+	}
+	for _, c := range cmds {
+		if cfg.DryRun {
+			fmt.Fprintf(out, "[dry-run] would run: %s\n", strings.Join(c, " "))
+			continue
+		}
+		if err := runCmd(c[0], c[1:]...); err != nil {
+			return err
+		}
+	}
+	if cfg.DryRun {
+		return nil
+	}
+	return ensureServiceHome()
+}
+
+// ensureServiceHome creates ServiceHome and hands it to the service user.
+func ensureServiceHome() error {
+	if err := os.MkdirAll(ServiceHome, 0o750); err != nil {
+		return fmt.Errorf("creating %s: %w", ServiceHome, err)
+	}
+	return runCmd("chown", ServiceUser+":", ServiceHome)
+}
+
+func lookPathOK(name string) bool { _, err := lookPath(name); return err == nil }
 
 // DetectInitSystem inspects the running OS and returns its init system.
 func DetectInitSystem() InitSystem {
@@ -96,6 +167,9 @@ func Install(cfg InstallConfig) error {
 func installSystemd(cfg InstallConfig) error {
 	unit := GenerateSystemd(DefaultSystemdConfig(cfg.ExecPath, cfg.ConfigPath))
 	out := cfg.out()
+	if err := ensureServiceUser(cfg); err != nil {
+		return err
+	}
 	if cfg.DryRun {
 		fmt.Fprintf(out, "[dry-run] would write systemd unit to %s\n", systemdUnitPath)
 		fmt.Fprintln(out, "[dry-run] would run: systemctl daemon-reload")
@@ -105,10 +179,10 @@ func installSystemd(cfg InstallConfig) error {
 	if err := os.WriteFile(systemdUnitPath, []byte(unit), 0o644); err != nil {
 		return fmt.Errorf("writing systemd unit: %w", err)
 	}
-	if err := run("systemctl", "daemon-reload"); err != nil {
+	if err := runCmd("systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := run("systemctl", "enable", "vortex"); err != nil {
+	if err := runCmd("systemctl", "enable", "vortex"); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "Installed systemd service. Start with: systemctl start vortex")
@@ -118,6 +192,9 @@ func installSystemd(cfg InstallConfig) error {
 func installOpenRC(cfg InstallConfig) error {
 	script := GenerateOpenRC(DefaultOpenRCConfig(cfg.ExecPath, cfg.ConfigPath))
 	out := cfg.out()
+	if err := ensureServiceUser(cfg); err != nil {
+		return err
+	}
 	if cfg.DryRun {
 		fmt.Fprintf(out, "[dry-run] would write OpenRC script to %s (mode 0755)\n", openrcInitPath)
 		fmt.Fprintln(out, "[dry-run] would run: rc-update add vortex default")
@@ -126,7 +203,7 @@ func installOpenRC(cfg InstallConfig) error {
 	if err := os.WriteFile(openrcInitPath, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("writing OpenRC script: %w", err)
 	}
-	if err := run("rc-update", "add", "vortex", "default"); err != nil {
+	if err := runCmd("rc-update", "add", "vortex", "default"); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "Installed OpenRC service. Start with: rc-service vortex start")
