@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -64,6 +65,10 @@ type ManagerConfig struct {
 	Enforcer *tenancy.Enforcer
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
+	// BindHost is the interface every route listens on. Empty (the default)
+	// means all interfaces, which is what a public edge needs; tests set
+	// "127.0.0.1" so they don't open ports to the network.
+	BindHost string
 }
 
 // RouteStats is a per-route runtime snapshot.
@@ -142,7 +147,7 @@ func (m *Manager) buildRoute(rc config.Route) (*route, error) {
 
 func (m *Manager) buildTCP(rc config.Route) (*route, error) {
 	lc := tcp.ListenerConfig{
-		ListenAddr:     listenAddr(rc.Listen),
+		ListenAddr:     m.listenAddr(rc.Listen),
 		Backends:       routeToTCPBackends(rc.Backends),
 		Pool:           m.cfg.TCPPool,
 		MaxConnections: 0,
@@ -161,7 +166,7 @@ func (m *Manager) buildTCP(rc config.Route) (*route, error) {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "tcp", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "tcp", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ln.Listen,
 		stats: func() (int64, int64) {
 			s := ln.Stats()
@@ -175,7 +180,7 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 		return nil, errors.New("udp route requires a backend")
 	}
 	ln, err := proxyudp.NewListener(proxyudp.UDPListenerConfig{
-		ListenAddr:  listenAddr(rc.Listen),
+		ListenAddr:  m.listenAddr(rc.Listen),
 		BackendAddr: backendHostPort(rc.Backends[0]),
 		RateLimit:   rateLimitRPS(rc.RateLimit),
 		Logger:      m.log,
@@ -184,7 +189,7 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "udp", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "udp", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ln.Listen,
 		stats: func() (int64, int64) {
 			s := ln.Stats()
@@ -224,7 +229,7 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 	router := proxyhttp.NewRouter()
 	router.Handle(routePattern(rc), gw)
 
-	srvCfg := proxyhttp.ServerConfig{Addr: listenAddr(rc.Listen), Router: router}
+	srvCfg := proxyhttp.ServerConfig{Addr: m.listenAddr(rc.Listen), Router: router}
 	if m.cfg.PolicyEngine != nil {
 		srvCfg.PolicyMiddleware = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
 	}
@@ -374,7 +379,7 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	router.Handle(routePattern(rc), handler)
 
 	ds, err := proxyquic.NewDualStack(proxyquic.DualStackConfig{
-		Addr:      listenAddr(rc.Listen),
+		Addr:      m.listenAddr(rc.Listen),
 		TLSConfig: m.cfg.TLS.TLSConfig(),
 		Router:    router,
 		Logger:    m.log,
@@ -383,7 +388,7 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "h3", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "h3", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ds.ListenAndServe,
 		stats: func() (int64, int64) {
 			s := ds.Stats()
@@ -467,13 +472,14 @@ func (m *Manager) Stats() []RouteStats {
 
 // --- conversion helpers ----------------------------------------------------
 
-// listenAddr returns ":<port>" for an L4 route, or ":0" if unset (L7 routes
-// bind their own address; this is the fallback bind).
-func listenAddr(port int) string {
-	if port <= 0 {
-		return ":0"
+// listenAddr returns the bind address for a route's port: "<BindHost>:<port>",
+// with an empty BindHost (the default) meaning all interfaces, and port 0 when
+// unset.
+func (m *Manager) listenAddr(port int) string {
+	if port < 0 {
+		port = 0
 	}
-	return ":" + strconv.Itoa(port)
+	return net.JoinHostPort(m.cfg.BindHost, strconv.Itoa(port))
 }
 
 func backendHostPort(b config.Backend) string {
