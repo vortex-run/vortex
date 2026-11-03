@@ -103,26 +103,95 @@ func handshake(serverCfg, clientCfg *tls.Config) hsResult {
 func TestMTLS_ServerRequiresClientCert(t *testing.T) {
 	_, mc := testMTLS(t, "prod", time.Hour, 30*time.Minute)
 	// We require a client cert; authorization is by SPIFFE identity in
-	// VerifyPeerCertificate (RequireAnyClientCert + manual chain verify), not by
-	// the default hostname verifier.
+	// VerifyConnection (RequireAnyClientCert + manual chain verify), not by
+	// the default hostname verifier. VerifyPeerCertificate must stay unset:
+	// it is skipped on resumed sessions.
 	if mc.ServerTLSConfig().ClientAuth != tls.RequireAnyClientCert {
 		t.Error("ServerTLSConfig.ClientAuth must require a client cert")
 	}
-	if mc.ServerTLSConfig().VerifyPeerCertificate == nil {
-		t.Error("ServerTLSConfig must set VerifyPeerCertificate for SPIFFE auth")
+	if mc.ServerTLSConfig().VerifyConnection == nil {
+		t.Error("ServerTLSConfig must set VerifyConnection for SPIFFE auth")
+	}
+	if mc.ServerTLSConfig().VerifyPeerCertificate != nil {
+		t.Error("ServerTLSConfig must not rely on VerifyPeerCertificate (skipped on resumption)")
 	}
 }
 
 func TestMTLS_ClientVerifiesPeer(t *testing.T) {
 	_, mc := testMTLS(t, "prod", time.Hour, 30*time.Minute)
 	// Client identifies peers by SPIFFE identity, so it sets
-	// VerifyPeerCertificate and presents its own cert via GetClientCertificate.
+	// VerifyConnection and presents its own cert via GetClientCertificate.
 	cc := mc.ClientTLSConfig()
-	if cc.VerifyPeerCertificate == nil {
-		t.Error("ClientTLSConfig must set VerifyPeerCertificate")
+	if cc.VerifyConnection == nil {
+		t.Error("ClientTLSConfig must set VerifyConnection")
 	}
 	if cc.GetClientCertificate == nil {
 		t.Error("ClientTLSConfig must set GetClientCertificate")
+	}
+}
+
+// resumeHandshake runs one handshake and lets the client read a byte, so it
+// processes the TLS 1.3 session ticket the server sends after the handshake.
+// It returns whether the client resumed and the server's handshake error.
+func resumeHandshake(t *testing.T, serverCfg, clientCfg *tls.Config) (resumed bool, serverErr error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		raw, aerr := ln.Accept()
+		if aerr != nil {
+			serverErr = aerr
+			return
+		}
+		srv := tls.Server(raw, serverCfg)
+		_ = srv.SetDeadline(time.Now().Add(3 * time.Second))
+		if serverErr = srv.Handshake(); serverErr == nil {
+			_, _ = srv.Write([]byte{1})
+		}
+		_ = srv.Close()
+	}()
+	raw, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl := tls.Client(raw, clientCfg)
+	_ = cl.SetDeadline(time.Now().Add(3 * time.Second))
+	if cl.Handshake() == nil {
+		_, _ = cl.Read(make([]byte, 1))
+		resumed = cl.ConnectionState().DidResume
+	}
+	_ = cl.Close()
+	<-done
+	return resumed, serverErr
+}
+
+// TestMTLS_ResumedSessionIsReverified: a peer that resumes a session must
+// pass the chain + SPIFFE check again. VerifyPeerCertificate is skipped on
+// resumption, so with it a client the server no longer trusts kept resuming.
+func TestMTLS_ResumedSessionIsReverified(t *testing.T) {
+	_, mc := testMTLS(t, "prod", time.Hour, 30*time.Minute)
+	srvMC := *mc // the server's own view, so only its trust changes below
+	serverCfg := srvMC.ServerTLSConfig()
+	clientCfg := mc.ClientTLSConfig()
+	clientCfg.ClientSessionCache = tls.NewLRUClientSessionCache(4)
+	clientCfg.ServerName = "node.prod.vortex" // session cache key; each test listener has a new port
+
+	if _, err := resumeHandshake(t, serverCfg, clientCfg); err != nil {
+		t.Fatalf("first handshake: %v", err)
+	}
+	resumed, err := resumeHandshake(t, serverCfg, clientCfg)
+	if err != nil || !resumed {
+		t.Fatalf("second handshake should resume: err=%v resumed=%v", err, resumed)
+	}
+
+	srvMC.TrustDomain = "other.vortex" // the server stops trusting this peer
+	if _, err := resumeHandshake(t, serverCfg, clientCfg); err == nil {
+		t.Error("resumed handshake succeeded for a peer outside the trust domain; resumption skipped verification")
 	}
 }
 
