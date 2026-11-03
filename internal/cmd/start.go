@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -625,7 +626,22 @@ func runStart(ctx context.Context, pidfile string) error {
 	// stand in for SIGHUP/SIGTERM, which Windows lacks. Reload goes through the
 	// lifecycle so ALL reload hooks fire (config swap + proxy rebuild), not just
 	// the config swap.
-	apiSrv.SetReloadFunc(func() error { mgr.Reload(); return nil })
+	// The hooks swallow errors (a bad file must not stop the process), so read
+	// the outcome back to tell `vortex reload` the truth. dp is set once the
+	// data plane exists, below.
+	var dpRef atomic.Pointer[dataPlane]
+	apiSrv.SetReloadFunc(func() error {
+		mgr.Reload()
+		if err := cfgMgr.LastReloadError(); err != nil {
+			return err
+		}
+		if dp := dpRef.Load(); dp != nil {
+			if err := dp.lastRebuildError(); err != nil {
+				return fmt.Errorf("routes not changed: %w", err)
+			}
+		}
+		return nil
+	})
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
 	apiSrv.Start()
 	// Background sweeps that bound the rate-limiter maps (production audit H5).
@@ -816,6 +832,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		display.StepFail("Routes", err.Error())
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
+	dpRef.Store(dp)
 	if names := routeNames(cfg); len(names) > 0 {
 		display.Step("Routes", strings.Join(names, ", "))
 	} else {
@@ -1062,11 +1079,58 @@ type dataPlane struct {
 	mu      sync.Mutex
 	current *proxy.Manager
 	cancel  context.CancelFunc
+	applied *config.Config // config the running manager was built from
+	lastErr error          // outcome of the most recent rebuild
 }
 
-// rebuild constructs a proxy.Manager from the current config and starts it,
-// stopping any previously-running manager first. On a build error the previous
-// manager is left running and the error is returned.
+// startGrace is how long apply waits for a new manager's listeners to fail.
+// Bind errors (port in use, permission denied) surface immediately.
+const startGrace = 500 * time.Millisecond
+
+// rebuild brings the routes in line with the holder's config. It does
+// nothing when that config is the one already running, which is the case
+// after a reload whose file failed validation. If the new routes fail to
+// start (a port in use, say), the previous routes are restored and the
+// holder is pointed back at their config, so one bad route can't take every
+// route down; the error is returned either way.
+func (d *dataPlane) rebuild(holder *config.Holder) error {
+	cfg := holder.Get()
+	d.mu.Lock()
+	prevCfg := d.applied
+	d.mu.Unlock()
+	if prevCfg != nil && (prevCfg == cfg || (cfg.Hash() != "" && prevCfg.Hash() == cfg.Hash())) {
+		d.setLastErr(nil)
+		return nil
+	}
+	err := d.apply(cfg)
+	if err != nil && prevCfg != nil {
+		d.log.Error("new routes failed to start, restoring previous routes", "err", err)
+		if rerr := d.apply(prevCfg); rerr != nil {
+			err = fmt.Errorf("%w; restoring previous routes also failed: %v", err, rerr)
+		} else {
+			holder.Store(prevCfg)
+		}
+	}
+	d.setLastErr(err)
+	return err
+}
+
+func (d *dataPlane) setLastErr(err error) {
+	d.mu.Lock()
+	d.lastErr = err
+	d.mu.Unlock()
+}
+
+// lastRebuildError returns the outcome of the most recent rebuild.
+func (d *dataPlane) lastRebuildError() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastErr
+}
+
+// apply constructs a proxy.Manager from cfg and starts it, stopping any
+// previously-running manager first. It returns an error if the manager can't
+// be built or a listener fails within startGrace.
 //
 // The previous manager is stopped BEFORE the new one starts: routes bind fixed
 // ports, so an overlapping start would race the old listener and fail with
@@ -1074,8 +1138,7 @@ type dataPlane struct {
 // frees the ports for a clean rebind. This trades a brief (sub-second) bind gap
 // for correctness; in-flight requests on the old listener still drain via the
 // listener's own graceful shutdown.
-func (d *dataPlane) rebuild(holder *config.Holder) error {
-	cfg := holder.Get()
+func (d *dataPlane) apply(cfg *config.Config) error {
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
 		PolicyEngine: d.policy, Edge: d.edge,
@@ -1102,11 +1165,24 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 		_ = prev.Stop(context.Background())
 	}
 
+	started := make(chan error, 1)
 	go func() {
-		if perr := mgr.Start(runCtx); perr != nil {
+		perr := mgr.Start(runCtx)
+		if perr != nil {
 			d.log.Error("proxy manager stopped with error", "err", perr)
 		}
+		started <- perr
 	}()
+	select {
+	case perr := <-started:
+		if perr != nil {
+			return perr // Start already stopped every listener
+		}
+	case <-time.After(startGrace):
+	}
+	d.mu.Lock()
+	d.applied = cfg
+	d.mu.Unlock()
 	return nil
 }
 
