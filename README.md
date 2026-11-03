@@ -2,13 +2,14 @@
 
 *An open source project by [Sandeep Kumar Bollavaram](https://github.com/sandeepbollavaram).*
 
-> **One binary. Any server. Fully autonomous.**
+> **One binary. Any server. AI agents that act only with your approval.**
 
-VORTEX is a self-hosted autonomous infrastructure platform: a single static Go
-binary that owns your edge (reverse proxy, TLS, QUIC), your security (mTLS,
-RBAC, OPA policy, tamper-proof audit), your observability (Prometheus, OTel),
-and an AI agent runtime that can read, write, and run things on your machine,
-build apps, run research, and manage your servers — all controlled from a
+VORTEX is a self-hosted infrastructure platform: a single static Go binary
+that owns your edge (reverse proxy, TLS, QUIC), your security (mTLS, API keys,
+OPA policy, a tamper-evident audit log), your observability (Prometheus,
+OTel), and an AI agent runtime that can read, write, and run things on your
+machine, build apps, run research, and manage your servers. Every shell
+command the agent wants to run waits for your approval. Control it from a
 terminal dashboard, a browser, or Telegram on your phone.
 
 ```
@@ -52,19 +53,20 @@ it stores its own state, and nothing phones home.
 |---|---|
 | 🤖 **AI Agent** | Claude, DeepSeek, OpenAI, Gemini, Groq, AWS Bedrock, Azure OpenAI, OpenRouter, Ollama |
 | 🌐 **Reverse Proxy** | HTTP/HTTPS/TCP/UDP/QUIC with load balancing and health checks |
-| 🔒 **Zero Trust** | mTLS identity mesh, RBAC, OPA policy engine, edge rate limiting |
-| 📱 **Telegram Control** | Drive the agent and get alerts from your phone |
-| 🏗️ **Autonomous Builds** | VORTEX Forge builds apps + Android APKs from a prompt |
+| 🔒 **Access Control** | mTLS, API keys with roles, OPA policy engine, edge rate limiting |
+| ✋ **Approval Gate** | Agent shell commands wait for your approval; release builds can't turn it off |
+| 📱 **Telegram Control** | Drive the agent, approve its commands, and get alerts from your phone |
+| 🏗️ **App Builds** | VORTEX Forge builds apps (and Android APKs, with the Flutter SDK installed) from a prompt |
 | 🔍 **Research Agent** | Web search + summarize into reports (SSRF-hardened) |
-| 🖥️ **DevOps Agent** | SSH, Docker, Nginx management over your fleet |
+| 🖥️ **DevOps Agent** | SSH, Docker, Nginx management on your servers |
 | 📊 **Data Pipelines** | CSV/JSON analysis + chart generation |
 | 🏥 **Self-Healing** | Auto-detect failures and recover, with SLO tracking |
-| 🤝 **Multi-Agent** | Orchestrate complex tasks across specialised agents |
+| 🤝 **Multi-Agent** | Orchestrate tasks across specialised agents; runs resume after a crash |
 | 📟 **Terminal UI** | Full dashboard in your terminal (optional vim keybindings) |
 | 🌐 **Web Dashboard** | Browser-based management at `/dashboard/` |
 | 🔐 **Encrypted Secrets** | XChaCha20-Poly1305 at rest, keyed by a random master key |
-| 📋 **Tamper-Proof Audit** | HMAC hash-chained, compliance-report exportable |
-| 📦 **Signed Releases** | Ed25519-signed checksums, verified before self-update |
+| 📋 **Tamper-Evident Audit** | HMAC hash-chained, verified at startup, compliance-report exportable |
+| 📦 **Release Signing** | Ed25519-signed checksums, verified before self-update (from the next release; v0.3.0 and earlier are unsigned) |
 
 ---
 
@@ -81,26 +83,25 @@ UI with `vortex ui`.
 
 ---
 
-## Compared to Claude Code
+## Status and limitations
 
-VORTEX does everything an AI coding agent does **and operates the server it
-runs on**:
+VORTEX is young (first commit June 2026) and maintained by one person. Know
+these before you deploy it:
 
-| | Claude Code | VORTEX |
-|---|:---:|:---:|
-| AI coding agent | ✅ | ✅ |
-| Multiple AI providers | — | ✅ (9 providers) |
-| Conversation persistence | ✅ | ✅ (SQLite + full-text search) |
-| LSP code intelligence | ✅ | ✅ |
-| Reverse proxy / TLS | — | ✅ |
-| Secrets manager | — | ✅ (encrypted at rest) |
-| mTLS / RBAC / policy | — | ✅ |
-| Telegram / phone control | — | ✅ |
-| Autonomous app builds | — | ✅ (Forge) |
-| Self-healing infra | — | ✅ |
-| Multi-agent orchestration | — | ✅ |
-| Audit log (tamper-proof) | — | ✅ |
-| Single self-hosted binary | — | ✅ |
+- **Single node.** Clustering code exists, but state is node-local; there is
+  no high-availability setup yet.
+- **No container sandbox for agent tools.** Containment is the approval gate,
+  a command allow-list, Auto Mode limits inside a trusted workspace, and a
+  scrubbed environment for child processes. Don't point the agent at
+  untrusted input unattended.
+- **API key roles below admin aren't enforced yet.** Only admin-only routes
+  check a role; any valid key can use the other routes. Issue keys only to
+  people you'd trust with the agent.
+- **WhatsApp and Slack are webhook adapters**, not full channels; Telegram is
+  the primary phone interface.
+
+The self-assessment audit, with every open finding, is in
+[VORTEX_PRODUCTION_AUDIT.md](VORTEX_PRODUCTION_AUDIT.md).
 
 ---
 
@@ -121,14 +122,14 @@ curl -fsSL https://vortex.run/install | sh
 any project directory:
 
 ```powershell
-# This session only:
-$env:PATH += ";S:\vortex\bin"
+# This session only (from the repository root):
+$env:PATH += ";$PWD\bin"
 
 # Permanent (user PATH) — run once:
 .\scripts\install-path.ps1   # or: task install:path
 
 # Or manually via System Properties → Environment Variables → Path
-# → Add S:\vortex\bin
+# → add the repository's bin folder
 ```
 
 On Linux / macOS, the equivalent helper appends to your shell rc:
@@ -147,7 +148,7 @@ vortex code        # operates on THIS project (the current directory)
 **Verify a release** before trusting it:
 ```bash
 vortex verify            # checks this binary against the signed release
-./scripts/verify-release.sh v0.2.0
+./scripts/verify-release.sh <version>   # a signed release (the next one onward)
 ```
 
 ---
@@ -247,8 +248,8 @@ Full reference: [docs/api.md](docs/api.md).
                    └─────────────┘
 ```
 
-The security model — keys, mTLS, the audit chain, the agent sandbox — is
-explained in [docs/security.md](docs/security.md).
+The security model — keys, mTLS, the audit chain, the agent's approval gate
+and its limits — is explained in [docs/security.md](docs/security.md).
 
 ---
 
