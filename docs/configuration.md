@@ -124,7 +124,8 @@ observability: {
 | `VORTEX_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
 | `VORTEX_AZURE_OPENAI_KEY` / `_ENDPOINT` / `_DEPLOYMENT` | Azure OpenAI. |
 | `VORTEX_TELEGRAM_TOKEN`, `VORTEX_TELEGRAM_DEFAULT_CHAT` | Telegram bot. |
-| `VORTEX_TELEGRAM_ALLOWED_IDS` | Comma-separated chat IDs allowed to command the bot. Empty allows nobody. |
+| `VORTEX_TELEGRAM_ALLOWED_IDS` | Comma-separated chat IDs allowed to command the bot. Empty allows nobody. Approval buttons also require the pressing user's ID to be listed. |
+| `VORTEX_TELEGRAM_SECRET` | Secret Telegram sends with each webhook update (`secret_token`); `/webhook/telegram` refuses updates without it. Unset: a random one is generated per start and registered when VORTEX sets the webhook itself (`VORTEX_PUBLIC_URL`). Set it if you register the webhook yourself. |
 | `VORTEX_WA_PHONE_ID`, `VORTEX_WA_TOKEN` | WhatsApp Cloud API (outbound messages and alerts). |
 | `VORTEX_WA_APP_SECRET` | Verifies `X-Hub-Signature-256` on inbound messages. **Required for `/webhook/whatsapp` to be mounted**; without it, WhatsApp is outbound-only. |
 | `VORTEX_WA_VERIFY_TOKEN` | Token for Meta's webhook verification handshake. An empty token never matches. |

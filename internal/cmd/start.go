@@ -2611,12 +2611,7 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		if len(allowed) == 0 && tgChat != 0 {
 			allowed = []int64{tgChat} // the configured chat is implicitly allowed
 		}
-		bot, err := messaging.NewTelegramBot(messaging.TelegramConfig{
-			Token:       tgToken,
-			AllowedIDs:  allowed,
-			SecretToken: os.Getenv("VORTEX_TELEGRAM_SECRET"),
-		})
-		if err != nil {
+		if bot, err := newTelegramBot(tgToken, allowed, log); err != nil {
 			log.Warn("telegram disabled", "err", err)
 		} else {
 			m.telegram = bot
@@ -2783,6 +2778,26 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 			}
 		},
 	})
+}
+
+// newTelegramBot builds the bot with a webhook secret. The webhook refuses
+// updates without the secret Telegram echoes back; with none configured
+// (VORTEX_TELEGRAM_SECRET), it uses a random one per start. VORTEX registers
+// its own webhook (VORTEX_PUBLIC_URL) with it, so delivery keeps working,
+// and a forged POST to /webhook/telegram can't match it.
+func newTelegramBot(token string, allowed []int64, log *slog.Logger) (*messaging.TelegramBot, error) {
+	secret := os.Getenv("VORTEX_TELEGRAM_SECRET")
+	if secret == "" {
+		var err error
+		if secret, err = a2a.NewToken(); err != nil {
+			return nil, fmt.Errorf("generating a webhook secret: %w", err)
+		}
+		if os.Getenv("VORTEX_PUBLIC_URL") == "" && os.Getenv("VORTEX_TELEGRAM_POLLING") != "true" {
+			log.Warn("Telegram webhook secret not set: a webhook registered outside VORTEX will be refused; " +
+				"set VORTEX_TELEGRAM_SECRET to its secret_token, or use VORTEX_PUBLIC_URL / VORTEX_TELEGRAM_POLLING=true")
+		}
+	}
+	return messaging.NewTelegramBot(messaging.TelegramConfig{Token: token, AllowedIDs: allowed, SecretToken: secret})
 }
 
 // startTelegramDelivery starts polling mode (VORTEX_TELEGRAM_POLLING=true) or

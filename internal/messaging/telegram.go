@@ -313,7 +313,7 @@ func (t *TelegramBot) lastUpdateID(upd telegramUpdate) int64 { return upd.Update
 // webhook handler and polling mode.
 func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime, upd telegramUpdate) {
 	if upd.CallbackQuery != nil {
-		if !t.allowed(upd.CallbackQuery.From.ID) {
+		if _, ok := t.allowedCallback(upd.CallbackQuery); !ok {
 			return
 		}
 		// Clarify option buttons first, then the team (checkpoint) resolver,
@@ -338,6 +338,18 @@ func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime
 	t.dispatch(ctx, runtime, upd.Message.Chat.ID, upd.Message.Text)
 }
 
+// allowedCallback reports whether a button press may act, and the chat to
+// answer in. The person who pressed it must be allowed, in polling and
+// webhook mode alike: the webhook used to check only the chat, so in an
+// allowed group chat any member could press Approve on the agent's commands.
+func (t *TelegramBot) allowedCallback(cq *telegramCallback) (chatID int64, ok bool) {
+	chatID = cq.Message.Chat.ID
+	if chatID == 0 {
+		chatID = cq.From.ID
+	}
+	return chatID, t.allowed(cq.From.ID)
+}
+
 // telegramUpdate is the subset of a Telegram Update we consume.
 type telegramUpdate struct {
 	UpdateID int64 `json:"update_id"`
@@ -347,28 +359,32 @@ type telegramUpdate struct {
 		} `json:"chat"`
 		Text string `json:"text"`
 	} `json:"message"`
-	CallbackQuery *struct {
-		ID   string `json:"id"`
-		Data string `json:"data"`
-		From struct {
+	CallbackQuery *telegramCallback `json:"callback_query"`
+}
+
+// telegramCallback is an inline-button press.
+type telegramCallback struct {
+	ID   string `json:"id"`
+	Data string `json:"data"`
+	From struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Message struct {
+		Chat struct {
 			ID int64 `json:"id"`
-		} `json:"from"`
-		Message struct {
-			Chat struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-		} `json:"message"`
-	} `json:"callback_query"`
+		} `json:"chat"`
+	} `json:"message"`
 }
 
 // verifySecret checks the X-Telegram-Bot-Api-Secret-Token header against the
-// configured secret using a constant-time comparison. When no secret is
-// configured it returns false (fail closed) only if the header is present and
-// wrong; an unconfigured bot with no header is allowed for backward-compat in
-// tests, but production wiring always sets a secret.
+// configured secret using a constant-time comparison. With no secret it
+// refuses everything: the webhook is public and feeds the agent, and the
+// allow-list alone is no protection because anyone can forge an update that
+// claims an allowed chat ID (or an approval button press). It used to accept
+// every request when no secret was set, and production didn't always set one.
 func (t *TelegramBot) verifySecret(r *http.Request) bool {
 	if t.cfg.SecretToken == "" {
-		return true
+		return false
 	}
 	got := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
 	return subtle.ConstantTimeCompare([]byte(got), []byte(t.cfg.SecretToken)) == 1
@@ -392,8 +408,8 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 
 		switch {
 		case upd.CallbackQuery != nil:
-			chatID := upd.CallbackQuery.Message.Chat.ID
-			if !t.allowed(chatID) {
+			chatID, ok := t.allowedCallback(upd.CallbackQuery)
+			if !ok {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

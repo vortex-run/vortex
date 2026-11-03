@@ -179,11 +179,12 @@ func startStubRuntime(t *testing.T) *agents.Runtime {
 
 func TestTelegram_HandleWebhook_RoutesToRuntime(t *testing.T) {
 	f := newFakeTelegram(t)
-	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{99}})
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{99}, SecretToken: "s"})
 	rt := startStubRuntime(t)
 
 	body := `{"message":{"chat":{"id":99},"text":"hi there"}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram", strings.NewReader(body))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
 
@@ -198,11 +199,12 @@ func TestTelegram_HandleWebhook_RoutesToRuntime(t *testing.T) {
 
 func TestTelegram_HandleWebhook_RejectsUnknownChat(t *testing.T) {
 	f := newFakeTelegram(t)
-	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{1}})
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{1}, SecretToken: "s"})
 	rt := startStubRuntime(t)
 
 	body := `{"message":{"chat":{"id":999},"text":"hi"}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram", strings.NewReader(body))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
 
@@ -245,16 +247,54 @@ func TestTelegram_HandleWebhook_AcceptsGoodSecret(t *testing.T) {
 
 func TestTelegram_HandleWebhook_CallbackQuery(t *testing.T) {
 	f := newFakeTelegram(t)
-	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{55}})
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{55}, SecretToken: "s"})
 	rt := startStubRuntime(t)
 
 	body := `{"callback_query":{"id":"cb1","data":"approve:job","from":{"id":55},"message":{"chat":{"id":55}}}}`
 	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram", strings.NewReader(body))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("callback status = %d, want 200", rec.Code)
+	}
+}
+
+// TestTelegram_HandleWebhook_NoSecretRefuses: with no secret configured the
+// public webhook must refuse updates; it used to accept them, so anyone could
+// forge a message from an allowed chat ID.
+func TestTelegram_HandleWebhook_NoSecretRefuses(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{1}})
+	rt := startStubRuntime(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram",
+		strings.NewReader(`{"message":{"chat":{"id":1},"text":"rm -rf"}}`))
+	rec := httptest.NewRecorder()
+	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no-secret webhook status = %d, want 401", rec.Code)
+	}
+	if f.method() == "sendMessage" {
+		t.Error("forged update reached the agent")
+	}
+}
+
+// TestTelegram_HandleWebhook_CallbackNeedsAllowedUser: in an allowed group
+// chat, a member who isn't on the allow-list can't press approval buttons.
+func TestTelegram_HandleWebhook_CallbackNeedsAllowedUser(t *testing.T) {
+	f := newFakeTelegram(t)
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{-100}, SecretToken: "s"}) // a group
+	rt := startStubRuntime(t)
+
+	body := `{"callback_query":{"id":"cb1","data":"approve:job","from":{"id":777},"message":{"chat":{"id":-100}}}}`
+	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram", strings.NewReader(body))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
+	rec := httptest.NewRecorder()
+	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("unlisted user pressing a button in an allowed group: status = %d, want 403", rec.Code)
 	}
 }
 

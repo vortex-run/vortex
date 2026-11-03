@@ -42,7 +42,11 @@ Environment variables override the saved setup config.
 - **Polling** (for a box with no public URL): set
   `VORTEX_TELEGRAM_POLLING=true`.
 
-The webhook verifies Telegram's secret token and is per-IP rate limited.
+The webhook verifies Telegram's secret token and is per-IP rate limited. When
+VORTEX registers the webhook it generates the secret itself (or uses
+`VORTEX_TELEGRAM_SECRET`). If you register the webhook some other way, set
+`VORTEX_TELEGRAM_SECRET` to the `secret_token` you gave Telegram: without a
+matching secret every update is refused.
 
 ## 5. Use it
 

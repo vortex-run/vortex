@@ -112,7 +112,11 @@ dashboard by another name and its control-plane reads need a key.
 API key, per-IP rate limited) and pass messages to the agent runtime, so each
 authenticates the platform itself and fails closed:
 
-- **Telegram:** only chat IDs in `VORTEX_TELEGRAM_ALLOWED_IDS` are served;
+- **Telegram:** updates must carry the webhook secret (`VORTEX_TELEGRAM_SECRET`,
+  or a random one VORTEX generates and registers itself); without it the route
+  refuses everything, since a chat ID alone is easy to forge. Approval buttons
+  count only when the user who pressed them is allowed. Beyond that, only chat
+  IDs in `VORTEX_TELEGRAM_ALLOWED_IDS` are served;
   empty allows nobody.
 - **WhatsApp:** requests must carry a valid `X-Hub-Signature-256` for
   `VORTEX_WA_APP_SECRET`. The route isn't mounted without the secret. Only
