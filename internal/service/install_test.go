@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -124,5 +125,24 @@ func TestInstallUnknownDryRunNoFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "vortex.service")); err == nil {
 		t.Error("unknown dry-run should not write vortex.service")
+	}
+}
+
+// TestInstallUnknown_DarwinRefuses: on macOS, install must not drop Linux
+// systemd/OpenRC files into the working directory.
+func TestInstallUnknown_DarwinRefuses(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	err := Install(InstallConfig{ExecPath: "/usr/local/bin/vortex", ConfigPath: "/etc/vortex/vortex.cue", InitSystem: InitUnknown})
+	if !errors.Is(err, errDarwinUnsupported) {
+		t.Fatalf("Install on darwin = %v, want errDarwinUnsupported", err)
+	}
+	for _, f := range []string{"vortex.service", "vortex-openrc"} {
+		if _, serr := os.Stat(filepath.Join(dir, f)); serr == nil {
+			t.Errorf("wrote %s on macOS", f)
+		}
 	}
 }

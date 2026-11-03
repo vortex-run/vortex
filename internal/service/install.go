@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -97,6 +98,11 @@ func ensureServiceHome() error {
 }
 
 func lookPathOK(name string) bool { _, err := lookPath(name); return err == nil }
+
+// errDarwinUnsupported is returned by Install on macOS, which has no launchd
+// support yet.
+var errDarwinUnsupported = errors.New("vortex service install doesn't support macOS (launchd) yet; " +
+	"run `vortex start --config <path>` in a terminal, or under your own launchd job")
 
 // DetectInitSystem inspects the running OS and returns its init system.
 func DetectInitSystem() InitSystem {
@@ -227,6 +233,11 @@ func installWindows(cfg InstallConfig) error {
 
 func installUnknown(cfg InstallConfig) error {
 	out := cfg.out()
+	if runtime.GOOS == "darwin" {
+		// macOS uses launchd; writing systemd and OpenRC files here (what the
+		// generic fallback below does) only left Linux files nobody can use.
+		return errDarwinUnsupported
+	}
 	unit := GenerateSystemd(DefaultSystemdConfig(cfg.ExecPath, cfg.ConfigPath))
 	script := GenerateOpenRC(DefaultOpenRCConfig(cfg.ExecPath, cfg.ConfigPath))
 	if cfg.DryRun {

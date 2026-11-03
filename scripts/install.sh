@@ -332,6 +332,14 @@ EOF
     log "existing config preserved at ${CONFIG_DIR}/vortex.cue"
   fi
 
+  # macOS has no `vortex service install` (launchd) yet; say how to run it
+  # instead of suggesting systemctl.
+  local start_hint="sudo vortex service install && sudo systemctl start vortex   (systemd; OpenRC: rc-service vortex start)"
+  if [ "$os" = "darwin" ]; then
+    NO_SERVICE=1
+    start_hint="vortex start --config ${CONFIG_DIR}/vortex.cue   (no launchd service yet)"
+  fi
+
   if [ "$NO_SERVICE" -eq 0 ]; then
     log "previewing service installation (dry-run)"
     "$target_bin" service install \
@@ -342,7 +350,7 @@ EOF
 
 VORTEX ${version} installed to ${target_bin}
 Config: ${CONFIG_DIR}/vortex.cue — edit this file before starting
-Start:  sudo systemctl start vortex   (or appropriate for your init system)
+Start:  ${start_hint}
 Docs:   https://docs.vortex.run
 EOF
 }
