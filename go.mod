@@ -2,7 +2,7 @@ module github.com/vortex-run/vortex
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	cuelang.org/go v0.17.1
