@@ -37,6 +37,9 @@ const apiBase = "http://127.0.0.1:9090"
 // package). The binary is removed when the test finishes.
 func BuildBinary(t *testing.T) string {
 	t.Helper()
+	if sharedBinary != "" {
+		return sharedBinary
+	}
 	dir := t.TempDir()
 	name := "vortex"
 	if runtime.GOOS == "windows" {
@@ -54,6 +57,16 @@ func BuildBinary(t *testing.T) string {
 	t.Cleanup(func() { _ = os.Remove(bin) })
 	return bin
 }
+
+// sharedBinary, when set, is returned by BuildBinary instead of compiling a
+// fresh binary for every test.
+var sharedBinary string
+
+// SetSharedBinary makes BuildBinary return bin (built once, typically by
+// BuildBinaryInto from TestMain). The integration suite calls BuildBinary in
+// about a hundred tests, and a full link each time cost minutes per test on
+// slow filesystems.
+func SetSharedBinary(bin string) { sharedBinary = bin }
 
 // BuildBinaryInto compiles the vortex binary into destDir and returns its path,
 // WITHOUT registering any per-test cleanup. Callers own destDir's lifetime —

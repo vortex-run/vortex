@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	netBin = bin
+	testutil.SetSharedBinary(bin) // every BuildBinary(t) in this package reuses it
 
 	code := m.Run()
 	_ = os.RemoveAll(dir)
