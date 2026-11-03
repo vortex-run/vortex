@@ -70,6 +70,13 @@ func NewRootCommand() *cobra.Command {
 		Long:          "VORTEX is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// --version must work: self-update on Unix verifies the downloaded
+		// binary by running it with --version, including the update code in
+		// already-released binaries (v0.3.0 and earlier). Without the flag
+		// the new binary exits 1 ("unknown flag") and every update from those
+		// versions rolls back. (v0.3.0 itself exited 0 on unknown flags, which
+		// is the only reason its own check ever passed.)
+		Version: version,
 		// Initialise the logger from the global flags before any subcommand
 		// (or the root RunE) executes.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
