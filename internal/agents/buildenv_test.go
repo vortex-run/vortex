@@ -49,3 +49,22 @@ func TestScrubbedEnv_Unchanged(t *testing.T) {
 		t.Error("scrubbedEnv leaks a provider key")
 	}
 }
+
+// git hooks run with the agent's git environment: SSH agent and identity
+// pass through, secrets don't.
+func TestGitEnv_KeepsGitAccessDropsSecrets(t *testing.T) {
+	t.Setenv("VORTEX_ANTHROPIC_KEY", "sk-secret")
+	t.Setenv("VORTEX_MASTER_KEY", "deadbeef")
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+	t.Setenv("GIT_AUTHOR_NAME", "Dev")
+	env := envMap(gitEnv())
+	if _, ok := env["VORTEX_ANTHROPIC_KEY"]; ok {
+		t.Error("gitEnv leaks a provider key")
+	}
+	if _, ok := env["VORTEX_MASTER_KEY"]; ok {
+		t.Error("gitEnv leaks the master key")
+	}
+	if env["SSH_AUTH_SOCK"] != "/tmp/agent.sock" || env["GIT_AUTHOR_NAME"] != "Dev" {
+		t.Errorf("gitEnv dropped git settings: %v", env)
+	}
+}

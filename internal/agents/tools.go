@@ -632,6 +632,22 @@ var buildEnvVars = map[string]bool{
 	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
 }
 
+// gitEnvVars are the extra variables git needs on top of safeEnvVars: SSH
+// agent access, identity overrides, how to reach remotes, and where its
+// config lives (HOME is already allowed, so ~/.gitconfig works).
+var gitEnvVars = map[string]bool{
+	"SSH_AUTH_SOCK": true, "GIT_SSH": true, "GIT_SSH_COMMAND": true,
+	"GIT_ASKPASS": true, "SSH_ASKPASS": true, "XDG_CONFIG_HOME": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+}
+
+// gitEnv is the environment for agent git commands. git runs repository
+// hooks (pre-commit, commit-msg, …), which can come from the project itself
+// (husky installs them from package.json), so they get no secrets either.
+func gitEnv() []string { return filterEnv(safeEnvVars, gitEnvVars) }
+
 // scrubbedEnv returns the minimal environment for agent-executed commands:
 // only the allowlisted variables above survive, by exact (case-insensitive)
 // name match.

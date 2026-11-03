@@ -25,6 +25,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = gitEnv() // hooks run with it: no provider keys or tokens
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
