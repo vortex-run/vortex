@@ -430,11 +430,31 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			}
 			switch outcome.Status {
 			case a2a.CheckpointEdited:
+				// An edit that did not land must stop the run: the user replaced
+				// this content at review, so building on the unedited file would
+				// go ahead with work they rejected, while the next agent's context
+				// claimed the edit was there.
+				var applied []a2a.FileEdit
+				var failed []string
 				for _, e := range outcome.EditedFiles {
-					_, _ = t.runToolWrite(ctx, e.Path, e.NewContent)
+					if _, werr := t.runToolWrite(ctx, e.Path, e.NewContent); werr != nil {
+						failed = append(failed, e.Path+": "+werr.Error())
+						continue
+					}
+					applied = append(applied, e)
 					fileSet[e.Path] = true
 				}
-				prevContext += "\n" + a2a.FileEditsAsContext(outcome.EditedFiles)
+				if len(failed) > 0 {
+					res.Success = false
+					res.FailedAt = step.AgentRole + " (checkpoint edit not applied)"
+					res.Error = "could not apply user edits: " + strings.Join(failed, "; ")
+					res.Duration = time.Since(start)
+					res.Files = mapKeys(fileSet)
+					progress(fmt.Sprintf("[%s] ✗ %d of %d edited file(s) could not be written", step.AgentRole, len(failed), len(outcome.EditedFiles)))
+					t.notify("✗ VORTEX team task failed", res.Summary())
+					return res, nil
+				}
+				prevContext += "\n" + a2a.FileEditsAsContext(applied)
 				progress(fmt.Sprintf("[%s] ✎ EDITED by user — %d file(s)", step.AgentRole, len(outcome.EditedFiles)))
 			default:
 				progress(fmt.Sprintf("[%s] ✓ APPROVED by user", step.AgentRole))
