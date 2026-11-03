@@ -57,7 +57,9 @@ func FuzzSlackVerifySignature(f *testing.F) {
 	})
 }
 
-func slackVerify(b *SlackBot, body []byte, ts, sig string) bool { return b.verifySignature(body, ts, sig) }
+func slackVerify(b *SlackBot, body []byte, ts, sig string) bool {
+	return b.verifySignature(body, ts, sig)
+}
 
 // NormalizeWhatsAppNumber keeps only ASCII digits and is idempotent.
 func FuzzNormalizeWhatsAppNumber(f *testing.F) {
