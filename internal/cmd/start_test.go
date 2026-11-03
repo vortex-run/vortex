@@ -28,7 +28,17 @@ func TestStartPidfileFlagDefault(t *testing.T) {
 func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "vortex.cue")
-	if err := os.WriteFile(cfgPath, []byte(checkValidConfig), 0o600); err != nil {
+	// A local-only config: the internal CA (Let's Encrypt would start the ACME
+	// challenge server on :80, all interfaces), no routes (no public edge
+	// listeners), and a single node (no gossip toward peer IPs). Anything that
+	// binds a non-loopback interface makes Windows Firewall prompt for the
+	// ephemeral cmd.test.exe on every run, and this test only checks a clean
+	// start→shutdown sequence.
+	const localOnlyConfig = `
+cluster: {name: "start-test"}
+tls: {provider: "internal", acme_email: "test@example.com"}
+`
+	if err := os.WriteFile(cfgPath, []byte(localOnlyConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	pidPath := filepath.Join(dir, "vortex.pid")
