@@ -21,14 +21,27 @@ func discardLogger() *slog.Logger {
 // returning "127.0.0.1:<port>" suitable for a shared dual-stack Addr.
 func freePort(t *testing.T) string {
 	t.Helper()
-	// Reserve via TCP (gives us a concrete port), then release.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// The dual stack binds the port for both TCP and QUIC (UDP). A port free
+	// for TCP can still be refused for UDP (Windows reserves UDP ranges, which
+	// made TestDualStack_StartsBoth flaky), so probe both and retry.
+	var lastErr error
+	for i := 0; i < 50; i++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		_ = ln.Close()
+		uc, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = uc.Close()
+		return addr
 	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
+	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)
+	return ""
 }
 
 func newDualStack(t *testing.T, addr string) *DualStack {
