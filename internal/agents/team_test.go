@@ -2,9 +2,11 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vortex-run/vortex/internal/a2a"
 )
@@ -183,6 +185,89 @@ func TestTeam_ExecuteHappyPath(t *testing.T) {
 	joined := strings.Join(updates, "\n")
 	if !strings.Contains(joined, "[coder]") || !strings.Contains(joined, "[tester]") || !strings.Contains(joined, "[reviewer]") {
 		t.Errorf("not all agents ran:\n%s", joined)
+	}
+}
+
+// refusingWriteTool is a write_file tool that rejects one path, as the real
+// tool does for paths outside the workspace.
+type refusingWriteTool struct {
+	memTool
+	refuse string
+}
+
+func (t *refusingWriteTool) Execute(ctx context.Context, params map[string]any) (any, error) {
+	if p, _ := params["path"].(string); p == t.refuse {
+		return nil, errors.New("path escapes workspace")
+	}
+	return t.memTool.Execute(ctx, params)
+}
+
+// nextCheckpoint waits for the next pending checkpoint in session s.
+func nextCheckpoint(t *testing.T, m *a2a.CheckpointManager, s string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if p := m.Pending(s); len(p) > 0 {
+			return p[0].ID
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("no checkpoint appeared")
+	return ""
+}
+
+func TestTeam_CheckpointEditWriteFailureStopsRun(t *testing.T) {
+	written := map[string]string{}
+	reg := NewToolRegistry()
+	for _, tool := range []Tool{
+		&memTool{name: "read_file", written: written},
+		&memTool{name: "list_directory", written: written},
+		&memTool{name: "run_terminal", written: written, output: "--- PASS: TestX (0.00s)\nok"},
+		&refusingWriteTool{memTool: memTool{name: "write_file", written: written}, refuse: "../outside.py"},
+	} {
+		if err := reg.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cps := a2a.NewCheckpointManager(nil, 0)
+	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
+	team := NewAgentTeam(TeamConfig{WorkDir: t.TempDir(), Checkpoints: cps}, gw, reg)
+
+	plan := &TeamPlan{Goal: "build hello", SessionID: "s1", Steps: defaultSteps("build hello")}
+	// Cancelled at the end so a regression that sails past the failed edit
+	// to the next checkpoint fails the test instead of leaking a blocked run.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan *TeamResult, 1)
+	go func() {
+		res, _ := team.Execute(ctx, plan, nil)
+		done <- res
+	}()
+
+	id := nextCheckpoint(t, cps, "s1") // after the coder step
+	if err := cps.Edit(id, []a2a.FileEdit{
+		{Path: "hello.py", NewContent: "print('edited')"},
+		{Path: "../outside.py", NewContent: "x"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case res := <-done:
+		if res.Success {
+			t.Fatal("run succeeded although an edit could not be written")
+		}
+		if !strings.Contains(res.FailedAt, "checkpoint edit not applied") || !strings.Contains(res.Error, "../outside.py") {
+			t.Errorf("FailedAt=%q Error=%q, want the unapplied edit named", res.FailedAt, res.Error)
+		}
+		if written["hello.py"] != "print('edited')" {
+			t.Errorf("applied edit missing: hello.py = %q", written["hello.py"])
+		}
+		if plan.Steps[1].Status == "done" {
+			t.Error("tester ran after a failed checkpoint edit")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Execute did not return (did it continue to the next checkpoint?)")
 	}
 }
 
