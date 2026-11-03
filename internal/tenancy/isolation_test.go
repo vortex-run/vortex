@@ -2,6 +2,7 @@ package tenancy
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -92,6 +93,41 @@ func TestIsolation_SecretsCannotCrossNamespaces(t *testing.T) {
 	}
 	if ok, _ := b.Exists("KEY"); ok {
 		t.Error("namespace b Exists should be false for a's key")
+	}
+}
+
+// TestIsolation_NoCollisionAcrossExtendedIDs: "--" in an ID sanitizes to the
+// separator, so namespace "a" secret "b__x" and namespace "a--b" secret "x"
+// used to share the key "a__b__x", and a's List showed b's secrets.
+func TestIsolation_NoCollisionAcrossExtendedIDs(t *testing.T) {
+	store := newSecretStore(t)
+	a := NewIsolatedSecretStore(store, "a")
+	ab := NewIsolatedSecretStore(store, "a--b")
+	aDash := NewIsolatedSecretStore(store, "a-")
+
+	if err := ab.Set("x", "ab-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if err := aDash.Set("b", "a-dash-secret"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"b__x", "_b", "__", "x__"} {
+		if _, err := a.Get(name); !errors.Is(err, ErrNamespacedSecretName) {
+			t.Errorf("a.Get(%q) err = %v, want ErrNamespacedSecretName", name, err)
+		}
+		if err := a.Set(name, "v"); !errors.Is(err, ErrNamespacedSecretName) {
+			t.Errorf("a.Set(%q) err = %v, want ErrNamespacedSecretName", name, err)
+		}
+	}
+	names, err := a.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 0 {
+		t.Errorf("namespace a lists %v, want none (they belong to a--b and a-)", names)
+	}
+	if got, _ := ab.List(); len(got) != 1 || got[0] != "x" {
+		t.Errorf("a--b lists %v, want [x]", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package tenancy
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -52,24 +53,60 @@ func NewIsolatedSecretStore(store *secrets.SecretStore, nsID string) *IsolatedSe
 	}
 }
 
+// ErrNamespacedSecretName rejects secret names that could cross a namespace
+// boundary.
+var ErrNamespacedSecretName = errors.New(`tenancy: a namespaced secret name may not contain "__" or start with "_"`)
+
+// key returns the store key for name. Sanitizing maps "--" in a namespace ID
+// to the separator itself, so without a rule on names, namespace "a" secret
+// "b__x" and namespace "a--b" secret "x" were both "a__b__x". With names
+// barred from containing "__" or starting with "_", the last "__" in a key
+// is always the separator, so every key decodes to one namespace and name.
+func (s *IsolatedSecretStore) key(name string) (string, error) {
+	if !validNamespacedName(name) {
+		return "", ErrNamespacedSecretName
+	}
+	return s.prefix + name, nil
+}
+
+func validNamespacedName(name string) bool {
+	return !strings.Contains(name, secretKeySeparator) && !strings.HasPrefix(name, "_")
+}
+
 // Set stores value under the namespace-prefixed key.
 func (s *IsolatedSecretStore) Set(name, value string) error {
-	return s.store.Set(s.prefix+name, value)
+	k, err := s.key(name)
+	if err != nil {
+		return err
+	}
+	return s.store.Set(k, value)
 }
 
 // Get retrieves the namespace-prefixed key.
 func (s *IsolatedSecretStore) Get(name string) (string, error) {
-	return s.store.Get(s.prefix + name)
+	k, err := s.key(name)
+	if err != nil {
+		return "", err
+	}
+	return s.store.Get(k)
 }
 
 // Delete removes the namespace-prefixed key.
 func (s *IsolatedSecretStore) Delete(name string) error {
-	return s.store.Delete(s.prefix + name)
+	k, err := s.key(name)
+	if err != nil {
+		return err
+	}
+	return s.store.Delete(k)
 }
 
 // Exists reports whether the namespace-prefixed key is set.
 func (s *IsolatedSecretStore) Exists(name string) (bool, error) {
-	return s.store.Exists(s.prefix + name)
+	k, err := s.key(name)
+	if err != nil {
+		return false, err
+	}
+	return s.store.Exists(k)
 }
 
 // List returns this namespace's secret names with the prefix stripped, so a
@@ -81,8 +118,10 @@ func (s *IsolatedSecretStore) List() ([]string, error) {
 	}
 	var out []string
 	for _, k := range all {
-		if strings.HasPrefix(k, s.prefix) {
-			out = append(out, strings.TrimPrefix(k, s.prefix))
+		// A remainder that isn't a valid name belongs to a namespace whose
+		// ID extends this one ("a" vs "a--b").
+		if name, ok := strings.CutPrefix(k, s.prefix); ok && validNamespacedName(name) {
+			out = append(out, name)
 		}
 	}
 	return out, nil
