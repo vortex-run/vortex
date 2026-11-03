@@ -716,11 +716,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// trusted like the rest of the control plane; remote authenticated callers
 	// read it from /api/status instead. When no auth is wired (tests/legacy)
 	// the field is populated as before so existing behaviour is preserved.
+	// Routes follow the same rule: /health is public, and the route list
+	// (names, listen addresses, live connection counts) maps the deployment
+	// for anyone on the internet. Not authenticating a key here is deliberate:
+	// a bcrypt check per request on a public endpoint is a CPU lever.
 	if s.authMW == nil || (s.trustLoopback && loopbackTrusted(r)) {
 		resp.ClusterName = cfg.Cluster.Name
-	}
-	if s.routeStats != nil {
-		resp.Routes = s.routeStats()
+		if s.routeStats != nil {
+			resp.Routes = s.routeStats()
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {

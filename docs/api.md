@@ -31,8 +31,11 @@ GET /ready
 → 200 {"ready":true}   or   503 {"ready":false,"reason":"agent queue saturated (…)"}
 ```
 
-`cluster_name` is included in `/health` only for trusted (loopback/authed)
-callers.
+`cluster_name` and `routes` (per-route name, protocol, listen address and
+active connections) are included in `/health` only for trusted loopback
+callers (the CLI, the local dashboard and TUI). Remote callers get status,
+version, config hash and uptime; route counts are in the authenticated
+`GET /api/status`.
 
 ## Status & metrics
 
