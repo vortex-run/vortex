@@ -5,10 +5,54 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
+// useBackupRoot points undo backups at a per-test directory.
+func useBackupRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	prev := backupRoot
+	backupRoot = func() (string, error) { return root, nil }
+	t.Cleanup(func() { backupRoot = prev })
+	return root
+}
+
+// TestBackupDir_PrivateAndConfined: a session ID can't climb out of the
+// per-user backup root, and with no private root backups are disabled
+// rather than falling back to the shared temp dir.
+func TestBackupDir_PrivateAndConfined(t *testing.T) {
+	root := useBackupRoot(t)
+	sessions := []string{"sess-1", "", "../../etc", `..\..\x`, "a/b", strings.Repeat("x", 200)}
+	for _, session := range sessions {
+		dir := backupDir(session)
+		rel, err := filepath.Rel(root, dir)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") || strings.ContainsAny(rel, `/\`) {
+			t.Errorf("backupDir(%q) = %q, want exactly one level under %q", session, dir, root)
+		}
+	}
+
+	backupRoot = func() (string, error) { return "", os.ErrNotExist }
+	if dir := backupDir("x"); dir != "" {
+		t.Errorf("with no private root, backupDir = %q, want empty (backups disabled)", dir)
+	}
+}
+
+// TestBackupRoot_NotSharedTemp: the default root is the per-user cache dir.
+func TestBackupRoot_NotSharedTemp(t *testing.T) {
+	root, err := defaultBackupRoot()
+	if err != nil {
+		t.Skipf("no user cache dir here: %v", err)
+	}
+	cache, _ := os.UserCacheDir()
+	if !strings.HasPrefix(root, cache) {
+		t.Errorf("backupRoot = %q, want under the user cache dir %q", root, cache)
+	}
+}
+
 func TestUndo_BackupAndRestore(t *testing.T) {
+	useBackupRoot(t)
 	dir := t.TempDir()
 	cfg := LocalFSConfig{Root: dir}
 	target := filepath.Join(dir, "f.txt")
@@ -46,6 +90,7 @@ func TestUndo_BackupAndRestore(t *testing.T) {
 }
 
 func TestUndo_NothingToUndo(t *testing.T) {
+	useBackupRoot(t)
 	_, err := UndoTool{cfg: LocalFSConfig{}, RequireApproval: false}.Execute(context.Background(),
 		map[string]any{"session_id": "empty-sess"})
 	if err == nil {
@@ -54,6 +99,7 @@ func TestUndo_NothingToUndo(t *testing.T) {
 }
 
 func TestBackup_KeepsLastFive(t *testing.T) {
+	useBackupRoot(t)
 	dir := t.TempDir()
 	target := filepath.Join(dir, "f.txt")
 	session := "prune-sess"
@@ -67,8 +113,6 @@ func TestBackup_KeepsLastFive(t *testing.T) {
 	if len(baks) > maxBackupsPerSession {
 		t.Errorf("kept %d backups, want <= %d", len(baks), maxBackupsPerSession)
 	}
-	// Cleanup the temp backups dir.
-	_ = os.RemoveAll(backupDir(session))
 }
 
 func TestUndo_RegisteredAndApprovalGated(t *testing.T) {

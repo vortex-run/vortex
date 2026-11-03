@@ -8,14 +8,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
 // Undo support: before write_file overwrites an existing file, a backup is
-// written under os.TempDir()/vortex-backups/<sessionID>/, keeping the last 5.
-// The undo tool restores the most recent backup (approval-gated).
+// written under <user cache dir>/vortex/backups/<session>/, keeping the last
+// 5. The undo tool restores the most recent backup (approval-gated).
+//
+// The backups used to live in os.TempDir()/vortex-backups, a fixed path in a
+// directory every local user can write on Linux and macOS: another user could
+// create it first and plant a backup whose metadata names any file the
+// VORTEX user can write (an undo then overwrites it), or symlink it elsewhere.
+// The session ID was also used as a path element unchecked ("../.." escaped).
 
 // maxBackupsPerSession bounds retained backups per session.
 const maxBackupsPerSession = 5
@@ -26,12 +33,36 @@ type backupMeta struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// backupDir returns the backup directory for a session.
+// backupRoot returns the per-user directory that holds every session's
+// backups. A variable so tests can point it at a temp dir.
+var backupRoot = defaultBackupRoot
+
+// defaultBackupRoot is <user cache dir>/vortex/backups.
+func defaultBackupRoot() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "vortex", "backups"), nil
+}
+
+// safeBackupSession matches session IDs usable as a directory name as-is.
+var safeBackupSession = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+// backupDir returns the backup directory for a session, or "" when there is
+// no private place to keep backups (then nothing is backed up or undone).
 func backupDir(session string) string {
 	if session == "" {
 		session = "default"
 	}
-	return filepath.Join(os.TempDir(), "vortex-backups", session)
+	if !safeBackupSession.MatchString(session) {
+		session = "s-" + hashPath(session)
+	}
+	root, err := backupRoot()
+	if err != nil || root == "" {
+		return ""
+	}
+	return filepath.Join(root, session)
 }
 
 // backupBeforeWrite saves a copy of path (if it exists) under the session's
@@ -43,6 +74,9 @@ func backupBeforeWrite(session, path string) {
 		return // file doesn't exist yet → nothing to back up
 	}
 	dir := backupDir(session)
+	if dir == "" {
+		return
+	}
 	if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 		return
 	}
@@ -79,6 +113,9 @@ type backupEntry struct {
 
 // listBackups returns backups in a dir, newest first.
 func listBackups(dir string) []backupEntry {
+	if dir == "" {
+		return nil
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
