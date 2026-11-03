@@ -22,6 +22,9 @@ INSTALL_DIR="${VORTEX_INSTALL_DIR:-/usr/local/bin}"
 CONFIG_DIR="${VORTEX_CONFIG_DIR:-/etc/vortex}"
 BIN_NAME="vortex"
 DOCS_URL="https://docs.vortex.run/install"
+# Ed25519 key that signs each release's checksums.txt. Must equal
+# ReleaseSigningPublicKey in internal/update/signature.go (a Go test checks).
+RELEASE_PUBKEY="YdFLEJG5dwdsibXFlQjjfpHIws49P1xPWtTxH1LTdhk="
 
 # Flags (resolved in parse_args).
 FLAG_VERSION=""
@@ -188,6 +191,55 @@ sudo_for() {
   echo sudo
 }
 
+# --- verify the release signature ------------------------------------------
+# checksums.txt comes from the same place as the archive, so the SHA-256
+# check alone catches corruption but not a tampered release. Verify the
+# Ed25519 signature over checksums.txt (as `vortex self-update` does) before
+# trusting any line in it. This needs OpenSSL 3 (pkeyutl -rawin): present on
+# current Debian, Ubuntu, Fedora and Alpine, not on macOS (LibreSSL).
+
+# unverified_signature warns, or refuses when VORTEX_REQUIRE_SIGNATURE=1.
+unverified_signature() {
+  if [ "${VORTEX_REQUIRE_SIGNATURE:-0}" = "1" ]; then
+    err "$1; refusing to install (VORTEX_REQUIRE_SIGNATURE=1)"
+  fi
+  warn "$1; the checksum is verified but the release signature is NOT"
+}
+
+# openssl_can_verify_ed25519 reports whether openssl can check a raw Ed25519
+# signature (OpenSSL 3; LibreSSL and OpenSSL 1.1 can't).
+openssl_can_verify_ed25519() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  case "$(openssl version 2>/dev/null)" in
+    OpenSSL\ [3-9]*) return 0 ;;
+  esac
+  return 1
+}
+
+# verify_signature <checksums.txt> <checksums.txt.sig>; the .sig may be absent.
+verify_signature() {
+  local sums="$1" sig="$2" dir
+  if [ ! -s "$sig" ]; then
+    unverified_signature "this release has no checksums.txt.sig (releases up to v0.3.0 are unsigned)"
+    return 0
+  fi
+  if ! openssl_can_verify_ed25519; then
+    unverified_signature "OpenSSL 3 is not available to check the release signature"
+    return 0
+  fi
+  dir="$(dirname "$sums")"
+  # SubjectPublicKeyInfo DER prefix for an Ed25519 key, then the raw 32 bytes.
+  { printf '\060\052\060\005\006\003\053\145\160\003\041\000'
+    printf '%s' "$RELEASE_PUBKEY" | openssl base64 -d -A
+  } > "${dir}/release-pub.der"
+  tr -d '\r\n' < "$sig" | openssl base64 -d -A > "${dir}/checksums.sig.bin"
+  if ! openssl pkeyutl -verify -pubin -keyform DER -inkey "${dir}/release-pub.der" \
+      -rawin -in "$sums" -sigfile "${dir}/checksums.sig.bin" >/dev/null 2>&1; then
+    err "release signature does not verify: checksums.txt was not signed by the VORTEX release key. Do not install this download."
+  fi
+  log "release signature verified"
+}
+
 main() {
   parse_args "$@"
 
@@ -241,6 +293,8 @@ EOF
   log "downloading ${url}"
   download_file "$url" "$tarball" || err "failed to download ${base}"
   download_quiet "$sumurl" "${workdir}/checksums.txt" || err "failed to download checksums.txt"
+  download_quiet "${sumurl}.sig" "${workdir}/checksums.txt.sig" 2>/dev/null || rm -f "${workdir}/checksums.txt.sig"
+  verify_signature "${workdir}/checksums.txt" "${workdir}/checksums.txt.sig"
   verify_sha256 "$tarball" "${workdir}/checksums.txt" "$base"
 
   log "extracting"
@@ -293,4 +347,5 @@ Docs:   https://docs.vortex.run
 EOF
 }
 
-main "$@"
+# VORTEX_INSTALL_LIB=1 loads the functions without running (for tests).
+[ "${VORTEX_INSTALL_LIB:-}" = "1" ] || main "$@"

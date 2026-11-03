@@ -70,6 +70,11 @@ jobs:
         # push/PR, not only at release time (audit M7). Bounded via Taskfile.
         run: task test:race
 
+      - name: Test (installer signature check)
+        # install.sh verifies checksums.txt.sig with OpenSSL 3; exercise good,
+        # tampered, wrong-key, unsigned and no-openssl cases with a throwaway key.
+        run: sh scripts/install_sig_test.sh
+
       - name: Test (release build tag)
         # Shipped binaries are built with `-tags=release`, which makes the
         # agent command-approval gate unwaivable (audit I6). That code path

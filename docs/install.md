@@ -13,7 +13,21 @@ The installer detects your OS/arch, downloads the matching release, verifies
 its SHA-256 against `checksums.txt`, installs the binary to
 `/usr/local/bin/vortex`, and seeds an example config at
 `/etc/vortex/vortex.cue`. Re-running it upgrades in place and never clobbers an
-existing config.
+existing config. It runs under any POSIX `sh` (dash, BusyBox ash, bash) and
+only uses `sudo` for directories you can't write.
+
+**Release signature.** A checksum only proves the download matches
+`checksums.txt`, which comes from the same place. The installer also verifies
+the release's Ed25519 signature over `checksums.txt` (as `vortex self-update`
+does) and refuses to install if it doesn't match. That check needs OpenSSL 3,
+which current Debian, Ubuntu, Fedora and Alpine have; macOS (LibreSSL) and
+older systems don't, and releases up to v0.3.0 aren't signed. In those cases
+the installer warns and continues. Set `VORTEX_REQUIRE_SIGNATURE=1` to refuse
+instead:
+
+```bash
+curl -fsSL https://vortex.run/install | VORTEX_REQUIRE_SIGNATURE=1 sh
+```
 
 Options:
 
