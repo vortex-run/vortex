@@ -29,6 +29,24 @@ depends on timing; it surfaced as a 25-minute test timeout on later PRs. It neve
 reached a release: the newest is v0.3.0, published before the sprint.
 `TestRun_FastRetriesDoNotHang` reproduces it.
 
+**N6 — Non-admin roles do not restrict anything.** *Open; needs a decision on
+the role-to-route mapping.* An admin can issue keys with the `operator`,
+`viewer`, or `readonly` roles, and `docs/security.md` said these roles gate
+endpoints. In the code only routes wrapped in `protectedAdmin` (`/api/keys`)
+check a role. Every route wrapped in `requireAPIKey` accepts any valid key,
+whatever its roles. That includes agent submit, orchestration, Forge, `/v1/*`,
+direct chat, and checkpoint approve, reject, and edit. Checkpoint edit writes files
+through the `write_file` tool. Verified on a local build on 2026-11-03: a
+`viewer` key got 403 from `GET /api/keys` but passed authentication on
+`POST /api/agents/submit` and `POST /api/checkpoints/{id}/approve`, which
+returned handler errors, not 401 or 403.
+
+The impact is limited to deployments that hand out non-admin keys expecting
+them to be read-only; the auto-created TUI key is unaffected. A fix has to
+choose which roles may run agents and write files, and it will cut off any
+existing non-admin keys that rely on the current behavior. `docs/security.md`
+now describes the actual behavior.
+
 ---
 
 ## Re-audit addendum — 2026-07-22 (post-remediation status pass)
