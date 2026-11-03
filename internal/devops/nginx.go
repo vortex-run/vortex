@@ -51,7 +51,13 @@ func (n *NginxManager) Reload(ctx context.Context) error {
 // AddSite writes a reverse-proxy site config, enables it, and reloads nginx
 // (approval-gated).
 func (n *NginxManager) AddSite(ctx context.Context, domain, upstream string, sslEnabled bool) error {
-	if !n.server.approve("add nginx site " + domain) {
+	if err := validDomain(domain); err != nil {
+		return err
+	}
+	if err := validUpstream(upstream); err != nil {
+		return err
+	}
+	if !n.server.approve("add nginx site " + domain + " → " + upstream) {
 		return fmt.Errorf("devops: add site not approved")
 	}
 	if n.writer == nil {
@@ -77,6 +83,9 @@ func (n *NginxManager) AddSite(ctx context.Context, domain, upstream string, ssl
 
 // EnableSSL provisions a Let's Encrypt cert for domain via certbot (approval).
 func (n *NginxManager) EnableSSL(ctx context.Context, domain, email string) error {
+	if err := validDomain(domain); err != nil {
+		return err
+	}
 	if !n.server.approve("enable SSL for " + domain) {
 		return fmt.Errorf("devops: enable SSL not approved")
 	}
@@ -105,6 +114,9 @@ func (n *NginxManager) ListSites(ctx context.Context) ([]string, error) {
 
 // RemoveSite disables a site config and reloads nginx (approval-gated).
 func (n *NginxManager) RemoveSite(ctx context.Context, domain string) error {
+	if err := validDomain(domain); err != nil {
+		return err
+	}
 	if !n.server.approve("remove nginx site " + domain) {
 		return fmt.Errorf("devops: remove site not approved")
 	}

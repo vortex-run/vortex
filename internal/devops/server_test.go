@@ -129,7 +129,7 @@ func TestServer_InstallPackageUsesAptOnUbuntu(t *testing.T) {
 	if err := s.InstallPackage(context.Background(), "nginx"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.lastCmd, "apt-get install -y nginx") {
+	if !strings.Contains(r.lastCmd, "apt-get install -y 'nginx'") {
 		t.Errorf("install command = %q, want apt-get", r.lastCmd)
 	}
 }
@@ -140,7 +140,7 @@ func TestServer_InstallPackageUsesYumOnCentos(t *testing.T) {
 	s.OS = "centos"
 	s.SetApprover(approveAll)
 	_ = s.InstallPackage(context.Background(), "httpd")
-	if !strings.Contains(r.lastCmd, "yum install -y httpd") {
+	if !strings.Contains(r.lastCmd, "yum install -y 'httpd'") {
 		t.Errorf("install command = %q, want yum", r.lastCmd)
 	}
 }
