@@ -160,6 +160,11 @@ func TestIsReadOnlyQuery(t *testing.T) {
 		{"DELETE FROM t", false},
 		{"DROP TABLE t", false},
 		{"-- comment\nSELECT 1", true},
+		{"SELECT 1;", true},
+		{"SELECT 1; DROP TABLE t", false},
+		{"select 1;drop table t;", false},
+		{"SELECT 1 /* */; DELETE FROM t", false},
+		{"SELECT /* hidden */ 1", false},
 	}
 	for _, c := range cases {
 		if got := isReadOnlyQuery(c.q); got != c.ro {

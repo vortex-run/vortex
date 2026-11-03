@@ -132,7 +132,7 @@ observability: {
 | `VORTEX_SLACK_WEBHOOK` | Slack incoming webhook for outbound alerts. |
 | `VORTEX_SLACK_SIGNING_SECRET` | Verifies slash-command requests. **Required for `/webhook/slack` to be mounted**; without it, Slack is outbound-only. |
 | `VORTEX_STUDIO_WORKSPACE` | Enables Studio under `/studio/` (browser terminal, git panel, DB console, and code-server if installed) for this directory. Off when unset. Admin API keys only: the terminal is a shell that bypasses the approval gate. code-server listens on a Unix socket in a private directory (Windows: a random loopback port), never on a public or fixed port. |
-| `VORTEX_STUDIO_DB_READONLY` | `false` lets the Studio DB console run writes. Default read-only. |
+| `VORTEX_STUDIO_DB_READONLY` | Reserved. The Studio DB console lists mTLS TCP routes but ships no database driver, so it runs no queries yet; when one is added, this defaults to read-only. |
 | `VORTEX_SECRET_STORE`, `VORTEX_AUDIT_LOG`, `VORTEX_MTLS_STORE` | Relocate on-disk state. |
 
 Environment variables always take precedence over the saved `vortex setup`
