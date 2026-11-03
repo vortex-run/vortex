@@ -66,15 +66,31 @@ func quicRouter(t *testing.T, body string) *proxyhttp.Router {
 	return r
 }
 
+// reserveAddr returns a loopback address whose port is free for both TCP and
+// UDP: the dual-stack server binds TCP and QUIC (UDP) on the same port.
+// Windows reserves dynamic UDP ranges (netsh int ipv4 show excludedportrange
+// protocol=udp), so a TCP-free port can still refuse a UDP bind; probe both
+// and retry.
 func reserveAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	var lastErr error
+	for range 50 {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		u, err := net.ListenPacket("udp", addr)
+		_ = ln.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = u.Close()
+		return addr
 	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
+	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)
+	return ""
 }
 
 func TestQUIC_HTTP3Request(t *testing.T) {
