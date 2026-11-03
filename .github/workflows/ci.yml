@@ -93,6 +93,33 @@ jobs:
           path: coverage.out
           retention-days: 14
 
+  test-os:
+    # Releases ship macOS and Windows binaries, so test there too: path, line
+    # ending, permission, signal and terminal behaviour all differ by OS, and
+    # several bugs (e.g. reserved Windows UDP ports, /dev/null as a terminal)
+    # only showed on one of them. Unit + integration, without -race (no C
+    # toolchain is guaranteed on these runners).
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Test
+        run: go test -count=1 -timeout 20m ./...
+
+      - name: Integration
+        run: go test -tags integration -count=1 -timeout 20m ./integration/...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
