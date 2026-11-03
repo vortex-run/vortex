@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # VORTEX one-line installer (build plan M1.4 / M1.7).
 #
@@ -9,7 +9,13 @@
 # seeds /etc/vortex/vortex.cue. The script is idempotent — re-running it upgrades
 # the binary, skips when already at the target version, and never clobbers an
 # existing config.
-set -euo pipefail
+#
+# POSIX sh, not bash: the documented `curl ... | sh` runs dash on Debian and
+# Ubuntu and BusyBox ash on Alpine, which rejected the old `set -o pipefail`
+# and aborted before doing anything. `local` is not strictly POSIX but every
+# sh we target (dash, ash, bash, macOS /bin/sh) supports it.
+# shellcheck disable=SC3043
+set -eu
 
 REPO="vortex-run/vortex"
 INSTALL_DIR="${VORTEX_INSTALL_DIR:-/usr/local/bin}"
@@ -129,7 +135,16 @@ download_file() {
 
 # --- resolve latest version ------------------------------------------------
 latest_version() {
-  local api="https://api.github.com/repos/${REPO}/releases/latest" tmp tag
+  local api="https://api.github.com/repos/${REPO}/releases/latest" tmp tag url
+  # The releases/latest page redirects to .../releases/tag/<tag>. Following it
+  # needs no API call: unauthenticated API calls are limited to 60 an hour
+  # per IP, which users behind a shared NAT, VPN or proxy run out of.
+  if command -v curl >/dev/null 2>&1; then
+    url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+    case "$url" in
+      */releases/tag/*) echo "${url##*/}"; return 0 ;;
+    esac
+  fi
   tmp="$(mktemp)"
   download_quiet "$api" "$tmp" || err "could not reach the GitHub releases API"
   tag="$(grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$tmp" | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/')"
@@ -151,11 +166,26 @@ verify_sha256() {
   elif command -v shasum >/dev/null 2>&1; then
     actual="$(shasum -a 256 "$file" | awk '{print $1}')"
   else
-    warn "no sha256 tool found; skipping checksum verification"
-    return 0
+    # Fail closed: installing an unverified binary as root is worse than
+    # asking the user to install sha256sum (coreutils) or shasum.
+    err "no sha256sum or shasum found; install one so the download can be verified"
   fi
   [ "$expected" = "$actual" ] || err "checksum mismatch for ${base}: expected ${expected}, got ${actual}"
   log "checksum verified"
+}
+
+# sudo_for prints "sudo" when the nearest existing directory at or above
+# path isn't writable by this user (and we aren't root), else nothing.
+sudo_for() {
+  local dir="$1"
+  while [ ! -d "$dir" ]; do
+    dir="$(dirname "$dir")"
+  done
+  if [ -w "$dir" ]; then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1 || err "need root (or sudo) to write ${1}"
+  echo sudo
 }
 
 main() {
@@ -198,10 +228,12 @@ EOF
 
   log "installing VORTEX ${version} for ${os}/${arch}"
 
-  local base url sumurl workdir tarball
+  local base url sumurl tarball
   base="vortex_${os}_${arch}.tar.gz"
   url="https://github.com/${REPO}/releases/download/${version}/${base}"
   sumurl="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+  # Global, not local: the EXIT trap runs after main returns, when a local is
+  # gone (set -u then aborted the cleanup and left the download behind).
   workdir="$(mktemp -d)"
   trap 'rm -rf "$workdir"' EXIT
   tarball="${workdir}/${base}"
@@ -215,32 +247,29 @@ EOF
   tar -xzf "$tarball" -C "$workdir" || err "failed to extract ${base}"
   [ -f "${workdir}/${BIN_NAME}" ] || err "binary ${BIN_NAME} not found in archive"
 
-  # Use sudo for privileged paths when not already root.
-  local SUDO=""
-  if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo"
-    else
-      err "must run as root (or have sudo) to install into ${INSTALL_DIR}"
-    fi
-  fi
+  # sudo only for a path this user can't write: --install-dir "$HOME/.local/bin"
+  # must not leave a root-owned binary in the user's home.
+  local BIN_SUDO CFG_SUDO
+  BIN_SUDO="$(sudo_for "$INSTALL_DIR")"
+  CFG_SUDO="$(sudo_for "$CONFIG_DIR")"
 
   log "installing binary to ${target_bin}"
-  $SUDO install -m 0755 "${workdir}/${BIN_NAME}" "$target_bin" || err "failed to install binary to ${target_bin}"
+  $BIN_SUDO mkdir -p "$INSTALL_DIR" || err "failed to create ${INSTALL_DIR}"
+  $BIN_SUDO install -m 0755 "${workdir}/${BIN_NAME}" "$target_bin" || err "failed to install binary to ${target_bin}"
 
   # Post-install verification: a download that passed SHA-256 can still be the
   # wrong arch or corrupt in a way the checksum was computed over; running it is
   # the definitive check.
   if ! "$target_bin" version >/dev/null 2>&1; then
-    $SUDO rm -f "$target_bin"
+    $BIN_SUDO rm -f "$target_bin"
     err "installed binary failed to run; removed it (corrupt or wrong platform?)"
   fi
 
   log "ensuring config directory ${CONFIG_DIR}"
-  $SUDO mkdir -p "$CONFIG_DIR"
+  $CFG_SUDO mkdir -p "$CONFIG_DIR"
   if [ ! -f "${CONFIG_DIR}/vortex.cue" ]; then
     if [ -f "${workdir}/vortex.cue" ]; then
-      $SUDO cp "${workdir}/vortex.cue" "${CONFIG_DIR}/vortex.cue"
+      $CFG_SUDO cp "${workdir}/vortex.cue" "${CONFIG_DIR}/vortex.cue"
       log "seeded example config at ${CONFIG_DIR}/vortex.cue"
     else
       warn "no example vortex.cue in archive; create ${CONFIG_DIR}/vortex.cue manually"
