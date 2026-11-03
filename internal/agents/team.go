@@ -407,7 +407,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			toID, _ := t.agentFor(toRole)
 			progress(fmt.Sprintf("[%s] ⏸ Checkpoint — awaiting your review", step.AgentRole))
 			outcome, cperr := t.config.Checkpoints.Create(ctx,
-				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(stepResult.Files))
+				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(ctx, stepResult.Files))
 			if cperr != nil && outcome != nil && outcome.Status == a2a.CheckpointCancelled {
 				// The caller went away while waiting; nobody decided anything.
 				res.Success = false
@@ -470,12 +470,12 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 }
 
 // filePreviews reads the modified files into checkpoint previews (best effort).
-func (t *AgentTeam) filePreviews(files []string) []a2a.FilePreview {
+func (t *AgentTeam) filePreviews(ctx context.Context, files []string) []a2a.FilePreview {
 	var out []a2a.FilePreview
 	for _, f := range files {
 		content := ""
 		if t.runTool != nil {
-			if res, err := t.runTool(contextTODO(), "read_file", map[string]any{"path": f}); err == nil {
+			if res, err := t.runTool(ctx, "read_file", map[string]any{"path": f}); err == nil {
 				content = specialists.ToolResultString(res)
 			}
 		}
@@ -523,9 +523,6 @@ func countLines(s string) int {
 	}
 	return strings.Count(s, "\n") + 1
 }
-
-// contextTODO returns a background context for the best-effort preview read.
-func contextTODO() context.Context { return context.Background() }
 
 // resolveStepRole returns the pipeline role for a step, using the capability
 // catalog when required_capabilities are set (no silent fallback).

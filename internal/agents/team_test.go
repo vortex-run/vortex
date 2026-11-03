@@ -483,3 +483,54 @@ func TestTeamResult_Summary(t *testing.T) {
 		}
 	}
 }
+
+// ctxProbeTool records whether read_file saw the caller's context value.
+type ctxProbeTool struct {
+	memTool
+	sawValue *bool
+}
+
+type ctxProbeKey struct{}
+
+func (t *ctxProbeTool) Execute(ctx context.Context, params map[string]any) (any, error) {
+	if ctx.Value(ctxProbeKey{}) == "run" {
+		*t.sawValue = true
+	}
+	return t.memTool.Execute(ctx, params)
+}
+
+// Checkpoint file previews must use the run's context (cancellation, deadlines,
+// trace values), not a detached background context.
+func TestTeam_CheckpointPreviewUsesRunContext(t *testing.T) {
+	written := map[string]string{}
+	var saw bool
+	reg := NewToolRegistry()
+	for _, tool := range []Tool{
+		&ctxProbeTool{memTool: memTool{name: "read_file", written: written}, sawValue: &saw},
+		&memTool{name: "list_directory", written: written},
+		&memTool{name: "run_terminal", written: written, output: "--- PASS: TestX (0.00s)\nok"},
+		&memTool{name: "write_file", written: written},
+	} {
+		if err := reg.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cps := a2a.NewCheckpointManager(nil, 0)
+	gw := &scriptedGateway{codeReply: codePlanJSON, reviewRpl: goodReviewJSON}
+	team := NewAgentTeam(TeamConfig{WorkDir: t.TempDir(), Checkpoints: cps}, gw, reg)
+
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ctxProbeKey{}, "run"))
+	defer cancel()
+	plan := &TeamPlan{Goal: "build hello", SessionID: "s1", Steps: defaultSteps("build hello")}
+	done := make(chan struct{})
+	go func() {
+		_, _ = team.Execute(ctx, plan, nil)
+		close(done)
+	}()
+	nextCheckpoint(t, cps, "s1") // previews are built before the checkpoint appears
+	cancel()
+	<-done
+	if !saw {
+		t.Error("checkpoint preview read_file did not receive the run's context")
+	}
+}
