@@ -136,12 +136,22 @@ const readinessQueueDepthLimit = 1000
 // stdoutIsTerminal reports whether stdout is a character device (a console).
 // Piped/captured stdout (CI harnesses, journald, shell redirects) must keep
 // the raw structured logs.
-func stdoutIsTerminal() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
+func stdoutIsTerminal() bool { return isTerminal(os.Stdout) }
+
+// isTerminal reports whether f is a terminal: a character device other than
+// the null device. /dev/null is a character device too, and it is what
+// systemd connects a service's stdin to by default, so checking the mode
+// alone made `vortex start` under systemd (or with < /dev/null) run the
+// interactive setup wizard against nobody, adding minutes to every start.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return false
 	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	return true
 }
 
 // routerNotifierAdapter adapts a messaging.Router to gateway.Notifier so the

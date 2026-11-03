@@ -744,13 +744,7 @@ func readLine(r *bufio.Reader) string {
 // isInteractive reports whether stdin is a terminal (character device). When it
 // is not (a pipe, file, or no TTY — e.g. systemd, CI, integration tests), the
 // auto-setup wizard must NOT run, or a non-interactive start would block.
-func isInteractive() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
-}
+func isInteractive() bool { return isTerminal(os.Stdin) }
 
 // --- live verification helpers ----------------------------------------------
 
