@@ -297,6 +297,14 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 	a2aServer := a2a.NewAgentServer()
 	baseURL := "http://localhost" + portSuffix(apiSrv.Addr())
 	a2aClient := a2a.NewAgentClient(baseURL, "coordinator")
+	// /a2a/ is outside API-key auth; only this process's own client may call
+	// it (see a2a.RequireToken).
+	a2aToken, err := a2a.NewToken()
+	if err != nil {
+		log.Error("agent team disabled: generating A2A token", "err", err)
+		return
+	}
+	a2aClient.SetToken(a2aToken)
 
 	// AG-UI collaboration layer: the bus carries all inter-agent traffic for the
 	// UI; the checkpoint manager pauses between steps for human review. The bus
@@ -325,7 +333,7 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 	}, gateway, tools)
 
 	rt.Coordinator().SetTeam(team)
-	apiSrv.SetA2AHandler(a2aServer.Handler())
+	apiSrv.SetA2AHandler(a2a.RequireToken(a2aToken, a2aServer.Handler()))
 	apiSrv.SetTeamAgentsProvider(func() []api.TeamAgentInfo {
 		out := []api.TeamAgentInfo{}
 		// Coordinator first, then the specialists from the A2A server.

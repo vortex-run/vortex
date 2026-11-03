@@ -122,8 +122,9 @@ type Server struct {
 	keyStatusProvider func() KeyStatusInfo
 
 	// a2aHandler serves the A2A protocol tree under /a2a/ (agent teams). It is
-	// NOT auth-gated: agents call one another over loopback, and the cards
-	// expose no secrets. Wired via SetA2AHandler; nil yields 404.
+	// outside API-key auth; the caller wraps it in a2a.RequireToken so only the
+	// in-process coordinator can reach it. Wired via SetA2AHandler; nil yields
+	// 404.
 	a2aHandler http.Handler
 	// teamAgents backs GET /api/team/agents + /api/team/status (auth-gated
 	// views of the agent team). Nil yields an empty list.
@@ -458,8 +459,10 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// VORTEX Studio (M12): browser IDE/terminal/db/git, auth-gated.
 	mux.HandleFunc("/studio/", s.handleStudio)
 
-	// A2A protocol tree (agent teams). Loopback agent-to-agent traffic; cards
-	// expose no secrets, so not auth-gated. 404 when team mode is off.
+	// A2A protocol tree (agent teams). Not behind API-key auth: the handler set
+	// via SetA2AHandler is wrapped in a2a.RequireToken, a per-process token only
+	// the in-process coordinator holds (RPC submits tasks that write files).
+	// 404 when team mode is off.
 	mux.HandleFunc("/a2a/", s.handleA2A)
 	mux.Handle("GET /api/team/agents", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
 	mux.Handle("GET /api/team/status", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))

@@ -17,6 +17,18 @@ type AgentClient struct {
 	baseURL    string
 	httpClient *http.Client
 	agentID    string // caller identity, stamped onto outgoing tasks
+	token      string // sent as TokenHeader; see RequireToken
+}
+
+// SetToken sets the shared token sent with every request (see RequireToken).
+func (c *AgentClient) SetToken(token string) { c.token = token }
+
+// do sends req with the client's token attached.
+func (c *AgentClient) do(req *http.Request) (*http.Response, error) {
+	if c.token != "" {
+		req.Header.Set(TokenHeader, c.token)
+	}
+	return c.httpClient.Do(req)
 }
 
 // NewAgentClient constructs a client rooted at baseURL identifying as callerID.
@@ -40,7 +52,7 @@ func (c *AgentClient) rpc(ctx context.Context, agentID, method string, params an
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("a2a: rpc to %s: %w", agentID, err)
 	}
@@ -87,7 +99,7 @@ func (c *AgentClient) WaitForResult(ctx context.Context, agentID, taskID string,
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("a2a: opening event stream: %w", err)
 	}
@@ -167,7 +179,7 @@ func (c *AgentClient) GetCard(ctx context.Context, agentID string) (*AgentCard, 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("a2a: get card: %w", err)
 	}
@@ -188,7 +200,7 @@ func (c *AgentClient) ListAgents(ctx context.Context) ([]AgentCard, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, fmt.Errorf("a2a: list agents: %w", err)
 	}
