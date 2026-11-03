@@ -311,6 +311,42 @@ func TestRunStore_ListRecent(t *testing.T) {
 	}
 }
 
+func TestRunStore_ListRecentTiebreak(t *testing.T) {
+	s := newTestStore(t)
+	var ids []string
+	for i := 0; i < 5; i++ {
+		id, err := s.CreateRun("g", "", chainTasks())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	// Force a millisecond tie across every run.
+	if _, err := s.db.Exec(`UPDATE orch_runs SET created_at=1, updated_at=1`); err != nil {
+		t.Fatal(err)
+	}
+
+	recent, err := s.ListRecent(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range recent {
+		if want := ids[len(ids)-1-i]; r.ID != want {
+			t.Fatalf("ListRecent[%d] = %s, want %s (newest insert first on tie)", i, r.ID, want)
+		}
+	}
+
+	incomplete, err := s.ListIncomplete()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range incomplete {
+		if r.ID != ids[i] {
+			t.Fatalf("ListIncomplete[%d] = %s, want %s (oldest insert first on tie)", i, r.ID, ids[i])
+		}
+	}
+}
+
 func TestRunStore_SaveTaskPreservesMetaWhenOmitted(t *testing.T) {
 	s := newTestStore(t)
 	caps := []string{"code.read"}
