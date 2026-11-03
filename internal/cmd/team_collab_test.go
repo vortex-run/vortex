@@ -95,7 +95,7 @@ func TestTeamCollab_ListPendingCheckpoints(t *testing.T) {
 	created := make(chan struct{})
 	go func() {
 		close(created)
-		_, _ = c.checkpoints.Create("s", "code-agent", "test-agent",
+		_, _ = c.checkpoints.Create(context.Background(), "s", "code-agent", "test-agent",
 			a2a.TaskResult{}, []a2a.FilePreview{{Path: "main.py", Lines: 9, IsNew: true}})
 	}()
 	<-created
