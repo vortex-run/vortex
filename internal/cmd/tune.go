@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/perf"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // errTune signals a tune-command failure whose detail was already printed.
@@ -18,10 +19,7 @@ var errTune = errors.New("tune command failed")
 // benchBaselinePath returns the benchmark baseline path
 // (<user-cache>/vortex/bench-baseline.json).
 func benchBaselinePath() string {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "bench-baseline.json")
 }
 

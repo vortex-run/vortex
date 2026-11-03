@@ -7,6 +7,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // secretStorePath resolves the on-disk path for the local encrypted store. It
@@ -16,10 +17,7 @@ func secretStorePath() string {
 	if override := os.Getenv("VORTEX_SECRET_STORE"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "secrets")
 }
 

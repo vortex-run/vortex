@@ -47,6 +47,16 @@ the binary the capability: `sudo setcap cap_net_bind_service=+ep $(command -v vo
 exist. Re-run `sudo vortex service install`, which creates it, or create it
 yourself with home `/var/lib/vortex`.
 
+**`can't find a private config directory`.** VORTEX keeps its master key,
+API keys and secrets in your user config and cache directories, found from
+`HOME` (Linux, macOS, BSD; or `XDG_CONFIG_HOME`/`XDG_CACHE_HOME`) or
+`APPDATA`/`LOCALAPPDATA` (Windows). Some service managers and containers start
+programs with none of these set. Set `HOME` to a directory only the VORTEX
+user can write; VORTEX won't fall back to the shared temp directory.
+
+**A route's port is taken during `vortex reload`.** The reload is refused, the
+previous routes keep running, and `vortex reload` prints the bind error.
+
 **Config errors.** `vortex check` prints the CUE error with a line number.
 `tls.acme_email` is required even with `provider: "internal"`.
 

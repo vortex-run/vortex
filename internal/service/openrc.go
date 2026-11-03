@@ -40,6 +40,9 @@ command_args="start --config {{.ConfigPath}}"
 command_user={{.User}}
 command_background=true
 directory={{.Home}}
+# VORTEX keeps its keys under $HOME/.config and $HOME/.cache, and refuses to
+# start without a HOME; don't depend on start-stop-daemon setting it.
+export HOME={{.Home}}
 # Bind :80/:443 as the unprivileged user (OpenRC 0.45+; older ignore it).
 capabilities="^cap_net_bind_service"
 pidfile={{.PidFile}}

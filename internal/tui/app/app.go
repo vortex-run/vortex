@@ -17,6 +17,7 @@ import (
 	"github.com/vortex-run/vortex/internal/tui"
 	"github.com/vortex-run/vortex/internal/tui/brand"
 	"github.com/vortex-run/vortex/internal/tui/views"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // ViewID identifies a screen.
@@ -534,10 +535,7 @@ var tutorialSteps = []string{
 
 // tutorialDonePath is the first-run flag file.
 func tutorialDonePath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
+	dir := userdir.Config()
 	return filepath.Join(dir, "vortex", "tutorial-done")
 }
 

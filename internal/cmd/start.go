@@ -18,6 +18,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/vortex-run/vortex/internal/a2a"
 	"github.com/vortex-run/vortex/internal/agents"
 	"github.com/vortex-run/vortex/internal/api"
@@ -46,9 +48,9 @@ import (
 	"github.com/vortex-run/vortex/internal/tenancy"
 	vtls "github.com/vortex-run/vortex/internal/tls"
 	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/vortex-run/vortex/internal/userdir"
 	"github.com/vortex-run/vortex/pkg/lifecycle"
 	"github.com/vortex-run/vortex/pkg/logger"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // newStartCommand builds `vortex start`, which loads and validates config,
@@ -1226,10 +1228,7 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 	if !needsTLS(cfg) {
 		return nil, nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	storePath := filepath.Join(cacheDir, "vortex", "certs")
 	storeKey, err := deriveKey("tls-store")
 	if err != nil {
@@ -1270,10 +1269,7 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 	// via VORTEX_MTLS_STORE so peers (and tests) can share the same cluster CA.
 	storePath := os.Getenv("VORTEX_MTLS_STORE")
 	if storePath == "" {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
+		cacheDir := userdir.Cache()
 		storePath = filepath.Join(cacheDir, "vortex", "mtls")
 	}
 	mtlsKey, err := deriveKey("mtls-store")
@@ -1318,10 +1314,7 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 	path := os.Getenv("VORTEX_APIKEY_STORE")
 	if path == "" {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
+		cacheDir := userdir.Cache()
 		path = filepath.Join(cacheDir, "vortex", "apikeys.json")
 	}
 	// Ensure the parent directory exists so Save on shutdown succeeds.
@@ -1339,10 +1332,7 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 // <user-config>/vortex/tui-key. This matches tui.APIKeyFilePath() but is
 // computed locally so the server path does not import the TUI package.
 func tuiKeyPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
+	dir := userdir.Config()
 	return filepath.Join(dir, "vortex", "tui-key")
 }
 
@@ -1760,10 +1750,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
 func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, localFS agents.LocalFSConfig, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	sandboxBase := filepath.Join(cacheDir, "vortex", "agents")
 
 	bus := agents.NewBus()
@@ -1934,10 +1921,7 @@ func buildForge(gateway agents.AIGateway, msg messagingComponents, log *slog.Log
 		log.Info("forge disabled (no AI gateway configured)")
 		return nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	sandboxBase := filepath.Join(cacheDir, "vortex", "agents", "forge")
 
 	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(cacheDir, "vortex", "forge-serve")}
@@ -2233,10 +2217,7 @@ var (
 // behaviour (at-least-once) rather than a failure.
 func openEffectLedger(log *slog.Logger) *agents.EffectLedger {
 	effectLedgerOnce.Do(func() {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
+		cacheDir := userdir.Cache()
 		ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db"))
 		if lerr != nil {
 			log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
@@ -2829,10 +2810,7 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 	mux := http.NewServeMux()
 
 	// code-server (optional — graceful degradation when not installed).
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	cs, cerr := studio.NewCodeServer(studio.CodeServerConfig{
 		WorkspaceDir: workspace,
 		DataDir:      filepath.Join(cacheDir, "vortex", "code-server"),

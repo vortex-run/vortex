@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // ConnectionErrorMessage is the user-facing text returned (as the response
@@ -773,10 +775,7 @@ func (c *Client) IsConnected() bool {
 // store only holds bcrypt hashes (the raw secret is unrecoverable from it), so
 // the setup wizard writes the secret here once for the local dashboard/TUI.
 func APIKeyFilePath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
+	dir := userdir.Config()
 	return filepath.Join(dir, "vortex", "tui-key")
 }
 

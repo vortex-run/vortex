@@ -14,6 +14,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/gateway"
 	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // errKeys is the sentinel signalling a handled keys-command failure (so the
@@ -22,10 +23,7 @@ var errKeys = fmt.Errorf("keys command failed")
 
 // keystorePath resolves the on-disk key-slot database.
 func keystorePath() string {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "keyslots.db")
 }
 
@@ -355,10 +353,7 @@ func newKeysTestCommand() *cobra.Command {
 
 // keysModePath stores the selected routing mode.
 func keysModePath() string {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "keys-mode")
 }
 

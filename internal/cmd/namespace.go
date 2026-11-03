@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/tenancy"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // errNamespace signals a namespace-command failure whose detail was printed.
@@ -23,10 +24,7 @@ func namespaceStorePath() string {
 	if override := os.Getenv("VORTEX_NAMESPACE_STORE"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "namespaces.json")
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/audit"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // errAudit signals an audit-command failure whose detail was already printed.
@@ -22,10 +23,7 @@ func auditLogPath() string {
 	if override := os.Getenv("VORTEX_AUDIT_LOG"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	return filepath.Join(cacheDir, "vortex", "audit.log")
 }
 

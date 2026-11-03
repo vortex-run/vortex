@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // Step interfaces let the orchestrator be driven by either the concrete agents
@@ -80,10 +81,7 @@ func (f *Forge) setQuestions(qs []ClarifyingQuestion) {
 // NewForge constructs the orchestrator.
 func NewForge(cfg ForgeConfig) (*Forge, error) {
 	if cfg.SandboxBase == "" {
-		base, err := os.UserCacheDir()
-		if err != nil {
-			base = os.TempDir()
-		}
+		base := userdir.Cache()
 		cfg.SandboxBase = filepath.Join(base, "vortex", "agents", "forge")
 	}
 	return &Forge{cfg: cfg}, nil

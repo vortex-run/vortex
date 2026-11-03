@@ -15,6 +15,8 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/vortex-run/vortex/internal/userdir"
+
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/config"
@@ -43,6 +45,22 @@ var (
 	log   *slog.Logger
 )
 
+// keepsState reports whether cmd reads or writes VORTEX state (keys, secrets,
+// audit log...), which needs a private per-user directory; see userdir.Check.
+// Commands that only print or validate are exempt.
+func keepsState(cmd *cobra.Command) bool {
+	top := cmd
+	for top.HasParent() && top.Parent().HasParent() {
+		top = top.Parent()
+	}
+	switch top.Name() {
+	case "version", "help", "completion", "check", "status", "stop", "verify",
+		cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return false
+	}
+	return true
+}
+
 // NewRootCommand constructs the root cobra command with global flags wired up.
 // It is exported so tests can build an isolated command tree.
 func NewRootCommand() *cobra.Command {
@@ -54,7 +72,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		// Initialise the logger from the global flags before any subcommand
 		// (or the root RunE) executes.
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			format := logger.FormatText
 			if flags.jsonLog {
 				format = logger.FormatJSON
@@ -63,6 +81,9 @@ func NewRootCommand() *cobra.Command {
 				Level:  logger.ParseLevel(flags.logLevel),
 				Format: format,
 			})
+			if keepsState(cmd) {
+				return userdir.Check()
+			}
 			return nil
 		},
 		// With no subcommand, boot VORTEX using the default pidfile — the same

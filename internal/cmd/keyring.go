@@ -12,6 +12,7 @@ import (
 	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/keyring"
 	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // masterKeyPath resolves the on-disk location of the master key, honouring
@@ -22,10 +23,7 @@ func masterKeyPath() string {
 	if override := os.Getenv("VORTEX_MASTER_KEY_FILE"); override != "" {
 		return override
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
+	dir := userdir.Config()
 	return filepath.Join(dir, "vortex", "master.key")
 }
 

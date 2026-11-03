@@ -21,6 +21,7 @@ import (
 	"github.com/vortex-run/vortex/internal/auth"
 	"github.com/vortex-run/vortex/internal/tui"
 	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // AIProviderConfig is the persisted first-run AI provider selection. The API
@@ -51,10 +52,7 @@ type BackupKey struct {
 
 // aiProviderConfigPath returns <user-config>/vortex/ai-provider.json.
 func aiProviderConfigPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
+	dir := userdir.Config()
 	return filepath.Join(dir, "vortex", "ai-provider.json")
 }
 
