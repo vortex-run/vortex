@@ -165,3 +165,22 @@ func TestAPI_InternalReloadLocalhostNoAuth(t *testing.T) {
 		t.Errorf("loopback /internal/reload = %d, want 200", rec.Code)
 	}
 }
+
+// An admin-only route still must not decode an unbounded body: a valid but
+// huge request is refused and creates nothing.
+func TestAPI_CreateKeyRejectsOversizedBody(t *testing.T) {
+	s, adminSecret := newAuthedServer(t)
+	huge := `{"user_id":"ci","org_id":"default","roles":["operator"],"description":"` +
+		string(bytes.Repeat([]byte("a"), 100<<10)) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/keys", bytes.NewReader([]byte(huge)))
+	req.Header.Set("X-API-Key", adminSecret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized POST /api/keys = %d, want 400", rec.Code)
+	}
+	list := httptest.NewRequest(http.MethodGet, "/api/keys", nil)
+	list.Header.Set("X-API-Key", adminSecret)
+	if lrec := serve(s, list); bytes.Contains(lrec.Body.Bytes(), []byte(`"user_id":"ci"`)) {
+		t.Error("a key was issued from an oversized request")
+	}
+}
