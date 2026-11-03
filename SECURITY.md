@@ -12,7 +12,7 @@ network.
 
 Email the maintainers via GitHub Security Advisories:
 
-1. Open https://github.com/vortex-run/vortex/security/advisories/new
+1. Open https://github.com/sandeepbollavaram/vortex/security/advisories/new
 2. Include: affected version/commit, reproduction steps, impact, and any
    suggested fix
 3. Allow a reasonable window (typically 90 days) before public disclosure

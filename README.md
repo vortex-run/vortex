@@ -1,5 +1,7 @@
 # VORTEX
 
+*An open source project by [Sandeep Kumar Bollavaram](https://github.com/sandeepbollavaram).*
+
 > **One binary. Any server. Fully autonomous.**
 
 VORTEX is a self-hosted autonomous infrastructure platform: a single static Go
@@ -25,8 +27,8 @@ Opens a throwaway cluster with live backends, TLS routes, and the dashboard at
 http://127.0.0.1:9090/dashboard/ — isolated from your real install. Details:
 [scripts/demo/README.md](scripts/demo/README.md).
 
-[![CI](https://github.com/vortex-run/vortex/actions/workflows/ci.yml/badge.svg)](https://github.com/vortex-run/vortex/actions/workflows/ci.yml)
-[![Security Scan](https://github.com/vortex-run/vortex/actions/workflows/security.yml/badge.svg)](https://github.com/vortex-run/vortex/actions/workflows/security.yml)
+[![CI](https://github.com/sandeepbollavaram/vortex/actions/workflows/ci.yml/badge.svg)](https://github.com/sandeepbollavaram/vortex/actions/workflows/ci.yml)
+[![Security Scan](https://github.com/sandeepbollavaram/vortex/actions/workflows/security.yml/badge.svg)](https://github.com/sandeepbollavaram/vortex/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 ---
@@ -112,7 +114,7 @@ curl -fsSL https://vortex.run/install | sh
 ```
 
 **Windows:** download `vortex_windows_amd64.zip` from the
-[Releases](https://github.com/vortex-run/vortex/releases) page, extract
+[Releases](https://github.com/sandeepbollavaram/vortex/releases) page, extract
 `vortex.exe`, and run `vortex service install`.
 
 **Build from source? Add `vortex` to your PATH** so `vortex code` works from
@@ -253,7 +255,7 @@ explained in [docs/security.md](docs/security.md).
 ## Building from Source
 
 ```bash
-git clone https://github.com/vortex-run/vortex
+git clone https://github.com/sandeepbollavaram/vortex
 cd vortex
 task build      # produces ./bin/vortex
 task test       # unit tests
@@ -277,6 +279,15 @@ Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and
 CI runs build, race-enabled tests, lint, dashboard build, and the integration
 suite on every push and PR. Please run `task test` (and dashboard lint/build if
 you touch `web/dashboard`) before opening a PR.
+
+---
+
+## Maintainer
+
+VORTEX is an open source project by Sandeep Kumar Bollavaram
+([@sandeepbollavaram](https://github.com/sandeepbollavaram)). It was first
+published under the `vortex-run` GitHub organization; old
+`github.com/vortex-run/vortex` links redirect here.
 
 ---
 

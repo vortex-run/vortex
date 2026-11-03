@@ -9,7 +9,7 @@ Actions secret named `VORTEX_SIGNING_KEY` or tagged releases cannot produce
 
 ```powershell
 # From a machine that has the private key file (never commit it):
-gh secret set VORTEX_SIGNING_KEY --repo vortex-run/vortex --body (Get-Content -Raw .secrets\VORTEX_SIGNING_KEY.txt)
+gh secret set VORTEX_SIGNING_KEY --repo sandeepbollavaram/vortex --body (Get-Content -Raw .secrets\VORTEX_SIGNING_KEY.txt)
 ```
 
 ## Rotate later

@@ -31,7 +31,7 @@ Environment overrides: `VORTEX_VERSION`, `VORTEX_INSTALL_DIR`,
 ## Manual download
 
 Grab the archive for your platform from the
-[Releases](https://github.com/vortex-run/vortex/releases) page:
+[Releases](https://github.com/sandeepbollavaram/vortex/releases) page:
 
 | Platform | Asset |
 |---|---|

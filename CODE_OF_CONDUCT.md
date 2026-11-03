@@ -48,7 +48,7 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported via [GitHub Security Advisories](https://github.com/vortex-run/vortex/security/advisories/new)
+reported via [GitHub Security Advisories](https://github.com/sandeepbollavaram/vortex/security/advisories/new)
 or by contacting the project maintainers. All complaints will be reviewed and
 investigated promptly and fairly.
 
