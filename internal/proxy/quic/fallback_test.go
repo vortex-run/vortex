@@ -23,21 +23,23 @@ func freePort(t *testing.T) string {
 	t.Helper()
 	// The dual stack binds the port for both TCP and QUIC (UDP). A port free
 	// for TCP can still be refused for UDP (Windows reserves UDP ranges, which
-	// made TestDualStack_StartsBoth flaky), so probe both and retry.
+	// made TestDualStack_StartsBoth flaky), so probe both and retry. Start
+	// from UDP: the OS only assigns UDP ports outside the reserved ranges,
+	// while consecutive TCP picks can all land inside one.
 	var lastErr error
 	for i := 0; i < 50; i++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		uc, err := net.ListenPacket("udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		addr := ln.Addr().String()
-		_ = ln.Close()
-		uc, err := net.ListenPacket("udp", addr)
+		addr := uc.LocalAddr().String()
+		_ = uc.Close()
+		ln, err := net.Listen("tcp", addr)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		_ = uc.Close()
+		_ = ln.Close()
 		return addr
 	}
 	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)

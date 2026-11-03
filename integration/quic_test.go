@@ -73,20 +73,22 @@ func quicRouter(t *testing.T, body string) *proxyhttp.Router {
 // and retry.
 func reserveAddr(t *testing.T) string {
 	t.Helper()
+	// UDP first: the OS only assigns UDP ports it will let us bind, while
+	// consecutive TCP picks can all fall inside a Windows-reserved UDP range.
 	var lastErr error
 	for range 50 {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		u, err := net.ListenPacket("udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		addr := ln.Addr().String()
-		u, err := net.ListenPacket("udp", addr)
-		_ = ln.Close()
+		addr := u.LocalAddr().String()
+		ln, err := net.Listen("tcp", addr)
+		_ = u.Close()
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		_ = u.Close()
+		_ = ln.Close()
 		return addr
 	}
 	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)

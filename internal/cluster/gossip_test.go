@@ -16,20 +16,24 @@ import (
 // another port is tried when it fails.
 func freeUDPPort(t *testing.T) int {
 	t.Helper()
+	// Ask for the UDP port first: the OS only hands out UDP ports it will let
+	// us bind. Starting from TCP failed 50 times in a row on Windows under
+	// load, because consecutive ephemeral TCP ports fell inside one of the
+	// UDP ranges Hyper-V reserves.
 	var lastErr error
 	for range 50 {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+		u, err := net.ListenPacket("udp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		port := l.Addr().(*net.TCPAddr).Port
-		u, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		_ = l.Close()
+		port := u.LocalAddr().(*net.UDPAddr).Port
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		_ = u.Close()
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		_ = u.Close()
+		_ = l.Close()
 		return port
 	}
 	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)
