@@ -620,7 +620,7 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 // wired the handler runs unchanged.
 func (s *Server) protected(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
+		if s.authMW == nil || (s.trustLoopback && loopbackTrusted(r)) {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -710,7 +710,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// trusted like the rest of the control plane; remote authenticated callers
 	// read it from /api/status instead. When no auth is wired (tests/legacy)
 	// the field is populated as before so existing behaviour is preserved.
-	if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
+	if s.authMW == nil || (s.trustLoopback && loopbackTrusted(r)) {
 		resp.ClusterName = cfg.Cluster.Name
 	}
 	if s.routeStats != nil {

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 // localhostOnly reports whether the request originates from the loopback
@@ -14,6 +16,47 @@ func localhostOnly(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// loopbackTrusted reports whether r may use the control-plane loopback
+// bypass. Coming from loopback isn't enough, because a browser on this
+// machine also connects from loopback on behalf of any website: a page could
+// POST /internal/shutdown, and a DNS-rebinding page (its own name resolving
+// to 127.0.0.1) could read /api/audit. So the request must also name a
+// loopback host and not be a cross-site browser request. The CLI (no Origin
+// or Sec-Fetch-* headers, Host 127.0.0.1) and the dashboard opened at
+// localhost (same-origin) still qualify; anything else needs a key.
+func loopbackTrusted(r *http.Request) bool {
+	if !localhostOnly(r) || !loopbackHost(r.Host) {
+		return false
+	}
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+	default:
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || u.Host != r.Host {
+			return false
+		}
+	}
+	return true
+}
+
+// loopbackHost reports whether a Host header value (host or host:port) names
+// this machine's loopback interface.
+func loopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if strings.EqualFold(host, "localhost") {
+		return true
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()

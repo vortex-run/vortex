@@ -97,6 +97,15 @@ used by `vortex reload`/`stop`) are allowed from loopback without a key by
 default. **Behind a same-host reverse proxy, set `VORTEX_TRUST_LOOPBACK=false`**
 so every request presenting a loopback address must still carry a credential.
 
+A browser on the same machine also connects from loopback, on behalf of
+whatever site it has open, so loopback trust also requires the request to
+name a loopback host (`127.0.0.1`, `::1`, `localhost`) and not be a
+cross-site browser request (foreign `Origin`, or `Sec-Fetch-Site` other than
+`same-origin`/`none`). A web page therefore can't stop or reload VORTEX, and
+a DNS-rebinding page can't read the audit log. The CLI and the dashboard
+opened at `http://localhost:9090/dashboard/` are unaffected; open the
+dashboard by another name and its control-plane reads need a key.
+
 ## Messaging webhooks
 
 `/webhook/telegram`, `/webhook/whatsapp` and `/webhook/slack` are public (no
