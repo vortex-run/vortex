@@ -7,6 +7,9 @@
 # Downloads checksums.txt for the given release tag, then downloads every
 # binary archive listed in it and verifies each SHA-256 matches. Prints one
 # PASS/FAIL line per artifact and exits non-zero if any artifact fails.
+# Before trusting checksums.txt it verifies the release's Ed25519 signature
+# (checksums.txt.sig), using install.sh's check: a bad signature fails; an
+# unsigned release or no OpenSSL 3 warns (VORTEX_REQUIRE_SIGNATURE=1 fails).
 set -euo pipefail
 
 REPO="vortex-run/vortex"
@@ -50,6 +53,23 @@ sha256() {
   fi
 }
 
+# check_signature verifies checksums.txt.sig with install.sh's verify_signature
+# (same pinned key and rules). Without install.sh alongside, it can only warn.
+check_signature() {
+  local lib
+  lib="$(dirname "$0")/install.sh"
+  if [ ! -f "$lib" ]; then
+    if [ "${VORTEX_REQUIRE_SIGNATURE:-0}" = "1" ]; then
+      err "install.sh not found next to this script; can't check the release signature"
+    fi
+    printf 'warning: install.sh not found next to this script; release signature NOT checked\n' >&2
+    return 0
+  fi
+  # shellcheck source=install.sh
+  VORTEX_INSTALL_LIB=1 . "$lib"
+  verify_signature "$1" "$2"
+}
+
 main() {
   if [ "$#" -ne 1 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     usage
@@ -59,13 +79,17 @@ main() {
   local version="$1"
   local base="https://github.com/${REPO}/releases/download/${version}"
 
-  local workdir
+  # Global, not local: the EXIT trap runs after main returns, when a local is
+  # gone (set -u then aborted the cleanup).
   workdir="$(mktemp -d)"
   trap 'rm -rf "$workdir"' EXIT
 
   log "fetching checksums.txt for ${version}"
   download "${base}/checksums.txt" "${workdir}/checksums.txt" ||
     err "could not download checksums.txt for ${version} (does the release exist?)"
+  download "${base}/checksums.txt.sig" "${workdir}/checksums.txt.sig" 2>/dev/null ||
+    rm -f "${workdir}/checksums.txt.sig"
+  check_signature "${workdir}/checksums.txt" "${workdir}/checksums.txt.sig"
 
   local failures=0 total=0
   # checksums.txt lines: "<sha256-hex>  <filename>"
