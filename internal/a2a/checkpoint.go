@@ -1,6 +1,7 @@
 package a2a
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +13,9 @@ const (
 	CheckpointApproved = "approved"
 	CheckpointEdited   = "edited"
 	CheckpointRejected = "rejected"
+	// CheckpointCancelled means the run waiting on the checkpoint went away
+	// (request cancelled, server shutting down) before anyone decided it.
+	CheckpointCancelled = "cancelled"
 )
 
 // FilePreview is a file produced by an agent, shown to the user at a checkpoint.
@@ -83,7 +87,12 @@ func NewCheckpointManager(bus *MessageBus, autoApproveAfter time.Duration) *Chec
 // Create registers a checkpoint, publishes it to the bus, and BLOCKS until it
 // is approved, rejected, or edited (or auto-approved on timeout). It returns
 // the outcome; a rejection is signalled via the outcome's status + reason.
-func (m *CheckpointManager) Create(sessionID, fromAgent, toAgent string, result TaskResult, files []FilePreview) (*CheckpointOutcome, error) {
+//
+// If ctx ends first the checkpoint is resolved as cancelled and Create returns
+// ctx's error. Without this a run whose caller had gone away blocked forever
+// (production never auto-approves), leaking its goroutine and leaving a
+// pending checkpoint that a later approval would resume.
+func (m *CheckpointManager) Create(ctx context.Context, sessionID, fromAgent, toAgent string, result TaskResult, files []FilePreview) (*CheckpointOutcome, error) {
 	cp := &Checkpoint{
 		ID:          "cp-" + randomID(),
 		SessionID:   sessionID,
@@ -114,17 +123,21 @@ func (m *CheckpointManager) Create(sessionID, fromAgent, toAgent string, result 
 		})
 	}
 
-	// Block until resolved or (optionally) auto-approved.
+	// Block until resolved, cancelled, or (optionally) auto-approved. A nil
+	// timer channel never fires, so no auto-approve means wait for a human.
+	var expire <-chan time.Time
 	if m.autoApproveAfter > 0 {
 		timer := time.NewTimer(m.autoApproveAfter)
 		defer timer.Stop()
-		select {
-		case <-cp.resolve:
-		case <-timer.C:
-			_ = m.Approve(cp.ID) // auto-approve on timeout
-		}
-	} else {
-		<-cp.resolve
+		expire = timer.C
+	}
+	select {
+	case <-cp.resolve:
+	case <-expire:
+		_ = m.Approve(cp.ID) // auto-approve on timeout
+	case <-ctx.Done():
+		// Loses cleanly to a decision that landed first: that one stands.
+		_ = m.resolveCheckpoint(cp.ID, CheckpointCancelled, ctx.Err().Error(), nil)
 	}
 
 	m.mu.RLock()
@@ -135,8 +148,11 @@ func (m *CheckpointManager) Create(sessionID, fromAgent, toAgent string, result 
 	delete(m.pending, cp.ID)
 	m.mu.Unlock()
 
-	if outcome.Status == CheckpointRejected {
+	switch outcome.Status {
+	case CheckpointRejected:
 		return outcome, fmt.Errorf("checkpoint rejected: %s", outcome.Reason)
+	case CheckpointCancelled:
+		return outcome, fmt.Errorf("checkpoint cancelled: %w", ctx.Err())
 	}
 	return outcome, nil
 }

@@ -1,6 +1,8 @@
 package a2a
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -20,7 +22,7 @@ func createAsync(t *testing.T, m *CheckpointManager, session, from, to string) (
 	t.Helper()
 	out := make(chan *CheckpointOutcome, 1)
 	go func() {
-		oc, _ := m.Create(session, from, to, *NewResult("task-1", from, true), sampleFiles())
+		oc, _ := m.Create(context.Background(), session, from, to, *NewResult("task-1", from, true), sampleFiles())
 		out <- oc
 	}()
 	// Wait for the checkpoint to appear in Pending.
@@ -63,7 +65,7 @@ func TestCheckpoint_RejectReturnsError(t *testing.T) {
 	m := NewCheckpointManager(nil, 0)
 	resErr := make(chan error, 1)
 	go func() {
-		_, err := m.Create("s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
+		_, err := m.Create(context.Background(), "s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
 		resErr <- err
 	}()
 	id := waitPending(t, m, "s1")
@@ -78,6 +80,43 @@ func TestCheckpoint_RejectReturnsError(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Create did not return after Reject")
+	}
+}
+
+func TestCheckpoint_ContextCancelUnblocks(t *testing.T) {
+	bus := NewMessageBus()
+	m := NewCheckpointManager(bus, 0) // production setting: never auto-approve
+	ctx, cancel := context.WithCancel(context.Background())
+	type res struct {
+		oc  *CheckpointOutcome
+		err error
+	}
+	done := make(chan res, 1)
+	go func() {
+		oc, err := m.Create(ctx, "s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
+		done <- res{oc, err}
+	}()
+	id := waitPending(t, m, "s1")
+
+	cancel()
+	select {
+	case r := <-done:
+		if !errors.Is(r.err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", r.err)
+		}
+		if r.oc == nil || r.oc.Status != CheckpointCancelled {
+			t.Errorf("outcome = %+v, want status cancelled", r.oc)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Create did not return after its context was cancelled")
+	}
+
+	if got := m.Pending("s1"); len(got) != 0 {
+		t.Errorf("cancelled checkpoint still pending: %+v", got)
+	}
+	// A late decision must not resume the abandoned run.
+	if err := m.Approve(id); err == nil {
+		t.Error("Approve after cancellation succeeded, want not-found error")
 	}
 }
 
@@ -134,7 +173,7 @@ func TestCheckpoint_PublishedToBus(t *testing.T) {
 	m := NewCheckpointManager(bus, 0)
 
 	go func() {
-		_, _ = m.Create("s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
+		_, _ = m.Create(context.Background(), "s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
 	}()
 
 	select {
@@ -150,7 +189,7 @@ func TestCheckpoint_PublishedToBus(t *testing.T) {
 func TestCheckpoint_AutoApproveAfterTimeout(t *testing.T) {
 	m := NewCheckpointManager(nil, 80*time.Millisecond)
 	start := time.Now()
-	oc, err := m.Create("s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
+	oc, err := m.Create(context.Background(), "s1", "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -186,7 +225,7 @@ func TestCheckpoint_ConcurrentNoDeadlock(t *testing.T) {
 			session := fmt.Sprintf("s-%d", n)
 			out := make(chan *CheckpointOutcome, 1)
 			go func() {
-				oc, _ := m.Create(session, "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
+				oc, _ := m.Create(context.Background(), session, "code-agent", "test-agent", *NewResult("t", "code-agent", true), sampleFiles())
 				out <- oc
 			}()
 			id := ""

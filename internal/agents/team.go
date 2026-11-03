@@ -406,8 +406,17 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			fromID, _ := t.agentFor(step.AgentRole)
 			toID, _ := t.agentFor(toRole)
 			progress(fmt.Sprintf("[%s] ⏸ Checkpoint — awaiting your review", step.AgentRole))
-			outcome, cperr := t.config.Checkpoints.Create(
+			outcome, cperr := t.config.Checkpoints.Create(ctx,
 				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(stepResult.Files))
+			if cperr != nil && outcome != nil && outcome.Status == a2a.CheckpointCancelled {
+				// The caller went away while waiting; nobody decided anything.
+				res.Success = false
+				res.FailedAt = step.AgentRole + " (cancelled at checkpoint)"
+				res.Error = cperr.Error()
+				res.Duration = time.Since(start)
+				res.Files = mapKeys(fileSet)
+				return res, nil
+			}
 			if cperr != nil {
 				// Rejected by the user.
 				res.Success = false
