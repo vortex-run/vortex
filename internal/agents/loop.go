@@ -37,6 +37,12 @@ type LoopConfig struct {
 	// catalog, written by whoever wrote the repo). It goes in the user turn
 	// ahead of the request, never in System, so it can't pose as instructions.
 	Reference string
+	// Verify, when set, is the run's completion check (e.g. the user's test
+	// command). It runs each time the model says it is done; on failure its
+	// output goes back to the model, up to MaxVerify attempts. A run whose
+	// check never passed ends Verified=false: the answer is a claim only.
+	Verify    func(ctx context.Context) (ok bool, output string)
+	MaxVerify int // default 3
 	// SkillFiles maps catalogued SKILL.md paths (see SkillKey) to the skill,
 	// so reading one is recorded as skill use in the audit log.
 	SkillFiles map[string]SkillRef
@@ -82,6 +88,9 @@ type LoopResult struct {
 	Turns  int
 	Tokens int // as reported by the provider; 0 when it reports none
 	Err    error
+	// Checked says a Verify check ran; Verified says the last one passed.
+	Checked, Verified bool
+	Checks            int // how many times the check ran
 }
 
 // RunLoop runs the agent loop for one user request.
@@ -97,6 +106,9 @@ func RunLoop(ctx context.Context, cfg LoopConfig, request string) LoopResult {
 	}
 	if cfg.MaxCallsPerTurn <= 0 {
 		cfg.MaxCallsPerTurn = 16
+	}
+	if cfg.MaxVerify <= 0 {
+		cfg.MaxVerify = 3
 	}
 	emit := cfg.Emit
 	if emit == nil {
@@ -138,7 +150,22 @@ func RunLoop(ctx context.Context, cfg LoopConfig, request string) LoopResult {
 		res.Tokens += reply.Tokens
 		if len(reply.ToolCalls) == 0 {
 			res.Answer, res.Stop = reply.Text, LoopDone
-			return res
+			if cfg.Verify == nil {
+				return res
+			}
+			res.Checked, res.Checks = true, res.Checks+1
+			ok, output := cfg.Verify(ctx)
+			res.Verified = ok
+			if ok || res.Checks >= cfg.MaxVerify || res.Turns >= cfg.MaxSteps || ctx.Err() != nil {
+				return res
+			}
+			// Not done yet: show the model why and let it continue.
+			emit(fmt.Sprintf("✗ Check failed (attempt %d of %d); continuing", res.Checks, cfg.MaxVerify))
+			msgs = append(msgs,
+				llm.ChatMessage{Role: "assistant", Content: reply.Text},
+				llm.ChatMessage{Role: "user", Content: "The completion check failed, so the task is not done. Its output:\n" +
+					boundObservation(output, cfg.MaxObservation) + "\nFix the problem, then reply when done."})
+			continue
 		}
 		if cfg.MaxTokens > 0 && res.Tokens >= cfg.MaxTokens {
 			// Don't start more actions once the budget is spent.

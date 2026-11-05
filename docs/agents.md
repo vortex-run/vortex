@@ -56,6 +56,17 @@ checks and approvals. Without
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 
+Give a run a completion check to make "done" mean something:
+
+```
+/agent --check "go test ./internal/foo/..." fix the failing test
+```
+
+When the model says it is finished, VORTEX runs the check (through the
+approval gate, like any command). If it fails, the output goes back to the
+model, up to three times. The run ends with "✓ Verified" or "✗ Not verified";
+without a check, the answer is only the model's claim.
+
 Not every model can drive this loop. `vortex ai probe` sends each configured
 provider a few small requests and checks that it calls a tool, uses typed
 arguments, reads a tool result back and ignores an instruction planted in a
