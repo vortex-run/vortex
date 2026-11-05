@@ -64,6 +64,12 @@ tampering; `vortex audit report` produces compliance reports
 (markdown/JSON/CSV); the log auto-archives to gzip at 100 MB and prunes
 archives after two years.
 
+Agent actions that need approval are recorded in three steps:
+`agent.approval.requested` (tool, risk, the action shown), `agent.approval.decided`
+(approved or rejected, and whether by the configured approver or the API) and
+`agent.action.executed` (success or the error). The entry doesn't name the
+person who approved: any valid API key can approve today (N6).
+
 Each entry's hash covers its sequence number, timestamp, actor, action,
 resource and (for entries marked `"v":2`) its `detail`: tool outcomes and
 errors, Studio SQL queries, issued key owners, config hashes. Entries written
