@@ -126,3 +126,29 @@ func TestUndo_RegisteredAndApprovalGated(t *testing.T) {
 		t.Error("undo tool should be registered")
 	}
 }
+
+// TestUndo_RefusesATargetOutsideTheWorkspace: a backup whose metadata names a
+// file outside the trusted root is not restored there.
+func TestUndo_RefusesATargetOutsideTheWorkspace(t *testing.T) {
+	useBackupRoot(t)
+	workspace, outside := t.TempDir(), t.TempDir()
+	victim := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(victim, []byte("original"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := "undo-escape"
+	backupBeforeWrite(session, victim) // as if planted: names a file outside
+	if err := os.WriteFile(victim, []byte("current"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := LocalFSConfig{Root: workspace, TrustedRoot: workspace}
+	for _, gated := range []bool{true, false} {
+		_, err := UndoTool{cfg: cfg, RequireApproval: gated}.Execute(context.Background(), map[string]any{"session_id": session})
+		if !errors.Is(err, ErrWorkspaceEscape) {
+			t.Errorf("gated=%v: err = %v, want ErrWorkspaceEscape", gated, err)
+		}
+	}
+	if data, _ := os.ReadFile(victim); string(data) != "current" {
+		t.Errorf("file outside the workspace was overwritten: %q", data)
+	}
+}

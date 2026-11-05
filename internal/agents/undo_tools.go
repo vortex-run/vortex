@@ -162,6 +162,17 @@ func (t UndoTool) Execute(_ context.Context, params map[string]any) (any, error)
 		return nil, fmt.Errorf("agents: nothing to undo")
 	}
 	latest := baks[0]
+	// The restore target comes from a metadata file, not from the write that
+	// made the backup; check it as if the model had named it. A planted
+	// metadata file (the backup dir can sit inside a broad trusted root, such
+	// as a home directory) must not turn undo into a write anywhere.
+	dest, err := t.cfg.resolveLocal(latest.meta.OriginalPath)
+	if err != nil {
+		return nil, fmt.Errorf("agents: undo: backup target %q: %w", latest.meta.OriginalPath, err)
+	}
+	if isProtectedPath(dest) {
+		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, dest)
+	}
 	if t.RequireApproval {
 		preview := "Restore " + latest.meta.OriginalPath + " to its previous contents"
 		return nil, &ApprovalError{Request: ApprovalRequest{
@@ -175,7 +186,7 @@ func (t UndoTool) Execute(_ context.Context, params map[string]any) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	if werr := os.WriteFile(latest.meta.OriginalPath, data, 0o644); werr != nil { //nolint:gosec // restore
+	if werr := os.WriteFile(dest, data, 0o644); werr != nil { //nolint:gosec // restore
 		return nil, werr
 	}
 	_ = os.Remove(latest.bakPath)
