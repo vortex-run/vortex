@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGroq_UsesOpenAIFormat(t *testing.T) {
@@ -198,5 +199,21 @@ func TestBedrock_ModelIDEncodedInPathAndSignature(t *testing.T) {
 	wire, canonical := bedrockModelPath("m-v1:0", "invoke")
 	if wire != "/model/m-v1%3A0/invoke" || canonical != "/model/m-v1%253A0/invoke" {
 		t.Errorf("wire=%q canonical=%q", wire, canonical)
+	}
+}
+
+// TestBedrockSignV4_MatchesAWSSDK: golden signature produced by the official
+// aws-sdk-go-v2 v4 signer (v1.47.6) for this exact request, so the hand-rolled
+// signer is checked against AWS's implementation, not just our reading of it.
+func TestBedrockSignV4_MatchesAWSSDK(t *testing.T) {
+	_, canonical := bedrockModelPath("anthropic.claude-3-5-sonnet-20240620-v1:0", "invoke")
+	h := map[string]string{}
+	bedrockSignV4(h, []byte(`{"x":1}`), "POST", "bedrock-runtime.us-east-1.amazonaws.com", canonical,
+		"AKIDEXAMPLE", "SECRET", "us-east-1", "bedrock", time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	const want = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261105/us-east-1/bedrock/aws4_request, " +
+		"SignedHeaders=content-type;host;x-amz-date, " +
+		"Signature=61a51f669f5ee956d13ed8eb6de82ed460c39b4aabe04ffb5ff922e61f4c94a4"
+	if h["Authorization"] != want {
+		t.Errorf("Authorization =\n%s\nwant\n%s", h["Authorization"], want)
 	}
 }
