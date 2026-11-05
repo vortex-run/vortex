@@ -28,7 +28,7 @@ func TestGenerateOpenRCCommandArgsConfig(t *testing.T) {
 
 func TestGenerateOpenRCPidfile(t *testing.T) {
 	out := GenerateOpenRC(DefaultOpenRCConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue"))
-	if !strings.Contains(out, "pidfile=/run/vortex/vortex.pid") {
+	if !strings.Contains(out, "pidfile=/run/gubern/gubern.pid") {
 		t.Errorf("pidfile not set:\n%s", out)
 	}
 }
@@ -48,10 +48,10 @@ func TestDefaultOpenRCConfig(t *testing.T) {
 	if cfg.ConfigPath != "/etc/vortex/vortex.cue" {
 		t.Errorf("ConfigPath = %q", cfg.ConfigPath)
 	}
-	if cfg.User != "vortex" {
-		t.Errorf("User default = %q, want vortex", cfg.User)
+	if cfg.User != "gubern" {
+		t.Errorf("User default = %q, want gubern", cfg.User)
 	}
-	if cfg.PidFile != "/run/vortex/vortex.pid" {
+	if cfg.PidFile != "/run/gubern/gubern.pid" {
 		t.Errorf("PidFile default = %q", cfg.PidFile)
 	}
 	if cfg.LogFile != "/var/log/vortex/vortex.log" {

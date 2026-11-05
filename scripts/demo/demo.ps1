@@ -51,7 +51,7 @@ Push-Location $repo
 try {
     if (-not (Test-Path $vortex)) {
         Write-Step 'building vortex...'
-        & go build -o $vortex ./cmd/vortex
+        & go build -o $vortex ./cmd/gubern
         if ($LASTEXITCODE -ne 0) { throw 'vortex build failed' }
     }
     if (-not (Test-Path $backends)) {

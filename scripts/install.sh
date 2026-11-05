@@ -1,14 +1,19 @@
 #!/bin/sh
 #
-# VORTEX one-line installer (build plan M1.4 / M1.7).
+# Gubern (formerly VORTEX) one-line installer (build plan M1.4 / M1.7).
 #
 #   curl -fsSL https://get.vortex.run | sh
 #
 # Detects OS and architecture, downloads the matching release from GitHub,
 # verifies its SHA-256 checksum against checksums.txt, installs the binary, and
-# seeds /etc/vortex/vortex.cue. The script is idempotent — re-running it upgrades
+# seeds /etc/gubern/gubern.cue. The script is idempotent — re-running it upgrades
 # the binary, skips when already at the target version, and never clobbers an
 # existing config.
+#
+# Hosts installed before the rename keep working: an existing /etc/vortex (and
+# vortex.cue in it) keeps being used, and an existing `vortex` binary in the
+# install dir becomes a link to `gubern`, so scripts and service units that run
+# `vortex` keep working.
 #
 # POSIX sh, not bash: the documented `curl ... | sh` runs dash on Debian and
 # Ubuntu and BusyBox ash on Alpine, which rejected the old `set -o pipefail`
@@ -20,8 +25,15 @@ set -eu
 REPO="vortex-run/vortex"
 # GUBERN_* settings; the pre-rename VORTEX_* names still work.
 INSTALL_DIR="${GUBERN_INSTALL_DIR:-${VORTEX_INSTALL_DIR:-/usr/local/bin}}"
-CONFIG_DIR="${GUBERN_CONFIG_DIR:-${VORTEX_CONFIG_DIR:-/etc/vortex}}"
-BIN_NAME="vortex"
+if [ -n "${GUBERN_CONFIG_DIR:-${VORTEX_CONFIG_DIR:-}}" ]; then
+  CONFIG_DIR="${GUBERN_CONFIG_DIR:-$VORTEX_CONFIG_DIR}"
+elif [ ! -d /etc/gubern ] && [ -d /etc/vortex ]; then
+  CONFIG_DIR="/etc/vortex" # pre-rename install: keep its config where it is
+else
+  CONFIG_DIR="/etc/gubern"
+fi
+BIN_NAME="gubern"
+LEGACY_BIN_NAME="vortex"
 DOCS_URL="https://docs.vortex.run/install"
 # Ed25519 key that signs each release's checksums.txt. Must equal
 # ReleaseSigningPublicKey in internal/update/signature.go (a Go test checks).
@@ -53,7 +65,8 @@ Options:
 Environment:
   GUBERN_VERSION     overrides the version to install (flag takes precedence)
   GUBERN_INSTALL_DIR overrides the install directory
-  GUBERN_CONFIG_DIR  overrides the config directory (default /etc/vortex)
+  GUBERN_CONFIG_DIR  overrides the config directory (default /etc/gubern, or an
+                     existing /etc/vortex)
   (the older VORTEX_* names are still accepted)
 EOF
 }
@@ -196,7 +209,7 @@ sudo_for() {
 # --- verify the release signature ------------------------------------------
 # checksums.txt comes from the same place as the archive, so the SHA-256
 # check alone catches corruption but not a tampered release. Verify the
-# Ed25519 signature over checksums.txt (as `vortex self-update` does) before
+# Ed25519 signature over checksums.txt (as `gubern self-update` does) before
 # trusting any line in it. This needs OpenSSL 3 (pkeyutl -rawin): present on
 # current Debian, Ubuntu, Fedora and Alpine, not on macOS (LibreSSL).
 
@@ -237,7 +250,7 @@ verify_signature() {
   tr -d '\r\n' < "$sig" | openssl base64 -d -A > "${dir}/checksums.sig.bin"
   if ! openssl pkeyutl -verify -pubin -keyform DER -inkey "${dir}/release-pub.der" \
       -rawin -in "$sums" -sigfile "${dir}/checksums.sig.bin" >/dev/null 2>&1; then
-    err "release signature does not verify: checksums.txt was not signed by the VORTEX release key. Do not install this download."
+    err "release signature does not verify: checksums.txt was not signed by the Gubern release key. Do not install this download."
   fi
   log "release signature verified"
 }
@@ -261,11 +274,11 @@ main() {
 
   if [ "$os" = "windows" ]; then
     cat <<EOF
-VORTEX on Windows is best installed manually:
-  1. Download vortex_windows_${arch}.zip from
-     https://github.com/${REPO}/releases/download/${version}/vortex_windows_${arch}.zip
-  2. Extract vortex.exe to "C:\\Program Files\\vortex\\vortex.exe"
-  3. Install as a service:  vortex service install
+Gubern on Windows is best installed manually:
+  1. Download gubern_windows_${arch}.zip from
+     https://github.com/${REPO}/releases/download/${version}/gubern_windows_${arch}.zip
+  2. Extract gubern.exe to "C:\\Program Files\\gubern\\gubern.exe"
+  3. Install as a service:  gubern service install
 EOF
     exit 0
   fi
@@ -276,15 +289,16 @@ EOF
     local installed
     installed="$("$target_bin" version --short 2>/dev/null || echo "")"
     if [ -n "$installed" ] && [ "$installed" = "$version" ]; then
-      log "VORTEX ${version} is already installed. Nothing to do."
+      log "Gubern ${version} is already installed. Nothing to do."
       exit 0
     fi
   fi
 
-  log "installing VORTEX ${version} for ${os}/${arch}"
+  log "installing Gubern ${version} for ${os}/${arch}"
 
-  local base url sumurl tarball
-  base="vortex_${os}_${arch}.tar.gz"
+  local base url sumurl tarball archive_bin
+  base="gubern_${os}_${arch}.tar.gz"
+  archive_bin="$BIN_NAME"
   url="https://github.com/${REPO}/releases/download/${version}/${base}"
   sumurl="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
   # Global, not local: the EXIT trap runs after main returns, when a local is
@@ -294,7 +308,15 @@ EOF
   tarball="${workdir}/${base}"
 
   log "downloading ${url}"
-  download_file "$url" "$tarball" || err "failed to download ${base}"
+  if ! download_file "$url" "$tarball" 2>/dev/null; then
+    # Releases from before the rename only publish vortex_* archives.
+    base="vortex_${os}_${arch}.tar.gz"
+    archive_bin="$LEGACY_BIN_NAME"
+    url="https://github.com/${REPO}/releases/download/${version}/${base}"
+    tarball="${workdir}/${base}"
+    log "no gubern archive in ${version}; downloading ${url}"
+    download_file "$url" "$tarball" || err "failed to download ${base}"
+  fi
   download_quiet "$sumurl" "${workdir}/checksums.txt" || err "failed to download checksums.txt"
   download_quiet "${sumurl}.sig" "${workdir}/checksums.txt.sig" 2>/dev/null || rm -f "${workdir}/checksums.txt.sig"
   verify_signature "${workdir}/checksums.txt" "${workdir}/checksums.txt.sig"
@@ -302,7 +324,7 @@ EOF
 
   log "extracting"
   tar -xzf "$tarball" -C "$workdir" || err "failed to extract ${base}"
-  [ -f "${workdir}/${BIN_NAME}" ] || err "binary ${BIN_NAME} not found in archive"
+  [ -f "${workdir}/${archive_bin}" ] || err "binary ${archive_bin} not found in archive"
 
   # sudo only for a path this user can't write: --install-dir "$HOME/.local/bin"
   # must not leave a root-owned binary in the user's home.
@@ -312,7 +334,7 @@ EOF
 
   log "installing binary to ${target_bin}"
   $BIN_SUDO mkdir -p "$INSTALL_DIR" || err "failed to create ${INSTALL_DIR}"
-  $BIN_SUDO install -m 0755 "${workdir}/${BIN_NAME}" "$target_bin" || err "failed to install binary to ${target_bin}"
+  $BIN_SUDO install -m 0755 "${workdir}/${archive_bin}" "$target_bin" || err "failed to install binary to ${target_bin}"
 
   # Post-install verification: a download that passed SHA-256 can still be the
   # wrong arch or corrupt in a way the checksum was computed over; running it is
@@ -322,37 +344,59 @@ EOF
     err "installed binary failed to run; removed it (corrupt or wrong platform?)"
   fi
 
-  log "ensuring config directory ${CONFIG_DIR}"
-  $CFG_SUDO mkdir -p "$CONFIG_DIR"
-  if [ ! -f "${CONFIG_DIR}/vortex.cue" ]; then
-    if [ -f "${workdir}/vortex.cue" ]; then
-      $CFG_SUDO cp "${workdir}/vortex.cue" "${CONFIG_DIR}/vortex.cue"
-      log "seeded example config at ${CONFIG_DIR}/vortex.cue"
-    else
-      warn "no example vortex.cue in archive; create ${CONFIG_DIR}/vortex.cue manually"
-    fi
-  else
-    log "existing config preserved at ${CONFIG_DIR}/vortex.cue"
+  # Pre-rename hosts: point an existing `vortex` at the new binary so service
+  # units and scripts that run it keep working (and stop running the old one).
+  local legacy_bin="${INSTALL_DIR}/${LEGACY_BIN_NAME}"
+  if [ -e "$legacy_bin" ] && [ ! -L "$legacy_bin" ]; then
+    $BIN_SUDO ln -sf "$target_bin" "$legacy_bin" || warn "could not replace ${legacy_bin}; remove it by hand"
+    log "${legacy_bin} now links to ${target_bin}"
   fi
 
-  # macOS has no `vortex service install` (launchd) yet; say how to run it
+  log "ensuring config directory ${CONFIG_DIR}"
+  $CFG_SUDO mkdir -p "$CONFIG_DIR"
+  # An existing pre-rename vortex.cue stays the config file.
+  local cfg_file="${CONFIG_DIR}/gubern.cue"
+  if [ ! -f "$cfg_file" ] && [ -f "${CONFIG_DIR}/vortex.cue" ]; then
+    cfg_file="${CONFIG_DIR}/vortex.cue"
+  fi
+  if [ ! -f "$cfg_file" ]; then
+    local example=""
+    for f in gubern.cue vortex.cue; do
+      if [ -f "${workdir}/${f}" ]; then example="${workdir}/${f}"; break; fi
+    done
+    if [ -n "$example" ]; then
+      $CFG_SUDO cp "$example" "$cfg_file"
+      log "seeded example config at ${cfg_file}"
+    else
+      warn "no example config in archive; create ${cfg_file} manually"
+    fi
+  else
+    log "existing config preserved at ${cfg_file}"
+  fi
+
+  # The service keeps its pre-rename name on hosts that already have it.
+  local svc="gubern"
+  if [ -f /etc/systemd/system/vortex.service ] || [ -f /etc/init.d/vortex ]; then
+    svc="vortex"
+  fi
+  # macOS has no `gubern service install` (launchd) yet; say how to run it
   # instead of suggesting systemctl.
-  local start_hint="sudo vortex service install && sudo systemctl start vortex   (systemd; OpenRC: rc-service vortex start)"
+  local start_hint="sudo ${BIN_NAME} service install && sudo systemctl start ${svc}   (systemd; OpenRC: rc-service ${svc} start)"
   if [ "$os" = "darwin" ]; then
     NO_SERVICE=1
-    start_hint="vortex start --config ${CONFIG_DIR}/vortex.cue   (no launchd service yet)"
+    start_hint="${BIN_NAME} start --config ${cfg_file}   (no launchd service yet)"
   fi
 
   if [ "$NO_SERVICE" -eq 0 ]; then
     log "previewing service installation (dry-run)"
     "$target_bin" service install \
-      --config-path "${CONFIG_DIR}/vortex.cue" --dry-run || true
+      --config-path "$cfg_file" --dry-run || true
   fi
 
   cat <<EOF
 
-VORTEX ${version} installed to ${target_bin}
-Config: ${CONFIG_DIR}/vortex.cue — edit this file before starting
+Gubern ${version} installed to ${target_bin}
+Config: ${cfg_file} — edit this file before starting
 Start:  ${start_hint}
 Docs:   https://docs.vortex.run
 EOF

@@ -66,7 +66,7 @@ func keepsState(cmd *cobra.Command) bool {
 // It is exported so tests can build an isolated command tree.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "vortex",
+		Use:           "gubern",
 		Short:         "VORTEX — one binary. any server. fully autonomous.",
 		Long:          "VORTEX is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
 		SilenceUsage:  true,

@@ -122,11 +122,7 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	}
 	fmt.Fprintln(out, " done")
 
-	binInArchive := "vortex"
-	if runtime.GOOS == "windows" {
-		binInArchive = "vortex.exe"
-	}
-	newBin, err := update.Extract(archivePath, extractDir, binInArchive)
+	newBin, err := extractBinary(archivePath, extractDir)
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
 		return errSelfUpdate

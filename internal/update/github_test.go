@@ -103,10 +103,10 @@ func TestAssetForPlatformUnknown(t *testing.T) {
 }
 
 func TestAssetName(t *testing.T) {
-	if got := AssetName("linux", "arm64"); got != "vortex_linux_arm64.tar.gz" {
+	if got := AssetName("linux", "arm64"); got != "gubern_linux_arm64.tar.gz" {
 		t.Errorf("got %q", got)
 	}
-	if got := AssetName("windows", "amd64"); got != "vortex_windows_amd64.zip" {
+	if got := AssetName("windows", "amd64"); got != "gubern_windows_amd64.zip" {
 		t.Errorf("got %q", got)
 	}
 }
@@ -131,5 +131,24 @@ func TestFetchChecksumsNoAsset(t *testing.T) {
 	rel := &Release{Tag: "v1.0.0", Assets: []Asset{{Name: "vortex_linux_amd64.tar.gz"}}}
 	if _, err := FetchChecksums(t.Context(), rel); err == nil {
 		t.Error("expected error when release has no checksums.txt asset")
+	}
+}
+
+// TestAssetForPlatform_PrefersGubernFallsBackToVortex: releases after the
+// rename carry gubern_* (and vortex_* for old installs); older ones only
+// vortex_*.
+func TestAssetForPlatform_PrefersGubernFallsBackToVortex(t *testing.T) {
+	both := &Release{Assets: []Asset{
+		{Name: "vortex_linux_amd64.tar.gz", DownloadURL: "https://x/old"},
+		{Name: "gubern_linux_amd64.tar.gz", DownloadURL: "https://x/new"},
+	}}
+	if a, err := AssetForPlatform(both, "linux", "amd64"); err != nil || a.DownloadURL != "https://x/new" {
+		t.Errorf("both: %+v, %v", a, err)
+	}
+	if a, err := AssetForPlatform(sampleRelease(), "linux", "amd64"); err != nil || a.Name != "vortex_linux_amd64.tar.gz" {
+		t.Errorf("legacy only: %+v, %v", a, err)
+	}
+	if names := BinaryNames("windows"); names[0] != "gubern.exe" || names[1] != "vortex.exe" {
+		t.Errorf("windows names = %v", names)
 	}
 }

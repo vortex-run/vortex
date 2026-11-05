@@ -41,18 +41,18 @@ func BuildBinary(t *testing.T) string {
 		return sharedBinary
 	}
 	dir := t.TempDir()
-	name := "vortex"
+	name := "gubern"
 	if runtime.GOOS == "windows" {
-		name = "vortex.exe"
+		name = "gubern.exe"
 	}
 	bin := filepath.Join(dir, name)
 
 	repoRoot := moduleRoot(t)
 
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/gubern")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building vortex binary: %v\n%s", err, out)
+		t.Fatalf("building gubern binary: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { _ = os.Remove(bin) })
 	return bin
@@ -74,9 +74,9 @@ func SetSharedBinary(bin string) { sharedBinary = bin }
 // suite (BuildBinary ties the binary to a single test via t.TempDir/t.Cleanup,
 // which deletes it when that one test finishes).
 func BuildBinaryInto(destDir string) (string, error) {
-	name := "vortex"
+	name := "gubern"
 	if runtime.GOOS == "windows" {
-		name = "vortex.exe"
+		name = "gubern.exe"
 	}
 	bin := filepath.Join(destDir, name)
 
@@ -84,10 +84,10 @@ func BuildBinaryInto(destDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/gubern")
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("building vortex binary: %w\n%s", err, out)
+		return "", fmt.Errorf("building gubern binary: %w\n%s", err, out)
 	}
 	return bin, nil
 }

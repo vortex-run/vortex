@@ -21,8 +21,8 @@ func DefaultOpenRCConfig(execPath, configPath string) OpenRCConfig {
 	return OpenRCConfig{
 		ExecPath:   execPath,
 		ConfigPath: configPath,
-		User:       "vortex",
-		PidFile:    "/run/vortex/vortex.pid",
+		User:       ServiceUser,
+		PidFile:    "/run/gubern/gubern.pid",
 		LogFile:    "/var/log/vortex/vortex.log",
 		Home:       ServiceHome,
 	}

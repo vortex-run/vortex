@@ -7,8 +7,8 @@ version: "3"
 vars:
   # Output binary name; .exe is appended automatically on Windows by Go, but we
   # set BIN explicitly so paths are predictable across platforms.
-  BIN: '{{if eq OS "windows"}}bin/vortex.exe{{else}}bin/vortex{{end}}'
-  PKG: ./cmd/vortex
+  BIN: '{{if eq OS "windows"}}bin/gubern.exe{{else}}bin/gubern{{end}}'
+  PKG: ./cmd/gubern
   # Version metadata stamped into the binary via -ldflags.
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev"
@@ -33,7 +33,7 @@ tasks:
     silent: true
 
   build:
-    desc: Compile the single vortex binary
+    desc: Compile the single gubern binary
     cmds:
       - go build -trimpath -ldflags "{{.LDFLAGS}}" -o "{{.BIN}}" {{.PKG}}
     sources:
@@ -43,7 +43,7 @@ tasks:
       - "{{.BIN}}"
 
   install:path:
-    desc: Add vortex to PATH (run once) so `vortex code` works from any directory
+    desc: Add gubern to PATH (run once) so `gubern code` works from any directory
     cmds:
       - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-path.ps1
         platforms: [windows]
@@ -102,19 +102,19 @@ tasks:
     desc: Build and start the VORTEX server
     deps: [build]
     cmds:
-      - '"{{.BIN}}" start --config vortex.cue'
+      - '"{{.BIN}}" start --config gubern.cue'
 
   start:
     desc: Start the VORTEX server
     deps: [build]
     cmds:
-      - '"{{.BIN}}" start --config vortex.cue'
+      - '"{{.BIN}}" start --config gubern.cue'
 
   start:team:
     desc: Start VORTEX with the specialist agent team (Code/Test/Review)
     deps: [build]
     cmds:
-      - '"{{.BIN}}" start --config vortex.cue --team'
+      - '"{{.BIN}}" start --config gubern.cue --team'
 
   stop:
     desc: Stop the running VORTEX server
@@ -127,9 +127,9 @@ tasks:
       - '"{{.BIN}}" status'
 
   check:
-    desc: Validate vortex.cue without starting
+    desc: Validate gubern.cue without starting
     cmds:
-      - '"{{.BIN}}" check --config vortex.cue'
+      - '"{{.BIN}}" check --config gubern.cue'
 
   service:install:
     desc: Install VORTEX as a system service (requires root on Linux)
@@ -159,7 +159,7 @@ tasks:
     cmds:
       - |
         if command -v journalctl >/dev/null 2>&1; then
-          journalctl -u vortex -f --output=short-precise
+          journalctl -u gubern -f --output=short-precise 2>/dev/null || journalctl -u vortex -f --output=short-precise
         else
           tail -f /var/log/vortex/vortex.log 2>/dev/null ||
           echo "No log file found. Run: task start"
@@ -244,7 +244,7 @@ tasks:
       - go test -race -count=1 -timeout 10m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
 
   test:integration:
-    desc: Run integration tests (starts a real vortex process)
+    desc: Run integration tests (starts a real gubern process)
     cmds:
       - go test -v -tags integration -timeout 900s ./integration/...
 

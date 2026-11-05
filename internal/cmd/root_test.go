@@ -17,8 +17,8 @@ func TestNewRootCommandInitialises(t *testing.T) {
 	if root == nil {
 		t.Fatal("NewRootCommand returned nil")
 	}
-	if root.Use != "vortex" {
-		t.Errorf("root.Use = %q, want vortex", root.Use)
+	if root.Use != "gubern" {
+		t.Errorf("root.Use = %q, want gubern", root.Use)
 	}
 }
 

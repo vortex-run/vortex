@@ -93,7 +93,7 @@ func TestInstallWindows_CreatesFirewallRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "nssm install vortex") {
+	if !strings.Contains(out, "nssm install gubern") {
 		t.Errorf("NSSM guidance disappeared: %s", out)
 	}
 	if !strings.Contains(out, "advfirewall") {

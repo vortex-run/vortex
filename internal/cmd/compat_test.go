@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // TestCompat_StatePaths pins where existing installs keep their state. A
@@ -27,14 +29,14 @@ func TestCompat_StatePaths(t *testing.T) {
 	cases := []struct {
 		name, got, want string
 	}{
-		{"master key", masterKeyPath(), filepath.Join(cfg, "vortex", "master.key")},
-		{"TUI key", tuiKeyPath(), filepath.Join(cfg, "vortex", "tui-key")},
-		{"AI provider config", aiProviderConfigPath(), filepath.Join(cfg, "vortex", "ai-provider.json")},
-		{"audit log", auditLogPath(), filepath.Join(cache, "vortex", "audit.log")},
-		{"secret store", secretStorePath(), filepath.Join(cache, "vortex", "secrets")},
-		{"key slots", keystorePath(), filepath.Join(cache, "vortex", "keyslots.db")},
-		{"plugins", pluginStorePath(), filepath.Join(cache, "vortex", "plugins")},
-		{"namespaces", namespaceStorePath(), filepath.Join(cache, "vortex", "namespaces.json")},
+		{"master key", masterKeyPath(), filepath.Join(userdir.App(cfg), "master.key")},
+		{"TUI key", tuiKeyPath(), filepath.Join(userdir.App(cfg), "tui-key")},
+		{"AI provider config", aiProviderConfigPath(), filepath.Join(userdir.App(cfg), "ai-provider.json")},
+		{"audit log", auditLogPath(), filepath.Join(userdir.App(cache), "audit.log")},
+		{"secret store", secretStorePath(), filepath.Join(userdir.App(cache), "secrets")},
+		{"key slots", keystorePath(), filepath.Join(userdir.App(cache), "keyslots.db")},
+		{"plugins", pluginStorePath(), filepath.Join(userdir.App(cache), "plugins")},
+		{"namespaces", namespaceStorePath(), filepath.Join(userdir.App(cache), "namespaces.json")},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

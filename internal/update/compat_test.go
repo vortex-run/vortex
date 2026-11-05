@@ -14,8 +14,8 @@ func TestCompat_AssetNames(t *testing.T) {
 		{"darwin", "amd64", "vortex_darwin_amd64.tar.gz"},
 		{"windows", "amd64", "vortex_windows_amd64.zip"},
 	} {
-		if got := AssetName(c.goos, c.goarch); got != c.want {
-			t.Errorf("AssetName(%s, %s) = %q, want %q", c.goos, c.goarch, got, c.want)
+		if got := LegacyAssetName(c.goos, c.goarch); got != c.want {
+			t.Errorf("LegacyAssetName(%s, %s) = %q, want %q", c.goos, c.goarch, got, c.want)
 		}
 	}
 }

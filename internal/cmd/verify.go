@@ -143,15 +143,27 @@ func fetchReleaseBinarySHA(ctx context.Context, rel *update.Release) (string, er
 		return "", err
 	}
 
-	binName := "vortex"
-	if runtime.GOOS == "windows" {
-		binName = "vortex.exe"
-	}
-	bin, err := update.Extract(archive, dir, binName)
+	bin, err := extractBinary(archive, dir)
 	if err != nil {
 		return "", err
 	}
 	return hashFile(bin)
+}
+
+// extractBinary pulls the executable out of a release archive: gubern, or
+// vortex in releases from before the rename.
+func extractBinary(archive, dir string) (string, error) {
+	var firstErr error
+	for _, name := range update.BinaryNames(runtime.GOOS) {
+		bin, err := update.Extract(archive, dir, name)
+		if err == nil {
+			return bin, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return "", firstErr
 }
 
 // hashFile returns the SHA-256 hex digest of the file at path.

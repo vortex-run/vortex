@@ -65,13 +65,13 @@ func TestDefaultSystemdConfig(t *testing.T) {
 	if cfg.ConfigPath != "/etc/vortex/vortex.cue" {
 		t.Errorf("ConfigPath = %q", cfg.ConfigPath)
 	}
-	if cfg.User != "vortex" {
-		t.Errorf("User default = %q, want vortex", cfg.User)
+	if cfg.User != "gubern" {
+		t.Errorf("User default = %q, want gubern", cfg.User)
 	}
-	if cfg.Group != "vortex" {
-		t.Errorf("Group default = %q, want vortex", cfg.Group)
+	if cfg.Group != "gubern" {
+		t.Errorf("Group default = %q, want gubern", cfg.Group)
 	}
-	if cfg.Description != "VORTEX — autonomous infra platform" {
+	if cfg.Description != "Gubern — autonomous infra platform" {
 		t.Errorf("Description default = %q", cfg.Description)
 	}
 	if cfg.After != "network-online.target" {

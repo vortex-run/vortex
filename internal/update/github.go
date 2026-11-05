@@ -165,16 +165,36 @@ func AssetForPlatform(release *Release, goos, goarch string) (*Asset, error) {
 	if a := findAsset(release, name); a != nil {
 		return a, nil
 	}
+	// Releases from before the VORTEX → Gubern rename only have vortex_*.
+	if a := findAsset(release, LegacyAssetName(goos, goarch)); a != nil {
+		return a, nil
+	}
 	return nil, fmt.Errorf("no release asset %q for %s/%s", name, goos, goarch)
 }
 
 // AssetName returns the archive filename for a platform.
-func AssetName(goos, goarch string) string {
+func AssetName(goos, goarch string) string { return assetName("gubern", goos, goarch) }
+
+// LegacyAssetName is the pre-rename archive name. Releases keep publishing it
+// (holding the same program as a binary named vortex) so installs from before
+// the rename can still self-update.
+func LegacyAssetName(goos, goarch string) string { return assetName("vortex", goos, goarch) }
+
+func assetName(prefix, goos, goarch string) string {
 	ext := "tar.gz"
 	if goos == "windows" {
 		ext = "zip"
 	}
-	return fmt.Sprintf("vortex_%s_%s.%s", goos, goarch, ext)
+	return fmt.Sprintf("%s_%s_%s.%s", prefix, goos, goarch, ext)
+}
+
+// BinaryNames lists the executable names to look for in a release archive,
+// newest first: gubern, then the pre-rename vortex.
+func BinaryNames(goos string) []string {
+	if goos == "windows" {
+		return []string{"gubern.exe", "vortex.exe"}
+	}
+	return []string{"gubern", "vortex"}
 }
 
 // CurrentPlatformAsset is a convenience wrapper for the running platform.

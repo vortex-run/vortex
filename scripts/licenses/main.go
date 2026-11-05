@@ -50,7 +50,7 @@ type dep struct {
 
 func main() {
 	out := flag.String("o", "THIRD_PARTY_LICENSES", "output file")
-	pkg := flag.String("pkg", "./cmd/vortex", "Go package whose dependencies are listed")
+	pkg := flag.String("pkg", "./cmd/gubern", "Go package whose dependencies are listed")
 	dash := flag.String("dashboard", "web/dashboard", "dashboard directory (package-lock.json + node_modules)")
 	flag.Parse()
 

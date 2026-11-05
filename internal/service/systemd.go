@@ -26,9 +26,9 @@ func DefaultSystemdConfig(execPath, configPath string) SystemdConfig {
 	return SystemdConfig{
 		ExecPath:    execPath,
 		ConfigPath:  configPath,
-		User:        "vortex",
-		Group:       "vortex",
-		Description: "VORTEX — autonomous infra platform",
+		User:        ServiceUser,
+		Group:       ServiceUser,
+		Description: "Gubern — autonomous infra platform",
 		After:       "network-online.target",
 		Home:        ServiceHome,
 	}
