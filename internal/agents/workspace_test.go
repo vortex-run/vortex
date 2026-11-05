@@ -525,7 +525,12 @@ func TestContainInTrustedRoot_RootReachedThroughSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks needs privileges on Windows")
 	}
-	realDir := t.TempDir()
+	// The real directory, itself resolved: on macOS t.TempDir() is under the
+	// /var -> /private/var link.
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(t.TempDir(), "root-link")
 	if err := os.Symlink(realDir, link); err != nil {
 		t.Fatal(err)
