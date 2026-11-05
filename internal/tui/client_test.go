@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // fakeVortex builds an httptest server emulating the management API. It records
@@ -422,5 +424,16 @@ func TestClient_HealthStillUsesShortTimeout(t *testing.T) {
 	c := NewClient(ClientConfig{BaseURL: srv.URL, Timeout: 500 * time.Millisecond})
 	if _, err := c.Health(); err == nil {
 		t.Error("Health should honour the short client timeout and fail on a 2s handler")
+	}
+}
+
+// TestSubmitDeadline_AgentRuns: the client must outwait the server-side run
+// limit, or a long /agent run is cut off by the TUI instead.
+func TestSubmitDeadline_AgentRuns(t *testing.T) {
+	if d := submitDeadline("/agent fix the build"); d <= agents.AgentRunTimeout {
+		t.Errorf("/agent deadline %v <= server run limit %v", d, agents.AgentRunTimeout)
+	}
+	if d := submitDeadline("hello"); d != submitTimeout {
+		t.Errorf("chat deadline = %v", d)
 	}
 }

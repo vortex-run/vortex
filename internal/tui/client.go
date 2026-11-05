@@ -427,6 +427,18 @@ func (c *Client) ForgeStatus(jobID string) (*ForgeJobData, error) {
 // much longer deadline than the fast read endpoints.
 const submitTimeout = 180 * time.Second
 
+// agentSubmitTimeout bounds a /agent submit: the server lets a run take up to
+// agents.AgentRunTimeout (10 minutes), plus a margin for the final answer.
+const agentSubmitTimeout = 11 * time.Minute
+
+// submitDeadline is how long the client waits for a reply to msg.
+func submitDeadline(msg string) time.Duration {
+	if strings.HasPrefix(strings.TrimSpace(msg), "/agent ") {
+		return agentSubmitTimeout
+	}
+	return submitTimeout
+}
+
 // forgeStatusTimeout bounds a forge status poll. Forge builds can run for
 // minutes; the status endpoint itself is fast, but we allow generous headroom.
 const forgeStatusTimeout = 300 * time.Second
@@ -436,14 +448,14 @@ const forgeStatusTimeout = 300 * time.Second
 // wait on a slow AI provider.
 func (c *Client) Submit(msg, sessionID string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
-	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitDeadline(msg))
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	submitClient := &http.Client{Timeout: submitTimeout}
+	submitClient := &http.Client{Timeout: submitDeadline(msg)}
 	resp, err := submitClient.Do(req)
 	if err != nil {
 		// Server unreachable (connection refused, DNS, timeout): surface a
@@ -473,7 +485,7 @@ func (c *Client) Submit(msg, sessionID string) (string, error) {
 // server rejected it.
 func (c *Client) SubmitStream(msg, sessionID string) (<-chan string, error) {
 	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
-	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitDeadline(msg))
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
 	if err != nil {
 		cancel()

@@ -63,6 +63,7 @@ func (t *TelegramBot) SetCommandHooks(h CommandHooks) { t.hooks = h }
 
 // TelegramBot is a Telegram Bot API client + webhook handler.
 type TelegramBot struct {
+	inflight sync.WaitGroup // webhook updates still being handled
 	cfg      TelegramConfig
 	baseURL  string
 	client   *http.Client
@@ -426,7 +427,7 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			case t.resolver != nil && t.resolver.Resolve(upd.CallbackQuery.Data):
 				// consumed by the approval resolver
 			default:
-				t.dispatch(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
+				t.dispatchDetached(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
 			}
 			w.WriteHeader(http.StatusOK)
 		case upd.Message != nil:
@@ -435,13 +436,27 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			t.dispatch(r.Context(), runtime, chatID, upd.Message.Text)
+			t.dispatchDetached(r.Context(), runtime, chatID, upd.Message.Text)
 			w.WriteHeader(http.StatusOK)
 		default:
 			// Nothing actionable in this update.
 			w.WriteHeader(http.StatusOK)
 		}
 	})
+}
+
+// dispatchDetached handles a webhook update after the webhook is answered.
+// Telegram re-delivers an update whose webhook request is slow, so a long
+// reply (a chat answer, or an /agent run waiting on an approval) was submitted
+// twice; and since an /agent run stops when its caller goes away, a dropped
+// webhook connection would also stop the run. The reply goes out through
+// sendMessage either way; the runtime's own lifetime still bounds the work.
+func (t *TelegramBot) dispatchDetached(ctx context.Context, runtime *agents.Runtime, chatID int64, text string) {
+	t.inflight.Add(1)
+	go func() {
+		defer t.inflight.Done()
+		t.dispatch(context.WithoutCancel(ctx), runtime, chatID, text)
+	}()
 }
 
 // dispatch submits text to the runtime and sends the response back to chatID.

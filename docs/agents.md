@@ -45,8 +45,9 @@ with the same local tools: it chooses which tools to call, sees their
 results, and keeps going until it answers. Every write, command and commit
 still goes through the approval gate (Telegram if configured, otherwise the
 TUI/API approve call; pending approvals expire after 15 minutes), and each
-decision is in the audit log. A run stops after 20 model turns or about two
-minutes, or at 250k tokens. Works with every built-in provider (Claude,
+decision is in the audit log. A run stops after 20 model turns, 10 minutes
+or 250k tokens, and when the client that started it disconnects (nobody is
+left to approve its actions or read its answer). Works with every built-in provider (Claude,
 OpenAI, DeepSeek, Groq, OpenRouter, Azure OpenAI, Gemini, Bedrock via the
 Converse API, Ollama). Models without native tool calling (many small
 local models) fall back to a text protocol: the model asks for a tool in a

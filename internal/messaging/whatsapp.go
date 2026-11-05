@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sandeepbollavaram/vortex/internal/agents"
@@ -54,9 +55,10 @@ func NormalizeWhatsAppNumber(s string) string {
 
 // WhatsAppBot is a WhatsApp Cloud API client + webhook handler.
 type WhatsAppBot struct {
-	cfg     WhatsAppConfig
-	baseURL string
-	client  *http.Client
+	inflight sync.WaitGroup // webhook messages still being handled
+	cfg      WhatsAppConfig
+	baseURL  string
+	client   *http.Client
 }
 
 // NewWhatsAppBot constructs the bot. It requires PhoneNumberID and AccessToken.
@@ -213,12 +215,26 @@ func (wb *WhatsAppBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
+		// Answer the webhook first and handle the messages after, in order:
+		// Meta re-delivers a slow webhook, which submitted long replies twice,
+		// and an /agent run stops if its caller's connection drops.
+		var msgs []whatsappMessageRef
 		for _, e := range in.Entry {
 			for _, c := range e.Changes {
 				for _, m := range c.Value.Messages {
-					wb.dispatch(r.Context(), runtime, m.From, m.Text.Body)
+					msgs = append(msgs, whatsappMessageRef{from: m.From, text: m.Text.Body})
 				}
 			}
+		}
+		if len(msgs) > 0 {
+			ctx := context.WithoutCancel(r.Context())
+			wb.inflight.Add(1)
+			go func() {
+				defer wb.inflight.Done()
+				for _, m := range msgs {
+					wb.dispatch(ctx, runtime, m.from, m.text)
+				}
+			}()
 		}
 		w.WriteHeader(http.StatusOK)
 	})
@@ -259,6 +275,9 @@ func (wb *WhatsAppBot) senderAllowed(from string) bool {
 // dispatch submits text to the runtime and replies to the sender. Senders not
 // on the allow-list are dropped without a reply, so the bot doesn't confirm it
 // exists to strangers.
+// whatsappMessageRef is one inbound message to dispatch.
+type whatsappMessageRef struct{ from, text string }
+
 func (wb *WhatsAppBot) dispatch(ctx context.Context, runtime *agents.Runtime, from, text string) {
 	if runtime == nil || text == "" || from == "" {
 		return

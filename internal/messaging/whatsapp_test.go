@@ -111,6 +111,7 @@ func TestWhatsApp_WebhookVerificationOK(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=verifyme&hub.challenge=CHAL", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK || rec.Body.String() != "CHAL" {
 		t.Errorf("verification: code=%d body=%q, want 200 CHAL", rec.Code, rec.Body.String())
@@ -126,6 +127,7 @@ func TestWhatsApp_WebhookVerificationWrongToken(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=WRONG&hub.challenge=CHAL", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("wrong verify token code = %d, want 403", rec.Code)
@@ -150,6 +152,7 @@ func TestWhatsApp_WebhookRoutesMessage(t *testing.T) {
 	req.Header.Set("X-Hub-Signature-256", signWA("appsecret", body))
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -170,6 +173,7 @@ func TestWhatsApp_WebhookRejectsBadSignature(t *testing.T) {
 	req.Header.Set("X-Hub-Signature-256", signWA("WRONGSECRET", body))
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("bad signature code = %d, want 401", rec.Code)
@@ -187,6 +191,7 @@ func postWA(t *testing.T, bot *WhatsAppBot, secret, from string) *httptest.Respo
 	}
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 	return rec
 }
 
@@ -237,6 +242,7 @@ func TestWhatsApp_VerificationEmptyTokenNeverMatches(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=&hub.challenge=CHAL", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("empty token handshake: code = %d, want 403", rec.Code)
 	}
@@ -250,6 +256,7 @@ func TestWhatsApp_VerificationEchoIsPlainText(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=verifyme&hub.challenge=%3Cscript%3Ealert(1)%3C%2Fscript%3E", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("Content-Type = %q, want text/plain (a sniffed text/html echo is reflected XSS)", ct)
 	}

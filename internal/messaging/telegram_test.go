@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
@@ -24,12 +25,16 @@ type fakeTelegram struct {
 	lastJSON   map[string]any
 	lastMulti  map[string]string
 	lastFile   []byte
+	hold       chan struct{} // when set, sendMessage waits for it to close
 }
 
 func newFakeTelegram(t *testing.T) *fakeTelegram {
 	t.Helper()
 	f := &fakeTelegram{}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hold := f.hold; hold != nil && strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			<-hold
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		// Method is the last path segment, e.g. /sendMessage.
@@ -187,6 +192,7 @@ func TestTelegram_HandleWebhook_RoutesToRuntime(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -207,6 +213,7 @@ func TestTelegram_HandleWebhook_RejectsUnknownChat(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("unknown chat status = %d, want 403", rec.Code)
@@ -223,6 +230,7 @@ func TestTelegram_HandleWebhook_RejectsBadSecret(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "wrong")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("bad secret status = %d, want 401", rec.Code)
@@ -239,6 +247,7 @@ func TestTelegram_HandleWebhook_AcceptsGoodSecret(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "good")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("good secret status = %d, want 200", rec.Code)
@@ -255,6 +264,7 @@ func TestTelegram_HandleWebhook_CallbackQuery(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("callback status = %d, want 200", rec.Code)
@@ -273,6 +283,7 @@ func TestTelegram_HandleWebhook_NoSecretRefuses(t *testing.T) {
 		strings.NewReader(`{"message":{"chat":{"id":1},"text":"rm -rf"}}`))
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("no-secret webhook status = %d, want 401", rec.Code)
 	}
@@ -293,6 +304,7 @@ func TestTelegram_HandleWebhook_CallbackNeedsAllowedUser(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("unlisted user pressing a button in an allowed group: status = %d, want 403", rec.Code)
 	}
@@ -449,5 +461,38 @@ func TestTelegram_NonClarifyCallbackNotConsumed(t *testing.T) {
 	bot := newTestBot(t, f, TelegramConfig{})
 	if bot.handleClarifyCallback("approve:appr-1") {
 		t.Error("a non-clarify callback should not be consumed by the clarify handler")
+	}
+}
+
+// TestTelegram_HandleWebhook_AnswersBeforeTheReply: the webhook is answered
+// while the reply is still being produced. Telegram re-delivers slow webhook
+// requests, which submitted long replies twice.
+func TestTelegram_HandleWebhook_AnswersBeforeTheReply(t *testing.T) {
+	f := newFakeTelegram(t)
+	f.hold = make(chan struct{})
+	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{99}, SecretToken: "s"})
+	rt := startStubRuntime(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/telegram", strings.NewReader(`{"message":{"chat":{"id":99},"text":"hi there"}}`))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s")
+	rec := httptest.NewRecorder()
+	answered := make(chan struct{})
+	go func() {
+		bot.HandleWebhook(rt).ServeHTTP(rec, req)
+		close(answered)
+	}()
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		close(f.hold)
+		t.Fatal("webhook waited for the reply to be sent")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d", rec.Code)
+	}
+	close(f.hold)
+	bot.inflight.Wait()
+	if f.method() != "sendMessage" {
+		t.Errorf("reply not sent; last method = %q", f.method())
 	}
 }

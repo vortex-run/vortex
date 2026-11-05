@@ -77,6 +77,12 @@ const (
 // Two minutes covers a slow provider intent parse for a real build.
 const handleMessageTimeout = 120 * time.Second
 
+// AgentRunTimeout bounds one /agent run. A run takes many model turns and can
+// wait on a person reading an approval, so the 120s chat deadline cut real
+// runs off mid-task. Clients that hold the request open (the TUI) must allow
+// at least this long.
+const AgentRunTimeout = 10 * time.Minute
+
 const intentSystemPrompt = `You are the Gubern coordinator. Classify the user's request into exactly one of: BUILD_APP, RESEARCH, DEVOPS_CHECK, DATA_PIPELINE, GENERAL_QUESTION, UNKNOWN. Respond with only the classification keyword.`
 
 const answerSystemPrompt = `You are Gubern, an autonomous coding assistant like Claude Code. Answer the user's question concisely and helpfully.
@@ -1157,8 +1163,8 @@ func strParamOr(params map[string]any, key, def string) string {
 // accepted for interface stability but deliberately unused: routing decouples
 // onto its own 120s deadline so a short-lived caller (the TUI cancels on nav)
 // cannot abort work mid-flight (see handleMessageInner).
-func (c *Coordinator) HandleMessage(_ context.Context, userMsg, sessionID string) (string, error) {
-	reply, err := c.handleMessageInner(userMsg, sessionID, nil)
+func (c *Coordinator) HandleMessage(ctx context.Context, userMsg, sessionID string) (string, error) {
+	reply, err := c.handleMessageInner(ctx, userMsg, sessionID, nil)
 	if err != nil {
 		return reply, err
 	}
@@ -1179,7 +1185,7 @@ func (c *Coordinator) HandleMessageStream(ctx context.Context, userMsg, sessionI
 		return c.HandleMessage(ctx, userMsg, sessionID)
 	}
 	sf := newStreamFilter(onDelta)
-	reply, err := c.handleMessageInner(userMsg, sessionID, sf)
+	reply, err := c.handleMessageInner(ctx, userMsg, sessionID, sf)
 	if err != nil {
 		return reply, err
 	}
@@ -1195,7 +1201,7 @@ func (c *Coordinator) HandleMessageStream(ctx context.Context, userMsg, sessionI
 // handleMessageInner is the routing core of HandleMessage (filtering applied by
 // the public wrappers). When sf is non-nil and the gateway supports streaming,
 // the direct-answer path streams its reply through sf as it is generated.
-func (c *Coordinator) handleMessageInner(userMsg, sessionID string, sf *streamFilter) (string, error) {
+func (c *Coordinator) handleMessageInner(caller context.Context, userMsg, sessionID string, sf *streamFilter) (string, error) {
 	if strings.TrimSpace(userMsg) == "" {
 		return "", fmt.Errorf("agents: empty user message")
 	}
@@ -1233,7 +1239,16 @@ func (c *Coordinator) handleMessageInner(userMsg, sessionID string, sf *streamFi
 	// tools itself through RunLoop, under the same approval gates. Opt-in
 	// while the loop is new; everything else keeps the routes below.
 	if task, isAgent := strings.CutPrefix(strings.TrimSpace(userMsg), "/agent "); isAgent {
-		return c.handleAgentLoop(ctx, sessionID, strings.TrimSpace(task), sf)
+		// Unlike chat, a run follows the caller: when the client goes away
+		// (or the runtime stops) nobody can approve its actions or read its
+		// answer, so it stops instead of spending tokens for up to
+		// AgentRunTimeout unobserved.
+		if caller == nil {
+			caller = context.Background()
+		}
+		actx, acancel := context.WithTimeout(caller, AgentRunTimeout)
+		defer acancel()
+		return c.handleAgentLoop(actx, sessionID, strings.TrimSpace(task), sf)
 	}
 
 	// Specialist team mode (agent teams): a complex coding task is run through
@@ -2093,7 +2108,7 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		SkillFiles: skillFiles,
 		Verify:     verify,
 		Session:    sessionID,
-		Timeout:    handleMessageTimeout - 5*time.Second,
+		Timeout:    AgentRunTimeout - 5*time.Second,
 		// A runaway run stops here rather than at the gateway's daily cap.
 		MaxTokens: 250_000,
 		Emit:      emit,
