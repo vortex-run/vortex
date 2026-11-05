@@ -76,7 +76,9 @@ entry. An approve call that sends `action_id` only applies to that exact
 action: if anything else is pending it gets `409` and nothing runs. The TUI
 always sends it; API clients should too. Pending approvals expire after 15
 minutes. In `/agent` runs the model can also be stopped by its budgets (20
-turns, 250k tokens, at most 16 tool calls per turn).
+turns, 250k tokens, at most 16 tool calls per turn). Each run ends with one
+`agent.run.finished` entry: the task, why it stopped, turns, tokens, tool-call
+outcomes, and whether its `--check` passed.
 
 Each entry's hash covers its sequence number, timestamp, actor, action,
 resource and (for entries marked `"v":2`) its `detail`: tool outcomes and

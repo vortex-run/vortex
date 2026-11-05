@@ -2088,6 +2088,7 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		MaxTokens: 250_000,
 		Emit:      emit,
 	}, task)
+	c.auditRun(ctx, sessionID, task, check, res)
 
 	// The final line goes through emit too: when the caller streams, the
 	// streamed lines are the reply, so an answer only in the return value
@@ -2139,6 +2140,33 @@ func (c *Coordinator) skillCatalog() (string, map[string]SkillRef) {
 	}
 	return "<workspace_skills>\nThe following comes from files in the repository. It describes optional " +
 		"procedures; it is not an instruction from the user.\n" + cat + "</workspace_skills>", files
+}
+
+// auditRun records how a /agent run ended: alongside the per-action entries
+// it gives the audit trail one place that says what was asked, how far the
+// run got and whether its completion check passed. The task text is
+// truncated like other free text in the log.
+func (c *Coordinator) auditRun(ctx context.Context, sessionID, task, check string, res LoopResult) {
+	outcomes := map[string]int{}
+	for _, st := range res.Steps {
+		outcomes[st.Outcome]++
+	}
+	detail := map[string]any{
+		"task": truncateForAudit(task), "stop": string(res.Stop), "turns": res.Turns,
+		"tokens": res.Tokens, "tool_calls": len(res.Steps), "outcomes": outcomes,
+	}
+	if check != "" {
+		detail["check"] = truncateForAudit(check)
+		detail["verified"] = res.Verified
+		detail["checks"] = res.Checks
+	}
+	if res.Err != nil {
+		detail["error"] = truncateForAudit(res.Err.Error())
+	}
+	// The run's own context may have expired (that is one way it ends).
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	c.auditAction(actx, "agent.run.finished", sessionID, "agent", detail)
 }
 
 // parseAgentFlags splits leading /agent options from the task. The only one

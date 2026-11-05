@@ -90,3 +90,31 @@ func TestAgentCommand_CheckRejectedIsNotVerified(t *testing.T) {
 		t.Errorf("a check the user refused must not count as passed: %q", reply)
 	}
 }
+
+// TestAgentCommand_RunFinishedIsAudited: every /agent run ends with one
+// agent.run.finished entry describing the outcome.
+func TestAgentCommand_RunFinishedIsAudited(t *testing.T) {
+	c, _ := agentCoord(t, toolGateway{writeScript()}, func(context.Context, ApprovalRequest) bool { return true })
+	rec := &approvalAuditRecorder{}
+	c.cfg.Audit = rec
+	if _, err := c.HandleMessage(context.Background(), `/agent --check "exit 0" create hello.txt`, "ra1"); err != nil {
+		t.Fatal(err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	var d map[string]any
+	for i, e := range rec.entries {
+		if strings.HasPrefix(e, "agent.run.finished|") {
+			if d != nil {
+				t.Fatal("more than one run.finished entry")
+			}
+			d = rec.details[i]
+		}
+	}
+	if d == nil {
+		t.Fatalf("no agent.run.finished entry: %v", rec.entries)
+	}
+	if d["stop"] != "done" || d["verified"] != true || d["tool_calls"] != 1 || d["task"] != "create hello.txt" {
+		t.Errorf("detail = %v", d)
+	}
+}
