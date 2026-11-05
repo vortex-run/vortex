@@ -956,9 +956,14 @@ func (c *Coordinator) resolvePending(session string, p *pendingApproval, approve
 	case p.result <- approved:
 	default:
 	}
-	c.auditAction(ctx, "agent.approval.decided", session, p.toolName, map[string]any{
-		"approved": approved, "via": "api", "action": truncateForAudit(p.description),
-	})
+	// A loop-owned pending action (no stashed tool) is audited by the loop
+	// itself once it has the decision; recording it here too doubled every
+	// /agent approval in the log.
+	if p.tool != nil {
+		c.auditAction(ctx, "agent.approval.decided", session, p.toolName, map[string]any{
+			"approved": approved, "via": "api", "action": truncateForAudit(p.description),
+		})
+	}
 	if !approved {
 		slog.Default().Info("approval rejected", "tool", p.toolName, "session", session)
 		return "✗ Action rejected by user"
@@ -2212,6 +2217,9 @@ func (c *Coordinator) loopCheck(sessionID, command string, approve ApprovalFunc,
 		out, err := tool.Execute(ctx, params)
 		var ae *ApprovalError
 		if errors.As(err, &ae) {
+			c.auditAction(ctx, "agent.approval.requested", sessionID, "run_terminal", map[string]any{
+				"risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description), "action_id": ActionID(ae.Request),
+			})
 			approved := approve != nil && approve(ctx, ae.Request)
 			c.auditAction(ctx, "agent.approval.decided", sessionID, "run_terminal", map[string]any{
 				"approved": approved, "via": "loop-check", "action": truncateForAudit(ae.Request.Description),

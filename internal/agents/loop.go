@@ -235,6 +235,9 @@ func runLoopCall(ctx context.Context, cfg LoopConfig, specs map[string]ToolSpec,
 	out, err := tool.Execute(ctx, params)
 	var ae *ApprovalError
 	if errors.As(err, &ae) {
+		loopAudit(ctx, cfg, "agent.approval.requested", call.Name, map[string]any{
+			"risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description), "action_id": ActionID(ae.Request),
+		})
 		approved := cfg.Approval != nil && cfg.Approval(ctx, ae.Request)
 		loopAudit(ctx, cfg, "agent.approval.decided", call.Name, map[string]any{
 			"approved": approved, "via": "loop", "risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description),

@@ -131,7 +131,8 @@ func TestRunLoop_WriteNeedsApproval(t *testing.T) {
 			if (err == nil) != tc.written {
 				t.Errorf("file written = %v, want %v", err == nil, tc.written)
 			}
-			if len(audit.entries) == 0 || audit.entries[0] != "agent.approval.decided|write_file" {
+			if len(audit.entries) < 2 || audit.entries[0] != "agent.approval.requested|write_file" ||
+				audit.entries[1] != "agent.approval.decided|write_file" {
 				t.Errorf("audit = %v", audit.entries)
 			}
 		})
