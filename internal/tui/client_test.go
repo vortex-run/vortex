@@ -346,7 +346,7 @@ func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 	// No env var; key only in the persisted setup file.
 	t.Setenv("GUBERN_API_KEY", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir (Linux)
-	t.Setenv("HOME", t.TempDir()) // redirect UserConfigDir (Linux) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
+	t.Setenv("HOME", t.TempDir())            // redirect UserConfigDir (Linux) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())         // redirect on Windows
 
 	path := APIKeyFilePath()

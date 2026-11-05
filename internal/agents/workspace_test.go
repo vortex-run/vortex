@@ -499,6 +499,13 @@ func pathsEquivalent(a, b string) bool {
 	if a == b {
 		return true
 	}
+	// The same place reached through a link or alias (macOS /var vs
+	// /private/var, Windows RUNNER~1 vs runneradmin): compare real paths,
+	// resolving the part that exists (the file itself may not yet).
+	if ra, rb := resolveExistingPrefix(a), resolveExistingPrefix(b); ra == rb ||
+		(runtime.GOOS == "windows" && strings.EqualFold(ra, rb)) {
+		return true
+	}
 	aa, aerr := filepath.Abs(a)
 	bb, berr := filepath.Abs(b)
 	if aerr == nil && berr == nil && aa == bb {
@@ -508,4 +515,42 @@ func pathsEquivalent(a, b string) bool {
 		return strings.EqualFold(aa, bb)
 	}
 	return false
+}
+
+// TestContainInTrustedRoot_RootReachedThroughSymlink: a trusted root given as
+// a link to the real directory (what macOS /var -> /private/var does to every
+// temp dir) works for existing and new files, keeps the Auto Mode waiver, and
+// still blocks escapes. Found by the first macOS/Windows CI run.
+func TestContainInTrustedRoot_RootReachedThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs privileges on Windows")
+	}
+	realDir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "root-link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "old.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(link, "old.txt"), filepath.Join(link, "new", "f.txt")} {
+		got, err := containInTrustedRoot(link, p)
+		if err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		if !pathWithinBase(got, realDir) {
+			t.Errorf("%s resolved to %s, not under the realDir root %s", p, got, realDir)
+		}
+		// A result fed back in (as the tools do) is accepted too.
+		if _, err := containInTrustedRoot(link, got); err != nil {
+			t.Errorf("result %s rejected on the second pass: %v", got, err)
+		}
+	}
+	cfg := LocalFSConfig{Root: link, TrustedRoot: link, AutoMode: true}
+	if resolved, err := containInTrustedRoot(link, filepath.Join(link, "new.txt")); err != nil || !cfg.waivesApproval(resolved) {
+		t.Errorf("Auto Mode waiver lost under a symlinked root (err %v)", err)
+	}
+	if _, err := containInTrustedRoot(link, filepath.Join(link, "..", "escape.txt")); err == nil {
+		t.Error("escape through .. allowed")
+	}
 }

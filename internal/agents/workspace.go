@@ -35,15 +35,21 @@ func containInTrustedRoot(trustedRoot, abs string) (string, error) {
 	// IsLocal also rejects reserved Windows device names such as NUL. Rebuilding
 	// target from the checked relative part means nothing below can touch the
 	// unvalidated input.
-	rel, err := filepath.Rel(base, target)
-	if err != nil || !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%w: %q is outside trusted workspace %q", ErrWorkspaceEscape, target, base)
-	}
-	target = filepath.Join(base, rel)
-
 	realBase, err := filepath.EvalSymlinks(base)
 	if err != nil {
 		return "", fmt.Errorf("agents: resolve trusted root symlinks: %w", err)
+	}
+	// The target may be written against the root as configured or against
+	// its real path (this function returns the real form, and callers pass
+	// such results back in). Either is fine lexically; the symlink checks
+	// below are always made against realBase.
+	rel, err := filepath.Rel(base, target)
+	if err == nil && filepath.IsLocal(rel) {
+		target = filepath.Join(base, rel)
+	} else if rel, err = filepath.Rel(realBase, target); err == nil && filepath.IsLocal(rel) {
+		target = filepath.Join(realBase, rel)
+	} else {
+		return "", fmt.Errorf("%w: %q is outside trusted workspace %q", ErrWorkspaceEscape, target, base)
 	}
 
 	if _, lerr := os.Lstat(target); lerr == nil {
@@ -74,6 +80,14 @@ func containInTrustedRoot(trustedRoot, abs string) (string, error) {
 			}
 			if !pathWithinBase(realAnc, realBase) {
 				return "", fmt.Errorf("%w: parent of %q resolves outside trusted workspace", ErrWorkspaceEscape, abs)
+			}
+			// Return the resolved form, as for an existing target, so callers
+			// always get a path under the real root. When the root itself is
+			// reached through a link or an alias (macOS /var -> /private/var,
+			// a Windows 8.3 short name such as RUNNER~1), the lexical target
+			// would not be under realBase. Found by the macOS/Windows CI jobs.
+			if remainder, err := filepath.Rel(anc, target); err == nil && filepath.IsLocal(remainder) {
+				return filepath.Join(realAnc, remainder), nil
 			}
 			break
 		}
