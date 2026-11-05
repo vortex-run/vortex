@@ -240,7 +240,8 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	// subsystems (studio, agents, webhooks) are wired onto it, so waiting for
 	// "management API listening" alone races tests that hit those endpoints
 	// immediately. "VORTEX started" is logged only after all wiring completes.
-	deadline := time.Now().Add(15 * time.Second)
+	wait := startTimeout()
+	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		if strings.Contains(p.logBuf.String(), "VORTEX started") {
 			resp, err := http.Get(apiBase + "/health")
@@ -253,7 +254,7 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("vortex did not become healthy within 15s:\n%s", p.logBuf.String())
+	t.Fatalf("vortex did not become healthy within %s:\n%s", wait, p.logBuf.String())
 	return nil
 }
 
@@ -367,4 +368,17 @@ func WriteTestConfig(t *testing.T, content string) string {
 		t.Fatalf("writing test config: %v", err)
 	}
 	return p
+}
+
+// startTimeout is how long StartVortex waits for "VORTEX started". Startup
+// takes ~3s on an idle machine; on a loaded one (e.g. a WSL VM sharing CPU
+// with host builds) it can exceed 15s. VORTEX_TEST_START_TIMEOUT (a Go
+// duration) raises it for such runs; the default is unchanged for CI.
+func startTimeout() time.Duration {
+	if v := os.Getenv("VORTEX_TEST_START_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 15 * time.Second
 }
