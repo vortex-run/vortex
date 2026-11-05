@@ -42,3 +42,6 @@ func waitExit(t *testing.T, p *VortexProcess, d time.Duration) {
 		t.Fatalf("vortex did not exit within %s", d)
 	}
 }
+
+// dumpStacks is Unix-only (SIGQUIT); Windows has no equivalent signal.
+func dumpStacks(*VortexProcess) {}

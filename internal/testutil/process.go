@@ -254,6 +254,7 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	dumpStacks(p)
 	t.Fatalf("vortex did not become healthy within %s:\n%s", wait, p.logBuf.String())
 	return nil
 }
