@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	agentskills "github.com/vortex-run/vortex/internal/skills"
 )
 
 // AIGateway is the interface the coordinator uses to reach a language model. It
@@ -2003,7 +2005,7 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		Tools:    c.cfg.LocalTools,
 		Approval: c.loopApprover(sessionID, emit),
 		Audit:    c.cfg.Audit,
-		System:   DefaultLoopSystemPrompt(c.WorkingDir()),
+		System:   c.loopSystemPrompt(),
 		Session:  sessionID,
 		Timeout:  handleMessageTimeout - 5*time.Second,
 		Emit:     emit,
@@ -2021,6 +2023,26 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		emit("Stopped: " + errString(res.Err))
 	}
 	return strings.Join(transcript, "\n"), nil
+}
+
+// loopSystemPrompt is the default prompt plus the catalog of project skills
+// (names and descriptions only). Skills are re-read on every run so edits
+// apply without a restart. Only workspace skills are listed: the model reads
+// a skill's body with read_file, which is confined to the workspace.
+func (c *Coordinator) loopSystemPrompt() string {
+	prompt := DefaultLoopSystemPrompt(c.WorkingDir())
+	wd := c.WorkingDir()
+	if wd == "" {
+		return prompt
+	}
+	found, problems := agentskills.Discover(agentskills.DefaultRoots(wd, ""))
+	for _, p := range problems {
+		slog.Warn("skipping invalid skill", "path", p.Path, "error", p.Err)
+	}
+	if cat := agentskills.Catalog(found, wd); cat != "" {
+		prompt += "\n\n" + cat
+	}
+	return prompt
 }
 
 func errString(err error) string {

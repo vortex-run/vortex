@@ -126,3 +126,31 @@ func TestAgentCommand_StreamedReplyIncludesAnswer(t *testing.T) {
 		t.Errorf("streamed reply lacks the answer: %q", streamed.String())
 	}
 }
+
+// TestAgentCommand_SkillCatalogInPrompt: workspace skills are listed (name
+// and description only) in the loop's system prompt; invalid ones are not.
+func TestAgentCommand_SkillCatalogInPrompt(t *testing.T) {
+	model := &scriptedModel{}
+	c, dir := agentCoord(t, toolGateway{model}, nil)
+	for name, doc := range map[string]string{
+		"release-notes": "---\nname: release-notes\ndescription: Draft release notes from git log\n---\nSECRET BODY\n",
+		"bad":           "---\nname: not-bad\ndescription: x\n---\n",
+	} {
+		d := filepath.Join(dir, ".agents", "skills", name)
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "SKILL.md"), []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.HandleMessage(context.Background(), "/agent summarise", "s6"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(model.system, "- release-notes: Draft release notes from git log (.agents/skills/release-notes/SKILL.md)") {
+		t.Errorf("system prompt lacks the skill:\n%s", model.system)
+	}
+	if strings.Contains(model.system, "SECRET BODY") || strings.Contains(model.system, "not-bad") {
+		t.Errorf("system prompt leaked a body or listed an invalid skill:\n%s", model.system)
+	}
+}

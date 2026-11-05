@@ -17,11 +17,13 @@ type scriptedModel struct {
 	err     error
 	seen    [][]llm.ChatMessage
 	tools   []llm.ToolDef
+	system  string
 }
 
-func (m *scriptedModel) ChatWithTools(_ context.Context, _ string, msgs []llm.ChatMessage, tools []llm.ToolDef) (llm.ToolChatResult, error) {
+func (m *scriptedModel) ChatWithTools(_ context.Context, system string, msgs []llm.ChatMessage, tools []llm.ToolDef) (llm.ToolChatResult, error) {
 	m.seen = append(m.seen, append([]llm.ChatMessage(nil), msgs...))
 	m.tools = tools
+	m.system = system
 	if m.err != nil {
 		return llm.ToolChatResult{}, m.err
 	}
