@@ -141,7 +141,7 @@ func TestChatWithTools_SkipsUnsupportedAndFallsBack(t *testing.T) {
 	defer bad.Close()
 	good := fakeProvider(t, `{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{}}`, nil)
 	g := toolGateway(t,
-		AIProvider{Name: ProviderGemini, APIKey: "k", Priority: 1},                    // no native tools: skipped
+		AIProvider{Name: ProviderBedrock, APIKey: "k", Priority: 1},                   // no native tools: skipped
 		AIProvider{Name: ProviderOpenAI, APIKey: "k", Endpoint: bad.URL, Priority: 2}, // fails
 		AIProvider{Name: ProviderGroq, APIKey: "k", Endpoint: good.URL, Priority: 3},  // answers
 	)
@@ -152,7 +152,7 @@ func TestChatWithTools_SkipsUnsupportedAndFallsBack(t *testing.T) {
 }
 
 func TestChatWithTools_OnlyUnsupportedProviders(t *testing.T) {
-	g := toolGateway(t, AIProvider{Name: ProviderGemini, APIKey: "k"})
+	g := toolGateway(t, AIProvider{Name: ProviderBedrock, APIKey: "k"})
 	if _, err := g.ChatWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "hi"}}, nil); !errors.Is(err, ErrToolsUnsupported) {
 		t.Errorf("err = %v, want ErrToolsUnsupported", err)
 	}
@@ -167,5 +167,93 @@ func TestChatWithTools_MalformedArgumentsKept(t *testing.T) {
 	}
 	if len(res.ToolCalls) != 1 || res.ToolCalls[0].Arguments != nil || res.ToolCalls[0].RawArgs != "{not json" {
 		t.Errorf("malformed call should be kept with RawArgs for the validator: %+v", res.ToolCalls)
+	}
+}
+
+func TestChatWithTools_Gemini(t *testing.T) {
+	var req map[string]any
+	var gotKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		req["_path"] = r.URL.Path
+		gotKey = r.Header.Get("x-goog-api-key")
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[
+			{"text":"thinking...","thought":true},
+			{"text":"Let me look. "},
+			{"functionCall":{"name":"read_file","args":{"path":"main.go"}},"thoughtSignature":"sig-1"}]},
+			"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":33}}`)
+	}))
+	t.Cleanup(srv.Close)
+	g := toolGateway(t, AIProvider{Name: ProviderGemini, APIKey: "gk", Endpoint: srv.URL, Models: []string{"gemini-x"}})
+
+	history := append([]ChatMessage(nil), followUp...)
+	history[1].ToolCalls = []ToolCall{{ID: "call_1", Name: "read_file", Arguments: map[string]any{"path": "go.mod"}, Opaque: "sig-0"}}
+	tools := []ToolDef{{Name: "read_file", Description: "Read", Parameters: map[string]any{
+		"type": "object", "additionalProperties": false, "$schema": "x",
+		"properties": map[string]any{"path": map[string]any{"type": "string", "description": "p"}},
+		"required":   []string{"path"},
+	}}}
+	res, err := g.ChatWithTools(context.Background(), "sys", history, tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotKey != "gk" || req["_path"] != "/v1beta/models/gemini-x:generateContent" {
+		t.Errorf("key=%q path=%v", gotKey, req["_path"])
+	}
+	if res.Stop != "tool_calls" || res.Text != "Let me look. " || res.Tokens != 33 || len(res.ToolCalls) != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	if c := res.ToolCalls[0]; c.Name != "read_file" || c.Arguments["path"] != "main.go" || c.Opaque != "sig-1" || c.ID == "" {
+		t.Errorf("call = %+v", c)
+	}
+
+	// Request shape: system instruction, model turn echoing the signature,
+	// tool result as a functionResponse, schema stripped to Gemini's subset.
+	if req["systemInstruction"] == nil {
+		t.Error("no systemInstruction")
+	}
+	contents := req["contents"].([]any)
+	if len(contents) != 3 {
+		t.Fatalf("contents = %v", contents)
+	}
+	model := contents[1].(map[string]any)
+	part := model["parts"].([]any)[0].(map[string]any)
+	if model["role"] != "model" || part["thoughtSignature"] != "sig-0" || part["functionCall"].(map[string]any)["name"] != "read_file" {
+		t.Errorf("model turn = %v", model)
+	}
+	fr := contents[2].(map[string]any)["parts"].([]any)[0].(map[string]any)["functionResponse"].(map[string]any)
+	if fr["name"] != "read_file" || fr["response"].(map[string]any)["content"] != "module x" {
+		t.Errorf("function response = %v", fr)
+	}
+	decl := req["tools"].([]any)[0].(map[string]any)["functionDeclarations"].([]any)[0].(map[string]any)
+	params := decl["parameters"].(map[string]any)
+	if _, bad := params["additionalProperties"]; bad {
+		t.Error("additionalProperties sent to Gemini")
+	}
+	if _, bad := params["$schema"]; bad {
+		t.Error("$schema sent to Gemini")
+	}
+	if params["properties"].(map[string]any)["path"].(map[string]any)["type"] != "string" {
+		t.Errorf("params = %v", params)
+	}
+}
+
+func TestGeminiContents_GroupsParallelResults(t *testing.T) {
+	got := geminiContents([]ChatMessage{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", ToolCalls: []ToolCall{{Name: "a"}, {Name: "b"}}},
+		{Role: "tool", ToolName: "a", Content: "1"},
+		{Role: "tool", ToolName: "b", Content: "2"},
+		{Role: "user", Content: "next"},
+	})
+	if len(got) != 4 {
+		t.Fatalf("contents = %v", got)
+	}
+	if parts := got[2]["parts"].([]map[string]any); len(parts) != 2 {
+		t.Errorf("parallel results should share one turn: %v", got[2])
+	}
+	if args := got[1]["parts"].([]map[string]any)[0]["functionCall"].(map[string]any)["args"]; args == nil {
+		t.Error("nil args must be sent as {}")
 	}
 }

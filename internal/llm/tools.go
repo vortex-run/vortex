@@ -6,7 +6,7 @@ package llm
 import "errors"
 
 // ErrToolsUnsupported means no configured provider can take tool definitions
-// natively (e.g. only Gemini or Bedrock are configured). Callers fall back to
+// natively (e.g. only Bedrock is configured). Callers fall back to
 // a text protocol or report the capability gap; nothing is silently degraded.
 var ErrToolsUnsupported = errors.New("llm: no configured provider supports native tool calling")
 
@@ -24,6 +24,9 @@ type ToolCall struct {
 	Name      string         // tool name
 	Arguments map[string]any // decoded arguments
 	RawArgs   string         // the arguments exactly as the model produced them
+	// Opaque is provider data that must be sent back with this call on the
+	// next turn (Gemini's thoughtSignature); never shown to the model or user.
+	Opaque string
 }
 
 // ChatMessage is one turn in a tool-using conversation.
