@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -141,7 +142,7 @@ func TestChatWithTools_SkipsUnsupportedAndFallsBack(t *testing.T) {
 	defer bad.Close()
 	good := fakeProvider(t, `{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{}}`, nil)
 	g := toolGateway(t,
-		AIProvider{Name: ProviderBedrock, APIKey: "k", Priority: 1},                   // no native tools: skipped
+		AIProvider{Name: "custom", APIKey: "k", Priority: 1},                          // no native tools: skipped
 		AIProvider{Name: ProviderOpenAI, APIKey: "k", Endpoint: bad.URL, Priority: 2}, // fails
 		AIProvider{Name: ProviderGroq, APIKey: "k", Endpoint: good.URL, Priority: 3},  // answers
 	)
@@ -152,7 +153,7 @@ func TestChatWithTools_SkipsUnsupportedAndFallsBack(t *testing.T) {
 }
 
 func TestChatWithTools_OnlyUnsupportedProviders(t *testing.T) {
-	g := toolGateway(t, AIProvider{Name: ProviderBedrock, APIKey: "k"})
+	g := toolGateway(t, AIProvider{Name: "custom", APIKey: "k"})
 	if _, err := g.ChatWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "hi"}}, nil); !errors.Is(err, ErrToolsUnsupported) {
 		t.Errorf("err = %v, want ErrToolsUnsupported", err)
 	}
@@ -255,5 +256,56 @@ func TestGeminiContents_GroupsParallelResults(t *testing.T) {
 	}
 	if args := got[1]["parts"].([]map[string]any)[0]["functionCall"].(map[string]any)["args"]; args == nil {
 		t.Error("nil args must be sent as {}")
+	}
+}
+
+func TestChatWithTools_BedrockConverse(t *testing.T) {
+	var req map[string]any
+	var uri, auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		uri, auth = r.RequestURI, r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"output":{"message":{"role":"assistant","content":[
+			{"text":"Checking. "},
+			{"toolUse":{"toolUseId":"tu_1","name":"read_file","input":{"path":"main.go"}}}]}},
+			"stopReason":"tool_use","usage":{"inputTokens":10,"outputTokens":5,"totalTokens":15}}`)
+	}))
+	t.Cleanup(srv.Close)
+	g := toolGateway(t, AIProvider{Name: ProviderBedrock, APIKey: "AKIA:secret", Endpoint: "us-east-1",
+		Models: []string{"anthropic.claude-3-5-sonnet-20240620-v1:0"}})
+	g.client = &http.Client{Transport: rewriteTransport{to: srv.URL, base: srv.Client().Transport}}
+
+	res, err := g.ChatWithTools(context.Background(), "sys", followUp, []ToolDef{readFileTool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uri != "/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/converse" || !strings.HasPrefix(auth, "AWS4-HMAC-SHA256 ") {
+		t.Errorf("uri=%q auth=%q", uri, auth)
+	}
+	if res.Stop != "tool_calls" || res.Text != "Checking. " || res.Tokens != 15 || len(res.ToolCalls) != 1 {
+		t.Fatalf("res = %+v", res)
+	}
+	if c := res.ToolCalls[0]; c.ID != "tu_1" || c.Name != "read_file" || c.Arguments["path"] != "main.go" {
+		t.Errorf("call = %+v", c)
+	}
+	msgs := req["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("messages = %v", msgs)
+	}
+	use := msgs[1].(map[string]any)["content"].([]any)[0].(map[string]any)["toolUse"].(map[string]any)
+	if use["toolUseId"] != "call_1" || use["name"] != "read_file" {
+		t.Errorf("toolUse = %v", use)
+	}
+	tr := msgs[2].(map[string]any)["content"].([]any)[0].(map[string]any)["toolResult"].(map[string]any)
+	if tr["toolUseId"] != "call_1" || tr["content"].([]any)[0].(map[string]any)["text"] != "module x" {
+		t.Errorf("toolResult = %v", tr)
+	}
+	spec := req["toolConfig"].(map[string]any)["tools"].([]any)[0].(map[string]any)["toolSpec"].(map[string]any)
+	if spec["name"] != "read_file" || spec["inputSchema"].(map[string]any)["json"] == nil {
+		t.Errorf("toolSpec = %v", spec)
+	}
+	if req["system"].([]any)[0].(map[string]any)["text"] != "sys" {
+		t.Errorf("system = %v", req["system"])
 	}
 }

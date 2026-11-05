@@ -6,7 +6,7 @@ package llm
 import "errors"
 
 // ErrToolsUnsupported means no configured provider can take tool definitions
-// natively (e.g. only Bedrock is configured). Callers fall back to
+// natively (every built-in provider does; a custom one may not). Callers fall back to
 // a text protocol or report the capability gap; nothing is silently degraded.
 var ErrToolsUnsupported = errors.New("llm: no configured provider supports native tool calling")
 

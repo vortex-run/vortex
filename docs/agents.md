@@ -46,10 +46,10 @@ results, and keeps going until it answers. Every write, command and commit
 still goes through the approval gate (Telegram if configured, otherwise the
 TUI/API approve call; pending approvals expire after 15 minutes), and each
 decision is in the audit log. A run stops after 20 model turns or about two
-minutes, or at 250k tokens. Needs a provider with native tool calling:
-Claude, OpenAI, DeepSeek, Groq, OpenRouter, Azure OpenAI, Gemini or Ollama
-(not Bedrock yet). Without `/agent`, requests use the existing command and keyword
-routing.
+minutes, or at 250k tokens. Works with every built-in provider (Claude,
+OpenAI, DeepSeek, Groq, OpenRouter, Azure OpenAI, Gemini, Bedrock via the
+Converse API, Ollama); the model itself must support tool use. Without
+`/agent`, requests use the existing command and keyword routing.
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 

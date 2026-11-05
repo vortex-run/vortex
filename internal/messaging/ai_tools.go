@@ -30,7 +30,7 @@ var ErrToolsUnsupported = llm.ErrToolsUnsupported
 func SupportsNativeTools(p AIProvider) bool {
 	switch p.Name {
 	case ProviderOpenAI, ProviderDeepSeek, ProviderGroq, ProviderOpenRouter, ProviderAzureOpenAI,
-		ProviderClaude, ProviderOllama, ProviderGemini:
+		ProviderClaude, ProviderOllama, ProviderGemini, ProviderBedrock:
 		return true
 	}
 	return false
@@ -79,6 +79,8 @@ func (g *AIGateway) chatToolsProvider(ctx context.Context, p AIProvider, system 
 		res, err = g.toolsOllama(ctx, p, model, system, msgs, tools)
 	case ProviderGemini:
 		res, err = g.toolsGemini(ctx, p, model, system, msgs, tools)
+	case ProviderBedrock:
+		res, err = g.toolsBedrock(ctx, p, model, system, msgs, tools)
 	default:
 		res, err = g.toolsOpenAICompat(ctx, p, model, system, msgs, tools)
 	}
