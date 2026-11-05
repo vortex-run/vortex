@@ -1,6 +1,6 @@
 #Requires -Version 5.0
 #
-# VORTEX PATH installer (Windows).
+# Gubern PATH installer (Windows).
 #
 # Adds the repo's bin/ directory to the *user* PATH permanently, so `vortex`
 # (and `vortex code`) work from any directory. Run once:

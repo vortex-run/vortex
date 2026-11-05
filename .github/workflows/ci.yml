@@ -1,4 +1,4 @@
-# VORTEX continuous integration (build plan M1.6).
+# Gubern continuous integration (build plan M1.6).
 #
 # Runs tests and lint on every push and pull request. The merge gate is
 # Non-Negotiable Rule #9: `task test` must pass before merging.

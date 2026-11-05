@@ -1,26 +1,26 @@
 # Agents
 
-VORTEX runs an AI **coordinator** that classifies your message and dispatches
+Gubern runs an AI **coordinator** that classifies your message and dispatches
 it to the right capability: code/file work, app builds, research, devops,
 data pipelines, or multi-agent orchestration. You talk to it from the TUI
-(`vortex ui`), the web dashboard, Telegram, or the HTTP API.
+(`gubern ui`), the web dashboard, Telegram, or the HTTP API.
 
 ## AI providers
 
-Configure one or more via `vortex setup` or environment variables. The gateway
+Configure one or more via `gubern setup` or environment variables. The gateway
 tries providers in priority order and falls back on failure.
 
 | Provider | Env | Notes |
 |---|---|---|
-| Anthropic Claude | `VORTEX_ANTHROPIC_KEY` | Best reasoning |
-| DeepSeek | `VORTEX_DEEPSEEK_KEY` | Cheap, OpenAI-compatible |
-| OpenAI | `VORTEX_OPENAI_KEY` | GPT-4o family |
-| Google Gemini | `VORTEX_GEMINI_KEY` | Gemini 1.5 |
-| Groq | `VORTEX_GROQ_KEY` | Very fast, free tier |
-| AWS Bedrock | `VORTEX_BEDROCK_REGION` + AWS creds | SigV4-signed |
-| Azure OpenAI | `VORTEX_AZURE_OPENAI_KEY/_ENDPOINT/_DEPLOYMENT` | |
-| OpenRouter | `VORTEX_OPENROUTER_KEY` | 75+ models |
-| Ollama | `VORTEX_OLLAMA_URL` | Local, free |
+| Anthropic Claude | `GUBERN_ANTHROPIC_KEY` | Best reasoning |
+| DeepSeek | `GUBERN_DEEPSEEK_KEY` | Cheap, OpenAI-compatible |
+| OpenAI | `GUBERN_OPENAI_KEY` | GPT-4o family |
+| Google Gemini | `GUBERN_GEMINI_KEY` | Gemini 1.5 |
+| Groq | `GUBERN_GROQ_KEY` | Very fast, free tier |
+| AWS Bedrock | `GUBERN_BEDROCK_REGION` + AWS creds | SigV4-signed |
+| Azure OpenAI | `GUBERN_AZURE_OPENAI_KEY/_ENDPOINT/_DEPLOYMENT` | |
+| OpenRouter | `GUBERN_OPENROUTER_KEY` | 75+ models |
+| Ollama | `GUBERN_OLLAMA_URL` | Local, free |
 
 A daily USD budget can cap spend; usage is visible at `/api/ai/cost`.
 
@@ -62,12 +62,12 @@ Give a run a completion check to make "done" mean something:
 /agent --check "go test ./internal/foo/..." fix the failing test
 ```
 
-When the model says it is finished, VORTEX runs the check (through the
+When the model says it is finished, Gubern runs the check (through the
 approval gate, like any command). If it fails, the output goes back to the
 model, up to three times. The run ends with "✓ Verified" or "✗ Not verified";
 without a check, the answer is only the model's claim.
 
-Not every model can drive this loop. `vortex ai probe` sends each configured
+Not every model can drive this loop. `gubern ai probe` sends each configured
 provider a few small requests and checks that it calls a tool, uses typed
 arguments, reads a tool result back and ignores an instruction planted in a
 result; nothing is executed. It exits non-zero if any check fails, and
@@ -87,10 +87,10 @@ load, `allowed-tools` is ignored for now, and every action a skill suggests
 still goes through the approval gate. Invalid skills (bad name, name not
 matching the folder, missing description, unsupported YAML such as `[a, b]`
 lists, symlinked files, files over 256 KiB) are skipped with a warning in the
-log. Skills are re-read on every run. `vortex skills list` (or `--dir <workspace>`)
+log. Skills are re-read on every run. `gubern skills list` (or `--dir <workspace>`)
 shows which ones load and why any are skipped.
 
-### VORTEX Forge — autonomous app builds
+### Gubern Forge — autonomous app builds
 
 Forge builds complete apps (and Android APKs) from a prompt, in a sandbox, and
 delivers the artifact. Requires an AI provider.
@@ -163,7 +163,7 @@ expire after 15 minutes.
 
 ### Local workspace trust (Auto Mode foundations)
 
-Configure in `vortex.cue` under `agents.local_tools` (defaults: empty
+Configure in `gubern.cue` under `agents.local_tools` (defaults: empty
 `trusted_root`, `auto_mode: false`):
 
 ```cue
@@ -175,8 +175,8 @@ agents: {
 }
 ```
 
-Environment overrides: `VORTEX_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`,
-`VORTEX_AGENTS_LOCAL_TOOLS_AUTO_MODE`. Invalid or missing trusted directories
+Environment overrides: `GUBERN_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`,
+`GUBERN_AGENTS_LOCAL_TOOLS_AUTO_MODE`. Invalid or missing trusted directories
 fail at startup with a clear field path. When both the coordinator working
 directory and `trusted_root` are set, startup requires **work dir ⊆ trusted_root**
 (lexical containment). Prefer `trusted_root` equal to the project root (or `.`
@@ -189,22 +189,22 @@ shell cwd is not left outside the FS trust boundary.
 | `trusted_root` | When set, all local FS tool paths must resolve inside this directory (lexical + symlink checks). Empty = no workspace confinement (approval remains the control). |
 | `auto_mode` | With a `trusted_root`, routine in-scope write/edit/create_project may skip repeated approval prompts. Shell (`run_terminal`) stays approval-gated. Release builds still force shell approval. |
 
-Auto Mode keeps the approval prompt for `vortex.cue` and for paths inside
+Auto Mode keeps the approval prompt for `gubern.cue` and for paths inside
 `.git`, `.githooks` and `.husky`, because hooks would otherwise run on a later
 approved command. A custom `core.hooksPath` is not detected.
 
 Auto Mode is **not** unrestricted host access. Out-of-scope paths are denied by
 the runtime. There is still no container/namespace isolation for local tools.
 
-### Hot reload (`SIGHUP` / `vortex reload`)
+### Hot reload (`SIGHUP` / `gubern reload`)
 
-Config reload swaps the live `vortex.cue` in the config `Holder` (same path as
+Config reload swaps the live `gubern.cue` in the config `Holder` (same path as
 routes and policy). **`agents.local_tools` is validated at process startup only:**
 `RegisterLocalTools` binds `trusted_root` and `auto_mode` into the coordinator’s
 local tool registry once; there is no reload hook to rebuild that registry or the
 specialist trusted-tool set. In-flight agent work may still be executing tools
 built from the previous settings.
 
-To change `trusted_root` or `auto_mode`, edit `vortex.cue` and **restart VORTEX**
-(`vortex stop` then `vortex start`, or your service manager). Do not rely on
+To change `trusted_root` or `auto_mode`, edit `gubern.cue` and **restart Gubern**
+(`gubern stop` then `gubern start`, or your service manager). Do not rely on
 reload to tighten or widen workspace trust on a running process.

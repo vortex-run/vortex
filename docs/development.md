@@ -14,11 +14,11 @@ package catalog, pitfalls, vs OpenClaw/Hermes).
 ## Build & test
 
 ```bash
-task build              # → ./bin/vortex (version-stamped via -ldflags)
+task build              # → ./bin/gubern (version-stamped via -ldflags)
 task test               # unit tests (race detector when a C compiler exists)
 task test:race          # force the race detector (needs cgo; 25m timeout)
 task test:race:critical # race smoke: orchestration, agents, a2a, api (10m)
-task test:integration   # integration suite (starts a real vortex process)
+task test:integration   # integration suite (starts a real gubern process)
 task lint               # golangci-lint over the module
 task vet                # go vet
 ```
@@ -38,10 +38,10 @@ even when tests only bind **127.0.0.1**.
 
 | Cause | Evidence | Inbound needed? |
 |-------|----------|-----------------|
-| `internal/cmd` `runStart` default listen `:9090` (all interfaces) | `api.DefaultAddr`; fixed in tests via `VORTEX_API_LISTEN=127.0.0.1:0` | No for unit tests |
+| `internal/cmd` `runStart` default listen `:9090` (all interfaces) | `api.DefaultAddr`; fixed in tests via `GUBERN_API_LISTEN=127.0.0.1:0` | No for unit tests |
 | Package tests that call `net.Listen` / `Server.Start` / `httptest.NewServer` | Many `*_test.go` files use `127.0.0.1:0` | No (loopback) |
 | New temp binary path after cache churn | `%TEMP%\go-build…\*.test.exe` | No |
-| Production `vortex start` on `:9090` | Intentional management API | Only if you need LAN access |
+| Production `gubern start` on `:9090` | Intentional management API | Only if you need LAN access |
 
 Do **not** broadly allow every `*.test.exe`. Prefer Deny, or allow one
 **stable** binary if you must:
@@ -51,12 +51,12 @@ go test -c -o %TEMP%\vortex-cmd.test.exe ./internal/cmd
 ```
 
 Override the management listen address for local smoke tests with
-`VORTEX_API_LISTEN=127.0.0.1:0` (empty = default `:9090`).
+`GUBERN_API_LISTEN=127.0.0.1:0` (empty = default `:9090`).
 
 ## Project layout
 
 ```
-cmd/vortex/        entrypoint
+cmd/gubern/        entrypoint
 internal/
   api/             management HTTP server
   agents/          AI coordinator, tools, LSP, SQLite memory
@@ -96,7 +96,7 @@ under `internal/` — do not put new product logic in those empty roots.
   race detector.
 - **Atomic, durable writes.** Persisted state (keys, secrets, sessions) is
   written via `pkg/atomicfile` (temp + fsync + rename).
-- **No secrets in config.** `vortex.cue` selects backends; credentials come
+- **No secrets in config.** `gubern.cue` selects backends; credentials come
   from the environment.
 
 ## CI

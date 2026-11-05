@@ -1,4 +1,4 @@
-# golangci-lint configuration for VORTEX.
+# golangci-lint configuration for Gubern.
 #
 # Conservative, high-signal linter set for the M1.1 foundation. As the codebase
 # grows we tighten this rather than loosen it. Aligned with golangci-lint v2.x.

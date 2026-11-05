@@ -9,12 +9,12 @@ Machine-readable sketch: [openapi.yaml](openapi.yaml).
 ## Authentication
 
 Protected endpoints require an API key, sent as `Authorization: Bearer <key>`
-or `X-API-Key: <key>`. Issue keys with `POST /api/keys` (admin) or `vortex
+or `X-API-Key: <key>`. Issue keys with `POST /api/keys` (admin) or `gubern
 setup`.
 
 - **Public** (no auth): `/health`, `/ready`, `/dashboard/`.
 - **Control plane** (`/internal/*`, `/metrics`, `/api/status`, …): allowed from
-  loopback without a key by default; set `VORTEX_TRUST_LOOPBACK=false` to
+  loopback without a key by default; set `GUBERN_TRUST_LOOPBACK=false` to
   require a key even from loopback (recommended behind a same-host proxy).
 - **Data plane** (`/api/agents/*`, `/api/forge/*`, …): always require a key.
 
@@ -76,12 +76,12 @@ non-streaming `response` text.
 ## OpenAI-compatible API
 
 Any OpenAI-speaking tool (Claude Code, Aider, Cline, Cursor, …) can use
-VORTEX as its AI backend — with provider routing, failover, budget, and cost
-tracking — by pointing `OPENAI_BASE_URL` at VORTEX:
+Gubern as its AI backend — with provider routing, failover, budget, and cost
+tracking — by pointing `OPENAI_BASE_URL` at Gubern:
 
 ```
 export OPENAI_BASE_URL=http://localhost:9090/v1
-export OPENAI_API_KEY=<your-vortex-key>
+export OPENAI_API_KEY=<your-gubern-key>
 ```
 
 ```
@@ -100,7 +100,7 @@ provider). Mid-stream provider errors are reported in-band as an SSE
 `{"error": …}` object, since the 200 status is already committed once
 streaming starts.
 
-## VORTEX Forge
+## Gubern Forge
 
 ```
 POST /api/forge/build       → start an app build
@@ -129,9 +129,9 @@ POST /api/audit/verify      → verify the hash chain
 CLI equivalents add reporting and archival:
 
 ```bash
-vortex audit verify
-vortex audit report --since 2026-01-01 --format markdown --output report.md
-vortex audit archive
+gubern audit verify
+gubern audit report --since 2026-01-01 --format markdown --output report.md
+gubern audit archive
 ```
 
 ## Other data endpoints
@@ -147,8 +147,8 @@ GET  /api/logs
 ## Control plane (Windows-safe SIGHUP/SIGTERM)
 
 ```
-POST /internal/reload       → re-read + re-validate config (vortex reload)
-POST /internal/shutdown     → graceful shutdown (vortex stop)
+POST /internal/reload       → re-read + re-validate config (gubern reload)
+POST /internal/shutdown     → graceful shutdown (gubern stop)
 ```
 
 Both honour loopback trust (see Authentication above).

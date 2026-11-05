@@ -66,7 +66,7 @@ func writeHoldingLock(path string) error {
 		alive, pid, rerr := IsRunning(path)
 		if rerr == nil {
 			if alive {
-				return fmt.Errorf("vortex is already running (pid %d)", pid)
+				return fmt.Errorf("gubern is already running (pid %d)", pid)
 			}
 			break // readable and dead → genuinely stale
 		}

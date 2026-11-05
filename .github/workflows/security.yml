@@ -1,4 +1,4 @@
-# VORTEX security scanning (build plan M19).
+# Gubern security scanning (build plan M19).
 #
 # Two complementary scanners:
 #   - govulncheck: call-graph-aware Go CVE scanning on every push to main and

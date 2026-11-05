@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# VORTEX release verifier (build plan M19).
+# Gubern release verifier (build plan M19).
 #
 #   ./scripts/verify-release.sh v0.2.0
 #

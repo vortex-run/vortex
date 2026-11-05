@@ -58,7 +58,7 @@ routes: [
 		health_check: {path: "/health", interval: "5s"}
 	},
 	{
-		// An L4 route, so the demo shows VORTEX proxying something that is not
+		// An L4 route, so the demo shows Gubern proxying something that is not
 		// HTTP. mtls is false: true requires the cluster identity mesh, which a
 		// single-node demo has no peers for.
 		name:     "postgres"

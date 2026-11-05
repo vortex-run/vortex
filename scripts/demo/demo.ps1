@@ -1,7 +1,7 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Brings up a self-contained VORTEX demo environment for screenshots and screen recordings.
+    Brings up a self-contained Gubern demo environment for screenshots and screen recordings.
 
 .DESCRIPTION
     Recording a demo against a normal install produces bad footage: the checked-in
@@ -9,7 +9,7 @@
     a real install's audit log, secrets, and API keys are all on camera.
 
     This script starts a demo that is isolated from the real installation. Every
-    persistent store is redirected into -DataDir via the VORTEX_* environment
+    persistent store is redirected into -DataDir via the GUBERN_* environment
     overrides, so nothing here touches %LOCALAPPDATA%\vortex and the demo can be
     reset by deleting one folder.
 
@@ -44,7 +44,7 @@ function Write-Step { param($m) Write-Host "  $m" -ForegroundColor Cyan }
 function Write-Ok { param($m) Write-Host "  $m" -ForegroundColor Green }
 
 Write-Host ''
-Write-Host 'VORTEX demo environment' -ForegroundColor White
+Write-Host 'Gubern demo environment' -ForegroundColor White
 Write-Host '-----------------------' -ForegroundColor DarkGray
 
 Push-Location $repo
@@ -69,16 +69,16 @@ if ((Test-Path $DataDir) -and -not $Keep) {
 }
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
-# Every store VORTEX persists is redirected here. Without these the demo would
+# Every store Gubern persists is redirected here. Without these the demo would
 # inherit the real installation's audit log, which was written under a different
 # cluster name and therefore fails chain verification - printing a red ERROR on
 # the first frame of the recording.
-$env:VORTEX_AUDIT_LOG = Join-Path $DataDir 'audit.log'
-$env:VORTEX_APIKEY_STORE = Join-Path $DataDir 'apikeys.json'
-$env:VORTEX_SECRET_STORE = Join-Path $DataDir 'secrets'
-$env:VORTEX_PLUGIN_DIR = Join-Path $DataDir 'plugins'
-$env:VORTEX_NAMESPACE_STORE = Join-Path $DataDir 'namespaces.json'
-$env:VORTEX_MTLS_STORE = Join-Path $DataDir 'mtls'
+$env:GUBERN_AUDIT_LOG = Join-Path $DataDir 'audit.log'
+$env:GUBERN_APIKEY_STORE = Join-Path $DataDir 'apikeys.json'
+$env:GUBERN_SECRET_STORE = Join-Path $DataDir 'secrets'
+$env:GUBERN_PLUGIN_DIR = Join-Path $DataDir 'plugins'
+$env:GUBERN_NAMESPACE_STORE = Join-Path $DataDir 'namespaces.json'
+$env:GUBERN_MTLS_STORE = Join-Path $DataDir 'mtls'
 Write-Ok "isolated state -> $DataDir"
 
 $procs = @()
@@ -147,7 +147,7 @@ try {
     Write-Host ''
     Write-Host '  In a SECOND terminal (sized ~100x30, font 16pt+), run:' -ForegroundColor DarkGray
     Write-Host ''
-    Write-Host ('    $env:VORTEX_APIKEY_STORE = "{0}"' -f (Join-Path $DataDir 'apikeys.json'))
+    Write-Host ('    $env:GUBERN_APIKEY_STORE = "{0}"' -f (Join-Path $DataDir 'apikeys.json'))
     Write-Host '    .\bin\vortex.exe status'
     Write-Host '    .\bin\vortex.exe check --config scripts\demo\demo.cue'
     Write-Host '    .\bin\vortex.exe ui'

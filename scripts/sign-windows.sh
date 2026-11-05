@@ -52,7 +52,7 @@ printf '%s' "$WINDOWS_CERT_BASE64" | base64 -d >"$cert_file"
 osslsigncode sign \
   -pkcs12 "$cert_file" \
   -pass "$WINDOWS_CERT_PASS" \
-  -n "VORTEX" \
+  -n "Gubern" \
   -i "https://github.com/vortex-run/vortex" \
   -ts "http://timestamp.digicert.com" \
   -in "$artifact" \

@@ -1,6 +1,6 @@
 # Demo environment
 
-A self-contained VORTEX deployment for screenshots, screen recordings, and
+A self-contained Gubern deployment for screenshots, screen recordings, and
 manual exploration. Isolated from your real installation.
 
 ```powershell
@@ -13,7 +13,7 @@ Ctrl+C stops everything.
 
 Recording a demo against a normal install produces unusable footage:
 
-- **The template config has no working backends.** `vortex.cue` points at
+- **The template config has no working backends.** `gubern.cue` points at
   `10.0.0.2` and `myapp.com`, which resolve to nothing, so every health check
   renders red and the Routes view is a wall of failures.
 - **Routes without an explicit `listen` bind to `:0`.** See `listenAddr` in
@@ -42,10 +42,10 @@ touches ACME rate limits on a throwaway hostname.
 ## Isolation
 
 Every store is redirected via environment overrides, so nothing touches
-`%LOCALAPPDATA%\vortex`:
+`%LOCALAPPDATA%\gubern`:
 
-`VORTEX_AUDIT_LOG`, `VORTEX_APIKEY_STORE`, `VORTEX_SECRET_STORE`,
-`VORTEX_PLUGIN_DIR`, `VORTEX_NAMESPACE_STORE`, `VORTEX_MTLS_STORE`
+`GUBERN_AUDIT_LOG`, `GUBERN_APIKEY_STORE`, `GUBERN_SECRET_STORE`,
+`GUBERN_PLUGIN_DIR`, `GUBERN_NAMESPACE_STORE`, `GUBERN_MTLS_STORE`
 
 Reset by deleting the data directory (default `%TEMP%\vortex-demo`).
 
@@ -67,7 +67,7 @@ adding overrides for them would make this harness complete.
 
 1. **Allow the firewall rule once, off camera.** HTTP routes bind `:port`
    (wildcard), which is what raises the Windows prompt. Start the demo once,
-   click Allow, then stop and restart it for the take. Installing VORTEX as a
+   click Allow, then stop and restart it for the take. Installing Gubern as a
    service adds a persistent rule instead (`internal/service/firewall_windows_rule.go`).
 2. **Check the log for anything you would not want published** before you
    publish the video: `Get-Content $env:TEMP\vortex-demo\vortex.log`.

@@ -1,10 +1,13 @@
-# VORTEX
+# Gubern
 
 *An open source project by [Sandeep Kumar Bollavaram](https://github.com/sandeepbollavaram).*
 
+> Formerly **VORTEX**. Existing installs keep working: see
+> [docs/migrating-from-vortex.md](docs/migrating-from-vortex.md).
+
 > **One binary. Any server. AI agents that act only with your approval.**
 
-VORTEX is a self-hosted infrastructure platform: a single static Go binary
+Gubern is a self-hosted infrastructure platform: a single static Go binary
 that owns your edge (reverse proxy, TLS, QUIC), your security (mTLS, API keys,
 OPA policy, a tamper-evident audit log), your observability (Prometheus,
 OTel), and an AI agent runtime that can read, write, and run things on your
@@ -15,8 +18,8 @@ dashboard, a browser, or Telegram on your phone.
 
 ```
 $ curl -fsSL https://vortex.run/install | sh
-$ vortex setup        # pick an AI provider, optional Telegram
-$ vortex start        # edge + security + agent runtime, one process
+$ gubern setup        # pick an AI provider, optional Telegram
+$ gubern start        # edge + security + agent runtime, one process
 ```
 
 ### Try the local demo (2 minutes)
@@ -35,13 +38,13 @@ http://127.0.0.1:9090/dashboard/ — isolated from your real install. Details:
 
 ---
 
-## What is VORTEX?
+## What is Gubern?
 
-VORTEX collapses the stack you normally assemble from a reverse proxy, a
+Gubern collapses the stack you normally assemble from a reverse proxy, a
 secrets manager, a cert manager, an observability stack, and a pile of glue
 scripts into **one binary with no external dependencies**. It runs your
 internet-facing edge and an AI agent that operates the box for you — both in
-the same process, both configured from one `vortex.cue` file.
+the same process, both configured from one `gubern.cue` file.
 
 It is **self-hosted and single-tenant by design**: you run it on your own VPS,
 it stores its own state, and nothing phones home.
@@ -57,7 +60,7 @@ it stores its own state, and nothing phones home.
 | 🔒 **Access Control** | mTLS, API keys with roles, OPA policy engine, edge rate limiting |
 | ✋ **Approval Gate** | Agent shell commands wait for your approval; release builds can't turn it off |
 | 📱 **Telegram Control** | Drive the agent, approve its commands, and get alerts from your phone |
-| 🏗️ **App Builds** | VORTEX Forge builds apps (and Android APKs, with the Flutter SDK installed) from a prompt |
+| 🏗️ **App Builds** | Gubern Forge builds apps (and Android APKs, with the Flutter SDK installed) from a prompt |
 | 🔍 **Research Agent** | Web search + summarize into reports (SSRF-hardened) |
 | 🖥️ **DevOps Agent** | SSH, Docker, Nginx management on your servers |
 | 📊 **Data Pipelines** | CSV/JSON analysis + chart generation |
@@ -75,21 +78,21 @@ it stores its own state, and nothing phones home.
 
 ```bash
 curl -fsSL https://vortex.run/install | sh
-vortex setup
-vortex start
+gubern setup
+gubern start
 ```
 
 Then open the dashboard at <http://localhost:9090/dashboard/> or the terminal
-UI with `vortex ui`.
+UI with `gubern ui`.
 
-`vortex ai probe` checks that your provider can drive model-led `/agent <task>`
+`gubern ai probe` checks that your provider can drive model-led `/agent <task>`
 runs (tool calling) before you rely on it.
 
 ---
 
 ## Status and limitations
 
-VORTEX is young (first commit June 2026) and maintained by one person. Know
+Gubern is young (first commit June 2026) and maintained by one person. Know
 these before you deploy it:
 
 - **Single node.** Clustering code exists, but state is node-local; there is
@@ -109,7 +112,7 @@ these before you deploy it:
   the primary phone interface.
 
 The self-assessment audit, with every open finding, is in
-[VORTEX_PRODUCTION_AUDIT.md](VORTEX_PRODUCTION_AUDIT.md).
+[GUBERN_PRODUCTION_AUDIT.md](GUBERN_PRODUCTION_AUDIT.md).
 
 ---
 
@@ -124,11 +127,11 @@ In short:
 curl -fsSL https://vortex.run/install | sh
 ```
 
-**Windows:** download `vortex_windows_amd64.zip` from the
+**Windows:** download `gubern_windows_amd64.zip` from the
 [Releases](https://github.com/sandeepbollavaram/vortex/releases) page, extract
-`vortex.exe`, and run `vortex service install`.
+`gubern.exe`, and run `gubern service install`.
 
-**Build from source? Add `vortex` to your PATH** so `vortex code` works from
+**Build from source? Add `gubern` to your PATH** so `gubern code` works from
 any project directory:
 
 ```powershell
@@ -152,20 +155,20 @@ Then, from anywhere:
 
 ```bash
 cd ~/myproject
-vortex code        # operates on THIS project (the current directory)
+gubern code        # operates on THIS project (the current directory)
 ```
 
 **Verify a release** before trusting it:
 ```bash
-vortex verify            # checks this binary against the signed release
+gubern verify            # checks this binary against the signed release
 ./scripts/verify-release.sh <version>   # a signed release (the next one onward)
 ```
 
 ---
 
-## Configuration (`vortex.cue`)
+## Configuration (`gubern.cue`)
 
-VORTEX is configured by a single [CUE](https://cuelang.org) file. A minimal
+Gubern is configured by a single [CUE](https://cuelang.org) file. A minimal
 working example:
 
 ```cue
@@ -183,7 +186,7 @@ All options are documented in [docs/configuration.md](docs/configuration.md).
 Validate without starting:
 
 ```bash
-vortex check --config vortex.cue
+gubern check --config gubern.cue
 ```
 
 ---
@@ -206,8 +209,8 @@ Capabilities and examples: [docs/agents.md](docs/agents.md).
 ## Telegram Setup
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
-2. Run `vortex setup` and choose to configure Telegram, or set
-   `VORTEX_TELEGRAM_TOKEN` and `VORTEX_TELEGRAM_DEFAULT_CHAT`.
+2. Run `gubern setup` and choose to configure Telegram, or set
+   `GUBERN_TELEGRAM_TOKEN` and `GUBERN_TELEGRAM_DEFAULT_CHAT`.
 3. Message your bot; it drives the agent and forwards alerts.
 
 Full steps: [docs/telegram.md](docs/telegram.md).
@@ -268,7 +271,7 @@ and its limits — is explained in [docs/security.md](docs/security.md).
 ```bash
 git clone https://github.com/sandeepbollavaram/vortex
 cd vortex
-task build      # produces ./bin/vortex
+task build      # produces ./bin/gubern
 task test       # unit tests
 task lint       # golangci-lint
 ```
@@ -295,7 +298,7 @@ you touch `web/dashboard`) before opening a PR.
 
 ## Maintainer
 
-VORTEX is an open source project by Sandeep Kumar Bollavaram
+Gubern is an open source project by Sandeep Kumar Bollavaram
 ([@sandeepbollavaram](https://github.com/sandeepbollavaram)). It was first
 published under the `vortex-run` GitHub organization; old
 `github.com/vortex-run/vortex` links redirect here.
@@ -304,4 +307,4 @@ published under the `vortex-run` GitHub organization; old
 
 ## License
 
-Apache License 2.0 — Copyright 2026 VORTEX Contributors. See [LICENSE](LICENSE).
+Apache License 2.0 — Copyright 2026 Gubern Contributors. See [LICENSE](LICENSE).

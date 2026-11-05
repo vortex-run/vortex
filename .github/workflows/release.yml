@@ -1,4 +1,4 @@
-# VORTEX release pipeline (build plan M1.6).
+# Gubern release pipeline (build plan M1.6).
 #
 # Triggered only by pushing a v* tag. Runs the full race-enabled test suite as a
 # gate, then GoReleaser builds the multi-platform binaries and publishes them
@@ -114,10 +114,10 @@ jobs:
       # Whole-repository SBOM (source dependencies, not just the shipped
       # archives) kept as a workflow artifact for audit/compliance trails.
       - name: Generate SBOM
-        run: syft packages . -o spdx-json > vortex-sbom.json
+        run: syft packages . -o spdx-json > gubern-sbom.json
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
-          path: vortex-sbom.json
+          path: gubern-sbom.json

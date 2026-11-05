@@ -1,6 +1,6 @@
-# VORTEX Web Dashboard
+# Gubern Web Dashboard
 
-React management UI embedded into the VORTEX binary and served at `/dashboard/`.
+React management UI embedded into the Gubern binary and served at `/dashboard/`.
 
 ## Stack
 
@@ -12,7 +12,7 @@ React management UI embedded into the VORTEX binary and served at `/dashboard/`.
 
 ```bash
 npm ci
-npm run dev      # Vite dev server (proxy API to a running vortex on :9090 if configured)
+npm run dev      # Vite dev server (proxy API to a running gubern on :9090 if configured)
 npm run lint
 npm run build    # writes dist/ — must be committed (Go embeds it)
 ```
