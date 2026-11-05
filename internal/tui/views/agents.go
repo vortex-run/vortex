@@ -64,7 +64,7 @@ type AgentsModel struct {
 // slashCommands are the Claude-Code-style quick commands shown when the input
 // begins with "/". Each maps to an agent action.
 var slashCommands = []string{
-	"/ls", "/read", "/run", "/create", "/edit", "/project",
+	"/agent", "/ls", "/read", "/run", "/create", "/edit", "/project",
 	"/forge", "/status", "/reload", "/help",
 	"/diff", "/commit", "/search", "/find",
 	"/history", "/resume", "/undo",

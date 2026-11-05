@@ -80,3 +80,9 @@ func TestAgents_StreamEndsWhileAwaiting(t *testing.T) {
 		t.Errorf("result not shown after the stream ended: %q", last)
 	}
 }
+
+func TestAutocomplete_AgentCommand(t *testing.T) {
+	if got := autocomplete("/ag"); got != "/agent " {
+		t.Errorf(`autocomplete("/ag") = %q, want "/agent "`, got)
+	}
+}

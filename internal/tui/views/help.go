@@ -99,6 +99,7 @@ var agentsHelp = HelpContent{
 			{Key: "N+Enter", Action: "Reject action"},
 		}},
 		{Title: "Slash commands", Items: []HelpItem{
+			{Key: "/agent <task>", Action: "Let the model plan and use tools (asks before changes)"},
 			{Key: "/ls [path]", Action: "List files"},
 			{Key: "/read <file>", Action: "Read a file"},
 			{Key: "/run <cmd>", Action: "Run a command"},
