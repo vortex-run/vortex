@@ -168,8 +168,14 @@ type pendingApproval struct {
 	tool        Tool
 	params      map[string]any
 	result      chan bool
-	description string // what was shown for approval, for the audit record
+	description string    // what was shown for approval, for the audit record
+	created     time.Time // pending approvals expire after approvalTTL
 }
+
+// approvalTTL bounds how long a pending action stays approvable. Without it a
+// stashed action stayed live indefinitely, so an approval sent hours later
+// (or replayed) ran an action whose context had long changed.
+const approvalTTL = 15 * time.Minute
 
 // SessionState tracks per-conversation context so a multi-turn build (with
 // clarifying questions) continues the SAME job instead of restarting.
@@ -810,6 +816,7 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 		toolName: name, tool: tool, params: params,
 		result:      make(chan bool, 1),
 		description: ae.Request.Description,
+		created:     time.Now(),
 	}
 	c.mu.Unlock()
 	return nil, nil
@@ -877,14 +884,24 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 		return "", false
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
+	defer cancel()
+	if !p.created.IsZero() && time.Since(p.created) > approvalTTL {
+		c.auditAction(ctx, "agent.approval.expired", session, p.toolName, map[string]any{
+			"action": truncateForAudit(p.description), "age": time.Since(p.created).Round(time.Second).String(),
+		})
+		select {
+		case p.result <- false:
+		default:
+		}
+		return "✗ Approval expired (older than " + approvalTTL.String() + "); ask again", true
+	}
+
 	// Legacy synchronous (Telegram) waiter, if any, still gets the decision.
 	select {
 	case p.result <- approved:
 	default:
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
-	defer cancel()
 	c.auditAction(ctx, "agent.approval.decided", session, p.toolName, map[string]any{
 		"approved": approved, "via": "api", "action": truncateForAudit(p.description),
 	})
@@ -911,8 +928,8 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 func (c *Coordinator) HasPendingApproval(session string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.pending[session]
-	return ok
+	p, ok := c.pending[session]
+	return ok && (p.created.IsZero() || time.Since(p.created) <= approvalTTL)
 }
 
 // executeApprovedLocal re-runs a local mutating tool with its RequireApproval

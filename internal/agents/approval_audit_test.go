@@ -2,8 +2,12 @@ package agents
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // approvalAuditRecorder captures audit entries.
@@ -84,4 +88,27 @@ func TestApprovalAudit_ReadOnlyNotAudited(t *testing.T) {
 	c, rec := auditedCoord(t, nil)
 	_, _ = c.ExecuteLocalTool(context.Background(), "s3", "list_directory", map[string]any{"path": "."}, func(string) {})
 	wantEntries(t, rec)
+}
+
+// TestApproval_ExpiredIsNotExecuted: an approval arriving after approvalTTL
+// must not run the stashed action.
+func TestApproval_ExpiredIsNotExecuted(t *testing.T) {
+	c, rec := auditedCoord(t, nil)
+	_, _ = c.ExecuteLocalTool(context.Background(), "old", "write_file",
+		map[string]any{"path": "late.txt", "content": "x"}, func(string) {})
+	c.mu.Lock()
+	c.pending["old"].created = time.Now().Add(-approvalTTL - time.Minute)
+	c.mu.Unlock()
+
+	if c.HasPendingApproval("old") {
+		t.Error("an expired action is still reported as pending")
+	}
+	transcript, matched := c.ApproveAction("old", true)
+	if !matched || !strings.Contains(transcript, "expired") {
+		t.Fatalf("ApproveAction = %q, %v; want an expiry message", transcript, matched)
+	}
+	if _, err := os.Stat(filepath.Join(c.WorkingDir(), "late.txt")); err == nil {
+		t.Error("expired approval executed the action")
+	}
+	wantEntries(t, rec, "agent.approval.requested|write_file", "agent.approval.expired|write_file")
 }
