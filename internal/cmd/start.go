@@ -988,6 +988,8 @@ func runStart(ctx context.Context, pidfile string) error {
 	// Durable run store (production audit H3): the planned DAG and every task
 	// transition persist so interrupted runs resume at task granularity on the
 	// next boot — completed tasks keep their results and never re-execute.
+	bootSteps.begin(log)
+	bootSteps.step("orchestration run store")
 	var orchStore *orchestration.RunStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
 		orchDB := filepath.Join(userdir.App(cacheDir), "memory", "orchestration.db")
@@ -1000,9 +1002,11 @@ func runStart(ctx context.Context, pidfile string) error {
 			apiSrv.SetOrchStoreProvider(&api.OrchRunStoreAdapter{Store: rs})
 		}
 	}
+	bootSteps.step("orchestration")
 	orchestrateFn := buildOrchestration(ctx, gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics, orchStore)
 	// Durable workflow store (upgrade 4 — crash recovery): opened here so the
 	// startup resume below can notify via the messaging router.
+	bootSteps.step("workflow store")
 	var workflowStore *agents.WorkflowStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
 		wfDB := filepath.Join(userdir.App(cacheDir), "memory", "workflows.db")
@@ -1013,11 +1017,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		}
 	}
 	workDir := resolveWorkingDir()
+	bootSteps.step("local workspace config")
 	localFS, lerr := resolveLocalFSConfig(cfg, workDir)
 	if lerr != nil {
 		display.StepFail("Configuration", lerr.Error())
 		return fmt.Errorf("config invalid, refusing to start: %w", lerr)
 	}
+	bootSteps.step("agent runtime")
 	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), workDir, localFS, clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
@@ -1061,6 +1067,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	buildHealing(ctx, cfg, apiSrv, mgr, msg, auditLog, metrics, log)
 	display.Step("Self-healing", "enabled")
 
+	bootSteps.finish()
 	log.Info("Gubern started",
 		"version", version,
 		"cluster", cfg.Cluster.Name,
@@ -1773,6 +1780,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	bus := agents.NewBus()
 	registry := agents.NewToolRegistry()
 	apiBaseURL := "http://" + apiAddr
+	bootSteps.step("agent tools")
 	if err := agents.RegisterBuiltins(registry, sandboxBase, agents.DefaultAllowedCommands, bus, apiBaseURL, "coordinator"); err != nil {
 		log.Warn("agent runtime disabled: tool registration failed", "err", err)
 		return nil
@@ -1785,6 +1793,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// side-effecting tool calls under durable-run scopes so a crash-resumed
 	// orchestration task replays already-performed effects instead of
 	// re-executing them. Optional — the runtime works unfenced without it.
+	bootSteps.step("effect ledger")
 	if ledger := openEffectLedger(log); ledger != nil {
 		sandboxed = sandboxed.WithEffectLedger(ledger)
 	}
@@ -1793,6 +1802,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// Optional agents.local_tools.trusted_root confines paths; auto_mode may
 	// waive repeated in-scope file approvals only inside that root.
 	localRegistry := agents.NewToolRegistry()
+	bootSteps.step("local tools")
 	if err := agents.RegisterLocalTools(localRegistry, localFS); err != nil {
 		log.Warn("local agent tools disabled: registration failed", "err", err)
 		localRegistry = nil
@@ -1802,6 +1812,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	if auditLog != nil { // a nil *audit.Log in the interface would not be nil
 		coordAudit = auditLog
 	}
+	bootSteps.step("coordinator")
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
 		Audit:             coordAudit,
 		Bus:               bus,
@@ -1829,6 +1840,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// persistence, listing, history, and full-text search. On first run, legacy
 	// per-session JSON files are migrated into the database (idempotent).
 	memoryDir := filepath.Join(userdir.App(cacheDir), "memory")
+	bootSteps.step("conversation store")
 	if store, serr := agents.NewMemoryStore(filepath.Join(memoryDir, "conversations.db")); serr != nil {
 		log.Warn("SQLite conversation store unavailable, using JSON memory", "err", serr)
 	} else {
