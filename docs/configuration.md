@@ -118,7 +118,7 @@ observability: {
 | `VORTEX_MASTER_KEY` | Inline master key (hex/base64). Overrides the key file. |
 | `VORTEX_MASTER_KEY_FILE` | Path to the master key file. |
 | `VORTEX_TRUST_LOOPBACK` | `false` to require auth on the control plane even from loopback. |
-| `VORTEX_API_LISTEN` | Management API address. Default `:9090` (all interfaces); `127.0.0.1:9090` keeps it local. |
+| `VORTEX_API_LISTEN` | Management API address. Default `:9090` (all interfaces); `127.0.0.1:9090` keeps it local. `vortex stop`, `status`, `reload`, `ui` and `code` read it too, so set it in the shell you run them from (or pass `--api-port` / `--addr`). |
 | `VORTEX_EDGE_BIND_HOST` | Interface the edge listens on: route listeners and the ACME challenge server on :80. Default empty (all interfaces); set an address such as `10.0.0.5` or `127.0.0.1` to restrict it. |
 | `VORTEX_ANTHROPIC_KEY`, `VORTEX_OPENAI_KEY`, `VORTEX_DEEPSEEK_KEY`, `VORTEX_GEMINI_KEY`, `VORTEX_GROQ_KEY`, `VORTEX_OPENROUTER_KEY` | AI provider keys. |
 | `VORTEX_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
