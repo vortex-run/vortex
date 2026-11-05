@@ -10,6 +10,18 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // React and the router are needed by every page and change rarely, so
+        // they get their own long-cached chunk. Charts (recharts) are left to
+        // the bundler: only lazily loaded pages use them, so they split off.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/\/node_modules\/(react|react-dom|react-router|scheduler)\//.test(id)) return "react";
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     proxy: {

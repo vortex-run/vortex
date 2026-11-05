@@ -1,20 +1,25 @@
+import { lazy } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router";
 import { Layout } from "./components/layout/Layout";
-import { Overview } from "./pages/Overview";
-import { RoutesPage } from "./pages/Routes";
-import { RouteBuilder } from "./pages/RouteBuilder";
-import { Namespaces } from "./pages/Namespaces";
-import { Metrics } from "./pages/Metrics";
-import { Security } from "./pages/Security";
-import { AuditLog } from "./pages/AuditLog";
-import { Secrets } from "./pages/Secrets";
-import { Nodes } from "./pages/Nodes";
-import { Plugins } from "./pages/Plugins";
-import { Settings } from "./pages/Settings";
-import { Healing } from "./pages/Healing";
-import { Traffic } from "./pages/Traffic";
-import { Agents } from "./pages/Agents";
+
+// Every page is its own chunk, fetched the first time it is opened, so the
+// app shell (sidebar, top bar) renders before page code and the charts
+// library arrive (it was a single ~700 kB bundle).
+const Overview = lazy(() => import("./pages/Overview").then((m) => ({ default: m.Overview })));
+const RoutesPage = lazy(() => import("./pages/Routes").then((m) => ({ default: m.RoutesPage })));
+const RouteBuilder = lazy(() => import("./pages/RouteBuilder").then((m) => ({ default: m.RouteBuilder })));
+const Namespaces = lazy(() => import("./pages/Namespaces").then((m) => ({ default: m.Namespaces })));
+const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
+const Security = lazy(() => import("./pages/Security").then((m) => ({ default: m.Security })));
+const AuditLog = lazy(() => import("./pages/AuditLog").then((m) => ({ default: m.AuditLog })));
+const Secrets = lazy(() => import("./pages/Secrets").then((m) => ({ default: m.Secrets })));
+const Nodes = lazy(() => import("./pages/Nodes").then((m) => ({ default: m.Nodes })));
+const Plugins = lazy(() => import("./pages/Plugins").then((m) => ({ default: m.Plugins })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Healing = lazy(() => import("./pages/Healing").then((m) => ({ default: m.Healing })));
+const Traffic = lazy(() => import("./pages/Traffic").then((m) => ({ default: m.Traffic })));
+const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Agents })));
 
 const queryClient = new QueryClient();
 

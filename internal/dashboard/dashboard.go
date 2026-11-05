@@ -43,6 +43,14 @@ func spaHandler(root fs.FS, fileServer http.Handler) http.Handler {
 			return
 		}
 		if _, err := fs.Stat(root, reqPath); err != nil {
+			// A missing build asset is a 404, never index.html: pages load as
+			// separate chunks, and a tab opened before an upgrade asks for the
+			// old chunk names. HTML served as a script fails with a confusing
+			// MIME error; a 404 fails cleanly (and a reload fetches the new index).
+			if strings.HasPrefix(reqPath, "assets/") {
+				http.NotFound(w, r)
+				return
+			}
 			// Not a real file: SPA route, serve index.html.
 			serveIndex(w, r, root)
 			return

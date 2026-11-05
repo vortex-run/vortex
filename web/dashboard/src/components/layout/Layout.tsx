@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Outlet, useLocation } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -33,7 +34,16 @@ export function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar title={titleFor(pathname)} />
         <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+          {/* Pages load on demand; keep the sidebar and top bar while one does. */}
+          <Suspense
+            fallback={
+              <div className="p-6 text-sm text-slate-500" role="status" aria-live="polite">
+                Loading…
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
