@@ -50,8 +50,15 @@ type AgentsModel struct {
 	// stale stream can never write into the buffer.
 	streamText string
 	streamCh   <-chan string
-	width      int
-	height     int
+	// Mid-stream approvals (/agent): the loop asks for approval and waits
+	// with the stream still open, so the box must come up before the stream
+	// ends. streamApproval is the action id already shown; approvalBody is
+	// the box's text, which keeps growing with the preview lines that follow.
+	streamApproval string
+	approvalBody   string
+	approvalInBox  bool // the pending approval's box is messages[len-1]
+	width          int
+	height         int
 }
 
 // slashCommands are the Claude-Code-style quick commands shown when the input
@@ -134,6 +141,21 @@ var jobIDPattern = regexp.MustCompile(`Job ID:\s*(job-[A-Za-z0-9_-]+|[A-Za-z0-9]
 // approvalMarker matches the coordinator's approval line, optionally carrying
 // "|<risk>|<tool>" metadata: "[APPROVAL_REQUIRED|HIGH RISK|run_terminal] ...".
 var approvalMarker = regexp.MustCompile(`\[APPROVAL_REQUIRED(?:\|([^|]*)\|([^\]]*))?\]`)
+
+// lastActionID returns the newest approval action id in s ("" if none):
+// a transcript can hold earlier, already-resolved approvals.
+func lastActionID(s string) string {
+	all := approvalActionID.FindAllStringSubmatch(s, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
+}
+
+// approvalBoxText renders an approval request (plus any preview) as the box.
+func approvalBoxText(s string) string {
+	return formatApproval(strings.TrimRight(s, "\n")) + "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
+}
 
 // approvalActionID matches the "(action <id>)" suffix the coordinator adds so
 // the decision is bound to the action the user actually saw.
@@ -277,11 +299,45 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			full := m.streamText
 			m.streamText = ""
 			m.streamCh = nil
+			if m.awaiting && m.approvalInBox {
+				// The stream ended with the box up. For a plain tool request
+				// that is normal: the action stays pending server-side and the
+				// approve call executes it, so hand over to that flow (Y/N stay
+				// live, the result is shown). If a /agent run ended instead,
+				// the approve call reports that nothing is pending.
+				m.approvalInBox, m.approvalBody, m.streamApproval = false, "", ""
+				if strings.TrimSpace(full) == "" {
+					m.thinking = false
+					m.viewport.SetContent(m.renderMessages())
+					return m, nil
+				}
+			}
 			// Route the accumulated reply through the normal handling so
 			// approvals, forge-job detection, and timing behave unchanged.
 			return m.Update(agentResponse{content: full})
 		}
+		if m.awaiting && m.approvalInBox {
+			// Preview lines for the pending approval: show them in its box.
+			m.approvalBody += msg.chunk
+			m.messages[len(m.messages)-1].Content = approvalBoxText(m.approvalBody)
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			return m, readAgentStream(msg.ch)
+		}
 		m.streamText += msg.chunk
+		if id := lastActionID(m.streamText); id != "" && id != m.streamApproval && !m.awaiting {
+			// The run is now waiting on this approval with the stream open.
+			m.streamApproval = id
+			m.approvalBody = m.streamText
+			m.streamText = ""
+			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: approvalBoxText(m.approvalBody), Timestamp: time.Now()})
+			m.awaiting, m.approvalReady, m.approvalChoice = true, false, ""
+			m.approvalID, m.approvalAction, m.approvalInBox = m.sessionID, id, true
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			return m, tea.Batch(readAgentStream(msg.ch),
+				tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return approvalReadyMsg{} }))
+		}
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		return m, readAgentStream(msg.ch)
@@ -305,11 +361,8 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.approvalReady = false // ignore keys until the box has rendered a frame
 			m.approvalChoice = ""
 			m.approvalID = m.sessionID
-			m.approvalAction = ""
-			// The last id is the one now pending (a transcript can hold earlier ones).
-			if all := approvalActionID.FindAllStringSubmatch(content, -1); len(all) > 0 {
-				m.approvalAction = all[len(all)-1][1]
-			}
+			m.approvalAction = lastActionID(content)
+			m.approvalInBox = false
 			content = formatApproval(content)
 			content += "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
 			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
@@ -371,6 +424,11 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.awaiting = false
 		m.approvalReady = false
 		m.approvalChoice = ""
+		if m.approvalInBox {
+			// The run continues on the open stream; its lines follow there.
+			m.approvalInBox, m.approvalBody, m.streamApproval = false, "", ""
+			msg.result = ""
+		}
 		if msg.approved {
 			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✓ Action approved", Timestamp: time.Now()})
 		} else {
