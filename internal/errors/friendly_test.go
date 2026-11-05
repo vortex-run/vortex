@@ -153,3 +153,19 @@ func TestAllPatternsCovered(t *testing.T) {
 		}
 	}
 }
+
+// TestNewFriendly_StatusCodeOnlyAsAWord: digits inside a path or ID must not
+// be read as an HTTP status (a temp dir name containing 401 turned a config
+// error into "Invalid API key").
+func TestNewFriendly_StatusCodeOnlyAsAWord(t *testing.T) {
+	cfgErr := errors.New(`D:\tmp\TestBoot_RejectsInvalidConfig1234014012\001\gubern.cue: cluster.name: conflicting values 12345 and string`)
+	if f := NewFriendly(cfgErr); strings.Contains(f.Title, "API key") {
+		t.Errorf("config error classified as %q", f.Title)
+	}
+	if f := NewFriendly(errors.New("claude: status 401: unauthorized")); !strings.Contains(f.Title, "API key") {
+		t.Errorf("real 401 not recognised: %q", f.Title)
+	}
+	if !hasStatus("got 429 too many", "429") || hasStatus("id4290x", "429") || hasStatus("14290", "429") {
+		t.Error("hasStatus word boundaries wrong")
+	}
+}

@@ -54,7 +54,7 @@ func NewFriendly(err error) *FriendlyError {
 			Code:    "NET_TIMEOUT",
 		}
 
-	case (strings.Contains(low, "rate limit") || strings.Contains(low, "429")) && !strings.Contains(low, "connection"):
+	case (strings.Contains(low, "rate limit") || hasStatus(low, "429")) && !strings.Contains(low, "connection"):
 		provider := providerOr(msg, "the AI provider")
 		return &FriendlyError{
 			Title:   "AI provider rate limited",
@@ -65,7 +65,7 @@ func NewFriendly(err error) *FriendlyError {
 			Code:    "AI_RATE_LIMIT",
 		}
 
-	case strings.Contains(low, "invalid api key") || strings.Contains(low, "401") || strings.Contains(low, "unauthorized"):
+	case strings.Contains(low, "invalid api key") || hasStatus(low, "401") || strings.Contains(low, "unauthorized"):
 		provider := providerOr(msg, "the AI provider")
 		return &FriendlyError{
 			Title:   "Invalid API key",
@@ -181,4 +181,29 @@ func Format(err error) string {
 		return ""
 	}
 	return NewFriendly(err).String()
+}
+
+// hasStatus reports whether msg contains the HTTP status code as a number of
+// its own ("status 401", "401 Unauthorized"), not as digits inside something
+// else. A substring match classified a config error as "Invalid API key"
+// because its file path (a temp dir name) happened to contain 401.
+func hasStatus(msg, code string) bool {
+	for i := strings.Index(msg, code); i >= 0; {
+		before := i == 0 || !isDigitOrLetter(msg[i-1])
+		end := i + len(code)
+		after := end == len(msg) || !isDigitOrLetter(msg[end])
+		if before && after {
+			return true
+		}
+		next := strings.Index(msg[i+1:], code)
+		if next < 0 {
+			return false
+		}
+		i += 1 + next
+	}
+	return false
+}
+
+func isDigitOrLetter(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }

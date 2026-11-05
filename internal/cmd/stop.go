@@ -50,7 +50,7 @@ func newStopCommand() *cobra.Command {
 				}
 				time.Sleep(500 * time.Millisecond)
 			}
-			return fmt.Errorf("Gubern did not stop within %s", timeout)
+			return fmt.Errorf("gubern did not stop within %s", timeout)
 		},
 	}
 	c.Flags().StringVar(&pidfilePath, "pidfile", defaultPidfile, "path to the PID file")
