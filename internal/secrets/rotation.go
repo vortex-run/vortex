@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/atomicfile"
+	"github.com/sandeepbollavaram/vortex/pkg/atomicfile"
 )
 
 // metaExt is the file extension for secret metadata, stored beside the

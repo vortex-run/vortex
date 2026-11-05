@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 func testHolder(t *testing.T) *config.Holder {

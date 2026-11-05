@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/dashboard"
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
-	"github.com/vortex-run/vortex/internal/security"
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/dashboard"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
+	"github.com/sandeepbollavaram/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // DefaultAddr is the management server's default listen address.

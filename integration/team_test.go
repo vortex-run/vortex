@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // startTeamVortex starts a --team server with an isolated config home and an

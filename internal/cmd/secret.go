@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
 )
 
 // errSecret signals a secret-command failure whose detail was already printed;

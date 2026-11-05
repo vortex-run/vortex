@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
 )
 
 // Provider names.

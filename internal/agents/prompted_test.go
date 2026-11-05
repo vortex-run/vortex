@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // textModel is a plain-completion gateway that replays scripted replies and

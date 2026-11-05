@@ -99,7 +99,7 @@ func TestNewFriendly_UnknownDefault(t *testing.T) {
 	if !strings.Contains(fe.Detail, "flux capacitor") {
 		t.Errorf("default should surface the raw message: %q", fe.Detail)
 	}
-	if !strings.Contains(fe.Fix, "--verbose") || !strings.Contains(fe.Fix, "github.com/vortex-run") {
+	if !strings.Contains(fe.Fix, "--verbose") || !strings.Contains(fe.Fix, "github.com/sandeepbollavaram/vortex") {
 		t.Errorf("default fix should point at logs + issues: %q", fe.Fix)
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // fakeTelegram is an httptest server standing in for the Telegram Bot API. It

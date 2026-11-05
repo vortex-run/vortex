@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/healing"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/healing"
 )
 
 // newWatchdogCommand builds `gubern watchdog`, a separate supervisor process

@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/pkg/pidfile"
+	"github.com/sandeepbollavaram/vortex/pkg/pidfile"
 )
 
 // newStopCommand builds `gubern stop`, which signals a running server to shut

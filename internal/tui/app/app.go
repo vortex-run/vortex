@@ -14,10 +14,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/tui/views"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/views"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // ViewID identifies a screen.

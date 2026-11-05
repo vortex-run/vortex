@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/awsigv4"
+	"github.com/sandeepbollavaram/vortex/pkg/awsigv4"
 )
 
 const (

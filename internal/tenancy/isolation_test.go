@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
 )
 
 // scrapeMetrics returns the Prometheus exposition text from a Metrics handler.

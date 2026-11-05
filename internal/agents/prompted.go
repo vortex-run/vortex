@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // PromptedTools drives the agent loop with a model that has no native tool

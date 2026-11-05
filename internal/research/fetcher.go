@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/safedial"
+	"github.com/sandeepbollavaram/vortex/pkg/safedial"
 )
 
 // maxFetchWords caps extracted content to keep summaries bounded.

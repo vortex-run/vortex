@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // probeModelFunc answers each probe call from a function of the request.

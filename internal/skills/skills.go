@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // Skill is one installed skill.

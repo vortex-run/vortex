@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // NodesModel shows cluster node status (single-node aware).

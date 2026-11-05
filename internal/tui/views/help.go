@@ -6,7 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // HelpViewID identifies which view's help content to show. It mirrors the

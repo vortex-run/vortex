@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // IsWebSocketUpgrade reports whether req is a WebSocket upgrade handshake: an

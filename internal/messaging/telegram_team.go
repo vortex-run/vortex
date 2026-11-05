@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // checkpointResolver is the subset of *a2a.CheckpointManager the bridge needs to

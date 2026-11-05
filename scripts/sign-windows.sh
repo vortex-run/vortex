@@ -53,7 +53,7 @@ osslsigncode sign \
   -pkcs12 "$cert_file" \
   -pass "$WINDOWS_CERT_PASS" \
   -n "Gubern" \
-  -i "https://github.com/vortex-run/vortex" \
+  -i "https://github.com/sandeepbollavaram/vortex" \
   -ts "http://timestamp.digicert.com" \
   -in "$artifact" \
   -out "$signed"

@@ -74,7 +74,7 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 }
 
 // FetchLatestRelease returns the latest published release for repo (e.g.
-// "vortex-run/vortex"). It applies a 30s timeout derived from ctx.
+// "sandeepbollavaram/vortex"). It applies a 30s timeout derived from ctx.
 func FetchLatestRelease(ctx context.Context, repo string) (*Release, error) {
 	return fetchRelease(ctx, apiBaseURL+"/repos/"+repo+"/releases/latest")
 }

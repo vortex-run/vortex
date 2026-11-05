@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	proxyudp "github.com/vortex-run/vortex/internal/proxy/udp"
+	proxyudp "github.com/sandeepbollavaram/vortex/internal/proxy/udp"
 )
 
 // udpEchoServer starts a UDP echo server and returns its address.

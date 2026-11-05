@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errPlugin signals a plugin-command failure whose detail was already printed.

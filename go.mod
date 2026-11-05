@@ -1,4 +1,4 @@
-module github.com/vortex-run/vortex
+module github.com/sandeepbollavaram/vortex
 
 go 1.26.0
 

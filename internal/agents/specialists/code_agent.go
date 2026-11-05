@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // CodeAgent writes and edits code. It reads context (task files + AGENTS.md),

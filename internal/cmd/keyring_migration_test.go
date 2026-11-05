@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // isolateKeyPaths points the master key, audit log, and migration marker at a

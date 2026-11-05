@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/vortex-run/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/internal/security"
 )
 
 // WebhookSpec registers an external-platform webhook handler under /webhook/.

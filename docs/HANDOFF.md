@@ -10,7 +10,7 @@ If you only read one file in this repo, read this. Then open the linked docs for
 
 ## 0. 60-second briefing
 
-**Gubern** (`github.com/vortex-run/vortex`) is a **self-hosted, single-tenant autonomous infrastructure platform** shipped as **one static Go binary**.
+**Gubern** (`github.com/sandeepbollavaram/vortex`) is a **self-hosted, single-tenant autonomous infrastructure platform** shipped as **one static Go binary**.
 
 One process owns:
 
@@ -122,7 +122,7 @@ vortex/
 ├── scripts/                    # install, sign, demo, path helpers
 ├── .github/workflows/          # ci, security, release, codeql, scorecard
 ├── Taskfile.yml                # build/test/lint (not Makefile)
-├── go.mod                      # module github.com/vortex-run/vortex ; toolchain go1.26.9
+├── go.mod                      # module github.com/sandeepbollavaram/vortex ; toolchain go1.26.9
 ├── gubern.cue                  # example / local config
 ├── GUBERN_PRODUCTION_AUDIT.md  # independent audit + remediation status
 └── agents|pipeline|research|plugins/   # OPERATOR scaffolding only — NOT product code

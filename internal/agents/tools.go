@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/safedial"
+	"github.com/sandeepbollavaram/vortex/pkg/safedial"
 )
 
 // Tool is a single, declared, enumerable action an agent may perform. Every

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestForge_EndpointsRequireAuth confirms the forge endpoints are mounted and

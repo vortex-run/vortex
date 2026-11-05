@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
 )
 
 // fnHook adapts a function into a plugins.Hook for tests.

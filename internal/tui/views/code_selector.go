@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // OptionSelector is an interactive arrow-key menu rendered in the CHAT panel

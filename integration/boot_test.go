@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 var hex32 = regexp.MustCompile(`^[0-9a-f]{32}$`)

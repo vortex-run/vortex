@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/internal/security"
 )
 
 // ErrAgentBusy signals the agent runtime's concurrency cap is reached; the

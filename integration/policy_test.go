@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // writePolicyDir writes a single policy.rego with the given contents into a

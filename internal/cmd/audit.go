@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errAudit signals an audit-command failure whose detail was already printed.

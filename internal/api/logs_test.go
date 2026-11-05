@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 func TestLogBuffer_StoresEntries(t *testing.T) {

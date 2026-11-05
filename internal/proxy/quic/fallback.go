@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 // DualStackConfig configures a server that listens on both QUIC (UDP) and TCP.

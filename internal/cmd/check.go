@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // newCheckCommand builds `gubern check`, which validates the config file named

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 // beAddr returns the host:port of an httptest server.

@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestStudio_GracefulDegradationWithoutCodeServer is the core M12 graceful-

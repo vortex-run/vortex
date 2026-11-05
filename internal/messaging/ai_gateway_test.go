@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
 )
 
 func TestNewAIGateway_RequiresProvider(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestMessaging_WebhookEndpointsExist starts vortex with a Telegram bot

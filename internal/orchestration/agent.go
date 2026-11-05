@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // AgentRouter dispatches a task to a specialized agent by type, returning its

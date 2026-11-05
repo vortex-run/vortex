@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // Native tool calling. Complete is text in / text out; ChatWithTools sends

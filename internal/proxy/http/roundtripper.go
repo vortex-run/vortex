@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // Defaults for RoundTripperConfig.

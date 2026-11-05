@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // ConnectionErrorMessage is the user-facing text returned (as the response

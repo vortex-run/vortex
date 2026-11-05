@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/gateway"
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // keyEncKey is a fixed 32-byte key for the keystore tests.

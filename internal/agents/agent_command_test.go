@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // toolGateway is an AIGateway that also supports tool calling.

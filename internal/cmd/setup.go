@@ -18,10 +18,10 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/chacha20"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // AIProviderConfig is the persisted first-run AI provider selection. The API
@@ -811,7 +811,7 @@ func verifyOpenRouter(key string) string {
 	return httpVerify(http.MethodPost, "https://openrouter.ai/api/v1/chat/completions",
 		map[string]string{
 			"Authorization": "Bearer " + key,
-			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
+			"HTTP-Referer":  "https://github.com/sandeepbollavaram/vortex",
 			"X-Title":       "Gubern",
 		},
 		map[string]any{"model": "openai/gpt-4o", "max_tokens": 5,

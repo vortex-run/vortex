@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // nsServer builds a server with in-memory namespace hooks reachable from

@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // Display prints the clean boot sequence. The zero value is unusable;

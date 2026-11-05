@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // KeysModel is the live API-key-rotation panel: per-slot score, latency,

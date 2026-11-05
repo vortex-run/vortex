@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/update"
+	"github.com/sandeepbollavaram/vortex/internal/update"
 )
 
 // githubRepo is the source repository for Gubern releases.
-const githubRepo = "vortex-run/vortex"
+const githubRepo = "sandeepbollavaram/vortex"
 
 // errSelfUpdate signals a self-update failure whose detail was already printed.
 var errSelfUpdate = errors.New("self-update failed")

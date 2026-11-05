@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 const sampleConfig = `

@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // handleAgentCatalog returns the static capability catalog used for

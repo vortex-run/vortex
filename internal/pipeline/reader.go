@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/safedial"
+	"github.com/sandeepbollavaram/vortex/pkg/safedial"
 )
 
 // maxDataBytes caps how much a remote/inline source may provide (16 MiB).

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // WhatsAppConfig configures the WhatsApp Business (Meta Cloud API) bot. The

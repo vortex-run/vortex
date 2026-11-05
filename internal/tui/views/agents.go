@@ -13,9 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	vortexerrors "github.com/vortex-run/vortex/internal/errors"
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	vortexerrors "github.com/sandeepbollavaram/vortex/internal/errors"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // ChatMessage is one line in the agent conversation.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestPipeline_AnalyzeRequiresAuth confirms the analyze endpoint is auth-gated.

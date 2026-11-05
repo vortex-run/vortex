@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"sync/atomic"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // GatewayConfig configures a Gateway.

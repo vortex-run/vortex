@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/policy"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
-	"github.com/vortex-run/vortex/internal/tenancy"
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/policy"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

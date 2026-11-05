@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // TestTUI_ClientConnects starts vortex and confirms the TUI client connects and

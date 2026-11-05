@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // Step interfaces let the orchestrator be driven by either the concrete agents

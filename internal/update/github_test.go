@@ -18,7 +18,7 @@ func TestFetchLatestReleaseNoReleases(t *testing.T) {
 	apiBaseURL = srv.URL
 	t.Cleanup(func() { apiBaseURL = old })
 
-	_, err := FetchLatestRelease(context.Background(), "vortex-run/vortex")
+	_, err := FetchLatestRelease(context.Background(), "sandeepbollavaram/vortex")
 	if !errors.Is(err, ErrNoReleases) {
 		t.Fatalf("expected ErrNoReleases for 404, got %v", err)
 	}
@@ -26,7 +26,7 @@ func TestFetchLatestReleaseNoReleases(t *testing.T) {
 
 func TestFetchReleaseByTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/vortex-run/vortex/releases/tags/v0.2.0" {
+		if r.URL.Path != "/repos/sandeepbollavaram/vortex/releases/tags/v0.2.0" {
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 			return
 		}
@@ -38,7 +38,7 @@ func TestFetchReleaseByTag(t *testing.T) {
 	apiBaseURL = srv.URL
 	t.Cleanup(func() { apiBaseURL = old })
 
-	rel, err := FetchReleaseByTag(context.Background(), "vortex-run/vortex", "v0.2.0")
+	rel, err := FetchReleaseByTag(context.Background(), "sandeepbollavaram/vortex", "v0.2.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestFetchReleaseByTag(t *testing.T) {
 		t.Errorf("unexpected assets: %+v", rel.Assets)
 	}
 
-	if _, err := FetchReleaseByTag(context.Background(), "vortex-run/vortex", "v9.9.9"); !errors.Is(err, ErrNoReleases) {
+	if _, err := FetchReleaseByTag(context.Background(), "sandeepbollavaram/vortex", "v9.9.9"); !errors.Is(err, ErrNoReleases) {
 		t.Errorf("expected ErrNoReleases for unknown tag, got %v", err)
 	}
 }

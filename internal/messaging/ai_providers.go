@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/awsigv4"
+	"github.com/sandeepbollavaram/vortex/pkg/awsigv4"
 )
 
 // (context is used by the call* methods' ctx parameters.)
@@ -57,7 +57,7 @@ func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, sy
 	_, err := g.doJSON(ctx, base+"/v1/chat/completions",
 		map[string]string{
 			"Authorization": "Bearer " + p.APIKey,
-			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
+			"HTTP-Referer":  "https://github.com/sandeepbollavaram/vortex",
 			"X-Title":       "Gubern",
 		},
 		map[string]any{

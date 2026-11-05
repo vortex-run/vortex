@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/secrets"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // secretStorePath resolves the on-disk path for the local encrypted store. It

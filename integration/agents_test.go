@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestAgents_SubmitGeneralQuestion starts a real vortex process and submits a

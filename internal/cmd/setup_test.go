@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 func TestSetup_CommandRegisters(t *testing.T) {

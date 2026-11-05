@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
 )
 
 // hookBodyLimit caps how much request body is passed to plugins (first 64KB).

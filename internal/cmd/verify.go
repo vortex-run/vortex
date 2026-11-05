@@ -14,7 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/update"
+	"github.com/sandeepbollavaram/vortex/internal/update"
 )
 
 // errVerify signals a verification failure whose detail was already printed.

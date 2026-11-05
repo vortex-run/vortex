@@ -22,8 +22,13 @@ when it suits you.
 These keep their old names because existing data and integrations depend on
 them: the `X-Vortex-*` HTTP headers, the `vortex_*` Prometheus metric names,
 the secret-store prefixes (`vortex/` in Vault, `/vortex/` in AWS SSM, `vortex-`
-in GCP Secret Manager), the Go module path (`github.com/vortex-run/vortex`),
-and the GitHub repository and download URLs.
+in GCP Secret Manager), and the `vortex` part of the GitHub repository and
+download URLs.
+
+The repository moved from `github.com/vortex-run/vortex` to
+`github.com/sandeepbollavaram/vortex`, and the Go module path moved with it.
+GitHub redirects the old address, so existing installs keep finding
+releases; update any `go install` commands or imports to the new path.
 
 ## Moving to the new names (optional)
 

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	dashboardui "github.com/vortex-run/vortex/web/dashboard"
+	dashboardui "github.com/sandeepbollavaram/vortex/web/dashboard"
 )
 
 // indexPath is the SPA entry document served for any non-asset route.

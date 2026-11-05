@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // Networking tests each start a real vortex process, which requires compiling

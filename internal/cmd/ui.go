@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	tuiapp "github.com/vortex-run/vortex/internal/tui/app"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	tuiapp "github.com/sandeepbollavaram/vortex/internal/tui/app"
 )
 
 // errUINotRunning signals that `gubern ui` found no running server (and was not

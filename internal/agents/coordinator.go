@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	agentskills "github.com/vortex-run/vortex/internal/skills"
+	agentskills "github.com/sandeepbollavaram/vortex/internal/skills"
 )
 
 // AIGateway is the interface the coordinator uses to reach a language model. It

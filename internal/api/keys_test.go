@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
 )
 
 // newAuthedServer builds a Server with auth wired, returning the server and an

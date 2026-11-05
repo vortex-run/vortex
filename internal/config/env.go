@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/legacyenv"
+	"github.com/sandeepbollavaram/vortex/internal/legacyenv"
 )
 
 // envPrefix is prepended to every Gubern environment override.

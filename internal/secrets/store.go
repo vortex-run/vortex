@@ -19,7 +19,7 @@ import (
 
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/vortex-run/vortex/pkg/atomicfile"
+	"github.com/sandeepbollavaram/vortex/pkg/atomicfile"
 )
 
 // secretExt is the file extension for stored secrets.

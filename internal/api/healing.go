@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
 )
 
 // HealingStatus is the GET /api/healing/status response (M14).

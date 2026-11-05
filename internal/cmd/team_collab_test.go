@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // newCollab builds a teamCollab over a real bus + checkpoint manager (no agents

@@ -12,9 +12,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/gateway"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errKeys is the sentinel signalling a handled keys-command failure (so the

@@ -6,7 +6,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // TestListen_BusyPortIsAnError: a taken management port must surface as an

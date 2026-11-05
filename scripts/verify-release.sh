@@ -12,7 +12,7 @@
 # unsigned release or no OpenSSL 3 warns (GUBERN_REQUIRE_SIGNATURE=1 fails; VORTEX_REQUIRE_SIGNATURE also accepted).
 set -euo pipefail
 
-REPO="vortex-run/vortex"
+REPO="sandeepbollavaram/vortex"
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }

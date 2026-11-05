@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/keyring"
-	"github.com/vortex-run/vortex/internal/secrets"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/keyring"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // masterKeyPath resolves the on-disk location of the master key, honouring

@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // stubRuntime is a fake AgentRuntime for API tests.

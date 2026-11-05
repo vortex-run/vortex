@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // TelegramConfig configures the Telegram bot. The token comes from the

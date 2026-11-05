@@ -46,9 +46,9 @@ builds:
       - -tags=release
     ldflags: &build_ldflags
       - -s -w
-      - -X github.com/vortex-run/vortex/internal/cmd.version={{.Version}}
-      - -X github.com/vortex-run/vortex/internal/cmd.commit={{.Commit}}
-      - -X github.com/vortex-run/vortex/internal/cmd.date={{.Date}}
+      - -X github.com/sandeepbollavaram/vortex/internal/cmd.version={{.Version}}
+      - -X github.com/sandeepbollavaram/vortex/internal/cmd.commit={{.Commit}}
+      - -X github.com/sandeepbollavaram/vortex/internal/cmd.date={{.Date}}
     goos: &build_goos
       - linux
       - darwin
@@ -219,7 +219,7 @@ homebrew_casks:
 
 release:
   github:
-    owner: vortex-run
+    owner: sandeepbollavaram
     name: vortex
   draft: false
   prerelease: auto

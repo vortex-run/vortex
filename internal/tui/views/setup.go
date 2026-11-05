@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // SetupStep is a stage in the wizard.

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
 )
 
 // handleStatus returns extended status for the dashboard (GET /api/status).

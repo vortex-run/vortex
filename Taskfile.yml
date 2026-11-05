@@ -18,7 +18,7 @@ vars:
     sh: '{{if eq OS "windows"}}powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString(\"yyyy-MM-ddTHH:mm:ssZ\")"{{else}}date -u +%Y-%m-%dT%H:%M:%SZ{{end}}'
   # Version metadata is stamped into the internal/cmd package, where the root
   # command lives (the entrypoint main package no longer holds these vars).
-  MOD: github.com/vortex-run/vortex/internal/cmd
+  MOD: github.com/sandeepbollavaram/vortex/internal/cmd
   LDFLAGS: >-
     -s -w
     -X {{.MOD}}.version={{.VERSION}}

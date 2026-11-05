@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // TestAgentCommand_SkillReadIsAudited: when the model reads a catalogued

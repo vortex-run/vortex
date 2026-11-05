@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // auditConfig renders a config with a fixed cluster name so the audit HMAC key

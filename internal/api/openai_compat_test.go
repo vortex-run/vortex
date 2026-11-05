@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // recordingCompleter captures what the /v1 handlers pass to the gateway and

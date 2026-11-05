@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // RoutesModel is the route list + detail panel.

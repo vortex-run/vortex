@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"testing"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 func grpcReq(t *testing.T, ct string) *http.Request {

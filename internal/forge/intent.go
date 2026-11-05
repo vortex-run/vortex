@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // AppType classifies what kind of artifact a build produces.

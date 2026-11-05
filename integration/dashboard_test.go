@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // isolatedAuditLog points GUBERN_AUDIT_LOG at a fresh per-test file so the

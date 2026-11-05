@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/vortex-run/vortex/internal/update"
+	"github.com/sandeepbollavaram/vortex/internal/update"
 )
 
 // swapBinary atomically replaces the running binary at self with newBin on

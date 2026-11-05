@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	agentskills "github.com/vortex-run/vortex/internal/skills"
+	agentskills "github.com/sandeepbollavaram/vortex/internal/skills"
 )
 
 // errSkills signals that some skills failed to load; the detail was printed.

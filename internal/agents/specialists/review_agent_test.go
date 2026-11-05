@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 func reviewAgentWith(t *testing.T, gw AIGateway, tools *fakeTools) *ReviewAgent {

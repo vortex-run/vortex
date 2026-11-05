@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // ReviewAgent reviews code quality and returns a 0-10 score with an approval

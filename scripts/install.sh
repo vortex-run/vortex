@@ -22,7 +22,7 @@
 # shellcheck disable=SC3043
 set -eu
 
-REPO="vortex-run/vortex"
+REPO="sandeepbollavaram/vortex"
 # GUBERN_* settings; the pre-rename VORTEX_* names still work.
 INSTALL_DIR="${GUBERN_INSTALL_DIR:-${VORTEX_INSTALL_DIR:-/usr/local/bin}}"
 if [ -n "${GUBERN_CONFIG_DIR:-${VORTEX_CONFIG_DIR:-}}" ]; then

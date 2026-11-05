@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/keyring"
-	"github.com/vortex-run/vortex/internal/testutil"
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/keyring"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 )
 
 // testMasterKey is a fixed 32-byte master key (hex) shared between the vortex

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/cluster"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/cluster"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // errCluster signals a cluster-command failure whose detail was already printed.

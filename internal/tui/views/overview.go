@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // OverviewModel is the home screen: stat cards, routes, system status, and

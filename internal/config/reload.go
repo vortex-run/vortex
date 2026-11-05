@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/vortex-run/vortex/pkg/lifecycle"
+	"github.com/sandeepbollavaram/vortex/pkg/lifecycle"
 )
 
 // Manager owns the live config Holder and the metadata needed to reload it. It

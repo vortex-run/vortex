@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/pkg/lifecycle"
+	"github.com/sandeepbollavaram/vortex/pkg/lifecycle"
 )
 
 // validConfig is a minimal but complete config that satisfies the schema.

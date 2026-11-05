@@ -15,14 +15,14 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/config"
-	vortexerrors "github.com/vortex-run/vortex/internal/errors"
-	"github.com/vortex-run/vortex/internal/legacyenv"
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	vortexerrors "github.com/sandeepbollavaram/vortex/internal/errors"
+	"github.com/sandeepbollavaram/vortex/internal/legacyenv"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // Build metadata, overridden at build time via -ldflags (see Taskfile.yml).

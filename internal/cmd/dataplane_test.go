@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // loadRoutes writes a config with TCP routes on the given ports (all pointing

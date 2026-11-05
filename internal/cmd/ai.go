@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/llm"
-	"github.com/vortex-run/vortex/internal/messaging"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/messaging"
 )
 
 // errProbe signals that a probe check failed; the detail was already printed.

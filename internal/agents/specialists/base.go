@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // AIGateway is the completion interface specialists use (satisfied by the

@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // Color palette — aliases of the brand palette. Change brand, not these.

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // TestStudio_AdminOnly: Studio runs a shell, git push and DB queries without

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // ApprovalTimeout is how long an approval request waits for a human response

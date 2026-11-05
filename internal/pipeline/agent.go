@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // Notifier delivers pipeline results. Satisfied by *messaging.Router via an

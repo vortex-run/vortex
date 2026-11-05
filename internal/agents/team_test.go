@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // scriptedGateway returns a reply chosen by which specialist system prompt it

@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/vortex-run/vortex/pkg/atomicfile"
+	"github.com/sandeepbollavaram/vortex/pkg/atomicfile"
 )
 
 // bcryptCost is the work factor used when hashing API-key secrets.

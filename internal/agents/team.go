@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents/specialists"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents/specialists"
 )
 
 // TeamNotifier sends out-of-band notifications (Telegram et al). Defined here

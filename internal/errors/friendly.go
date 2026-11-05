@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // FriendlyError is a structured, human-facing error explanation.
@@ -128,7 +128,7 @@ func NewFriendly(err error) *FriendlyError {
 			Title:  "Unexpected error",
 			Detail: msg,
 			Why:    "An unexpected error occurred",
-			Fix:    "Check the logs with: gubern start --verbose\nReport at: https://github.com/vortex-run/vortex/issues",
+			Fix:    "Check the logs with: gubern start --verbose\nReport at: https://github.com/sandeepbollavaram/vortex/issues",
 			Code:   "UNKNOWN",
 		}
 	}

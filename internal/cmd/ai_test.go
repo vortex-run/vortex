@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/messaging"
+	"github.com/sandeepbollavaram/vortex/internal/messaging"
 )
 
 // fakeOllamaChat answers /api/chat like a model: a capable one calls the

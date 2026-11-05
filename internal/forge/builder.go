@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // BuildConfig configures the build agent.

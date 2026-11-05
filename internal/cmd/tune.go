@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/perf"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/perf"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errTune signals a tune-command failure whose detail was already printed.

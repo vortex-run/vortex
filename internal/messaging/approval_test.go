@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 func TestApprovalManager_ApprovedReExecutes(t *testing.T) {

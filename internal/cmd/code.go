@@ -11,10 +11,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/tui/views"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/views"
 )
 
 // errCodeNotRunning signals that `gubern code` found no running server; the

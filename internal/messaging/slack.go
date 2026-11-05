@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // SlackConfig configures the Slack integration (incoming webhook for outbound

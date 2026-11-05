@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	dashboardui "github.com/vortex-run/vortex/web/dashboard"
+	dashboardui "github.com/sandeepbollavaram/vortex/web/dashboard"
 )
 
 func get(t *testing.T, path string) *httptest.ResponseRecorder {

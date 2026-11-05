@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // ProbeCheck is the outcome of one capability check against a model.

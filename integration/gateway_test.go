@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	proxygateway "github.com/vortex-run/vortex/internal/proxy/gateway"
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxygateway "github.com/sandeepbollavaram/vortex/internal/proxy/gateway"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 func gwBackendAddr(t *testing.T, srv *httptest.Server) proxyhttp.BackendAddr {

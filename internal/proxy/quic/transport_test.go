@@ -19,7 +19,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 // testTLSConfig returns a server TLS config with a self-signed cert for

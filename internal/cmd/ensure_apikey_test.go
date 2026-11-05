@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
 )
 
 // setConfigHome points os.UserConfigDir() at dir on both Linux (XDG_CONFIG_HOME)

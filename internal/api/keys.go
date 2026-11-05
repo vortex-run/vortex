@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
 )
 
 // createKeyRequest is the POST /api/keys body.

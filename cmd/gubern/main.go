@@ -1,5 +1,5 @@
 package main
 
-import "github.com/vortex-run/vortex/internal/cmd"
+import "github.com/sandeepbollavaram/vortex/internal/cmd"
 
 func main() { cmd.Execute() }

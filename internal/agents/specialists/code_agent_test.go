@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // fakeTools is a configurable in-memory tool executor for specialist tests.

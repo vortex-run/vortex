@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/llm"
+	"github.com/sandeepbollavaram/vortex/internal/llm"
 )
 
 // A model-driven agent loop (research roadmap M1). The model proposes one or

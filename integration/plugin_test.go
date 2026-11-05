@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // hookWASM builds a minimal WASM module that ignores its input and always

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // fakeGateway records the prompts it receives and returns a fixed reply.

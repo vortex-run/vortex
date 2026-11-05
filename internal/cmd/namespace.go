@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/tenancy"
-	"github.com/vortex-run/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errNamespace signals a namespace-command failure whose detail was printed.

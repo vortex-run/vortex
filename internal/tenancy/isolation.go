@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
 )
 
 // nsContextKey is the context key under which the active namespace is stored.

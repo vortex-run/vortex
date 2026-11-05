@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/pkg/pidfile"
+	"github.com/sandeepbollavaram/vortex/pkg/pidfile"
 )
 
 // statusHealth mirrors the JSON returned by GET /health.

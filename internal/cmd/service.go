@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/service"
+	"github.com/sandeepbollavaram/vortex/internal/service"
 )
 
 // errNeedRoot signals that a privileged operation was attempted without root;

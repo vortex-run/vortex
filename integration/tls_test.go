@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 )
 
 func internalManager(t *testing.T, minVersion string) *vtls.Manager {

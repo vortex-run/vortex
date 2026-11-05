@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/messaging"
+	"github.com/sandeepbollavaram/vortex/internal/messaging"
 )
 
 func webhookPaths(t *testing.T, m messagingComponents) map[string]bool {

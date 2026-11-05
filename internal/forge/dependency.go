@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // safeTools are binaries the DependencyAgent may invoke directly: they have
