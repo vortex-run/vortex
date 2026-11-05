@@ -35,6 +35,11 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimRight(stdout.String(), "\n"), nil
 }
 
+// Paths from the model always follow "--": without it a "file" such as -f or
+// --pathspec-from-file=<path> is read as an option (staging ignored files,
+// or paths named in some other file) behind an approval that reads like a
+// plain "git add".
+
 // strSliceParam extracts a []string param (accepts []string or []any of strings).
 func strSliceParam(params map[string]any, key string) []string {
 	switch v := params[key].(type) {
@@ -150,7 +155,7 @@ func (t GitAddTool) Execute(ctx context.Context, params map[string]any) (any, er
 			Params:      params,
 		}}
 	}
-	if _, err := runGit(ctx, t.cfg.Root, append([]string{"add"}, files...)...); err != nil {
+	if _, err := runGit(ctx, t.cfg.Root, append([]string{"add", "--"}, files...)...); err != nil {
 		return nil, err
 	}
 	return map[string]any{"staged": files}, nil
@@ -190,7 +195,7 @@ func (t GitCommitTool) Execute(ctx context.Context, params map[string]any) (any,
 		}}
 	}
 	if len(files) > 0 {
-		if _, aerr := runGit(ctx, t.cfg.Root, append([]string{"add"}, files...)...); aerr != nil {
+		if _, aerr := runGit(ctx, t.cfg.Root, append([]string{"add", "--"}, files...)...); aerr != nil {
 			return nil, aerr
 		}
 	}
