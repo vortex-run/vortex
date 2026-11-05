@@ -82,6 +82,9 @@ vortex start
 Then open the dashboard at <http://localhost:9090/dashboard/> or the terminal
 UI with `vortex ui`.
 
+`vortex ai probe` checks that your provider can drive model-led `/agent <task>`
+runs (tool calling) before you rely on it.
+
 ---
 
 ## Status and limitations
