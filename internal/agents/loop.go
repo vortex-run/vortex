@@ -36,6 +36,12 @@ type LoopConfig struct {
 	MaxSteps       int           // model turns; default 20
 	MaxObservation int           // bytes of tool output shown to the model per call; default 8 KiB
 	Timeout        time.Duration // whole run; default 10 minutes
+	// MaxTokens caps tokens reported by the model across the run; 0 = no cap
+	// (the gateway's daily budget still applies). Checked after each turn.
+	MaxTokens int
+	// MaxCallsPerTurn caps tool calls run from one model reply; extra calls
+	// are answered "not run" instead of executed. Default 16.
+	MaxCallsPerTurn int
 	// Emit, when set, receives progress lines (tool starts/results).
 	Emit func(string)
 }
@@ -46,7 +52,7 @@ type LoopStop string
 // Loop stop reasons.
 const (
 	LoopDone           LoopStop = "done"            // model answered without calling tools
-	LoopBudgetExceeded LoopStop = "budget_exceeded" // MaxSteps or Timeout reached
+	LoopBudgetExceeded LoopStop = "budget_exceeded" // MaxSteps, MaxTokens or Timeout reached
 	LoopModelError     LoopStop = "model_error"     // the gateway failed
 )
 
@@ -54,7 +60,7 @@ const (
 type LoopStep struct {
 	Tool     string
 	Args     map[string]any
-	Outcome  string // "ok", "invalid", "rejected", "error", "unknown_tool"
+	Outcome  string // "ok", "invalid", "rejected", "error", "unknown_tool", "skipped"
 	Observed string // what the model was shown
 }
 
@@ -65,6 +71,7 @@ type LoopResult struct {
 	Stop   LoopStop
 	Steps  []LoopStep
 	Turns  int
+	Tokens int // as reported by the provider; 0 when it reports none
 	Err    error
 }
 
@@ -78,6 +85,9 @@ func RunLoop(ctx context.Context, cfg LoopConfig, request string) LoopResult {
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 10 * time.Minute
+	}
+	if cfg.MaxCallsPerTurn <= 0 {
+		cfg.MaxCallsPerTurn = 16
 	}
 	emit := cfg.Emit
 	if emit == nil {
@@ -112,13 +122,26 @@ func RunLoop(ctx context.Context, cfg LoopConfig, request string) LoopResult {
 			}
 			return res
 		}
+		res.Tokens += reply.Tokens
 		if len(reply.ToolCalls) == 0 {
 			res.Answer, res.Stop = reply.Text, LoopDone
 			return res
 		}
+		if cfg.MaxTokens > 0 && res.Tokens >= cfg.MaxTokens {
+			// Don't start more actions once the budget is spent.
+			res.Stop = LoopBudgetExceeded
+			res.Err = fmt.Errorf("agents: token budget of %d reached (%d used)", cfg.MaxTokens, res.Tokens)
+			return res
+		}
 		msgs = append(msgs, llm.ChatMessage{Role: "assistant", Content: reply.Text, ToolCalls: reply.ToolCalls})
-		for _, call := range reply.ToolCalls {
-			step := runLoopCall(ctx, cfg, specs, call, emit)
+		for i, call := range reply.ToolCalls {
+			var step LoopStep
+			if i >= cfg.MaxCallsPerTurn {
+				step = LoopStep{Tool: call.Name, Args: call.Arguments, Outcome: "skipped",
+					Observed: fmt.Sprintf("not run: at most %d tool calls per turn; call it again next turn if still needed", cfg.MaxCallsPerTurn)}
+			} else {
+				step = runLoopCall(ctx, cfg, specs, call, emit)
+			}
 			res.Steps = append(res.Steps, step)
 			msgs = append(msgs, llm.ChatMessage{
 				Role: "tool", ToolCallID: call.ID, ToolName: call.Name,

@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,5 +179,47 @@ func TestRunLoop_ObservationIsBounded(t *testing.T) {
 	got := lastToolResult(m)
 	if len(got) > 1100 || !strings.Contains(got, "output truncated") {
 		t.Errorf("observation not bounded: %d bytes", len(got))
+	}
+}
+
+func TestLoop_TokenBudgetStopsBeforeMoreActions(t *testing.T) {
+	reg, dir := loopWorkspace(t)
+	r1 := call("c1", "list_directory", map[string]any{"path": "."})
+	r1.Tokens = 600
+	r2 := call("c2", "write_file", map[string]any{"path": "x.txt", "content": "x"})
+	r2.Tokens = 600
+	m := &scriptedModel{replies: []llm.ToolChatResult{r1, r2}}
+	approve := func(context.Context, ApprovalRequest) bool { return true }
+	res := RunLoop(context.Background(), LoopConfig{Model: m, Tools: reg, Approval: approve, MaxTokens: 1000}, "go")
+	if res.Stop != LoopBudgetExceeded || res.Tokens != 1200 || len(res.Steps) != 1 {
+		t.Fatalf("stop=%s tokens=%d steps=%d", res.Stop, res.Tokens, len(res.Steps))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "x.txt")); err == nil {
+		t.Error("write ran after the token budget was spent")
+	}
+}
+
+func TestLoop_CallsPerTurnCapped(t *testing.T) {
+	reg, _ := loopWorkspace(t)
+	var calls []llm.ToolCall
+	for i := 0; i < 5; i++ {
+		calls = append(calls, llm.ToolCall{ID: fmt.Sprint("c", i), Name: "list_directory", Arguments: map[string]any{"path": "."}})
+	}
+	m := &scriptedModel{replies: []llm.ToolChatResult{{ToolCalls: calls}, {Text: "ok"}}}
+	res := RunLoop(context.Background(), LoopConfig{Model: m, Tools: reg, MaxCallsPerTurn: 2}, "go")
+	var ran, skipped int
+	for _, s := range res.Steps {
+		if s.Outcome == "skipped" {
+			skipped++
+		} else {
+			ran++
+		}
+	}
+	if ran != 2 || skipped != 3 || res.Stop != LoopDone {
+		t.Errorf("ran=%d skipped=%d stop=%s", ran, skipped, res.Stop)
+	}
+	// Every call still gets a tool result, so the conversation stays valid.
+	if got := len(m.seen[1]); got != 1+1+5 {
+		t.Errorf("second turn had %d messages, want 7", got)
 	}
 }

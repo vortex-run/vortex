@@ -2060,7 +2060,9 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		System:   c.loopSystemPrompt(),
 		Session:  sessionID,
 		Timeout:  handleMessageTimeout - 5*time.Second,
-		Emit:     emit,
+		// A runaway run stops here rather than at the gateway's daily cap.
+		MaxTokens: 250_000,
+		Emit:      emit,
 	}, task)
 
 	// The final line goes through emit too: when the caller streams, the
