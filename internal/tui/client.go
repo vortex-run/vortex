@@ -789,12 +789,12 @@ func APIKeyFilePath() string {
 	return filepath.Join(dir, "vortex", "tui-key")
 }
 
-// LoadAPIKey resolves an API key, checking in order: the VORTEX_API_KEY env
+// LoadAPIKey resolves an API key, checking in order: the GUBERN_API_KEY env
 // var, the setup/TUI key file under the user config dir (APIKeyFilePath), then
 // the same file under the user cache dir. It returns the first non-empty value,
 // or "" when none is found.
 func (c *Client) LoadAPIKey() string {
-	if k := os.Getenv("VORTEX_API_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_API_KEY"); k != "" {
 		return k
 	}
 	for _, path := range apiKeyFileCandidates() {

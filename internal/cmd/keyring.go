@@ -16,11 +16,11 @@ import (
 )
 
 // masterKeyPath resolves the on-disk location of the master key, honouring
-// VORTEX_MASTER_KEY_FILE and otherwise defaulting to <user-config>/vortex/
+// GUBERN_MASTER_KEY_FILE and otherwise defaulting to <user-config>/vortex/
 // master.key. The config dir (not the cache dir) is used so the key survives
-// cache clears. VORTEX_MASTER_KEY (inline) takes precedence inside keyring.
+// cache clears. GUBERN_MASTER_KEY (inline) takes precedence inside keyring.
 func masterKeyPath() string {
-	if override := os.Getenv("VORTEX_MASTER_KEY_FILE"); override != "" {
+	if override := os.Getenv("GUBERN_MASTER_KEY_FILE"); override != "" {
 		return override
 	}
 	dir := userdir.Config()
@@ -84,7 +84,7 @@ func migrationMarkerPath() string {
 // re-keys the local secret store and the audit log from the old cluster-name-
 // derived keys onto master-key-derived keys. It is a no-op when:
 //   - the marker file already exists (migration done), or
-//   - VORTEX_MASTER_KEY is set (operator manages the key; no legacy data
+//   - GUBERN_MASTER_KEY is set (operator manages the key; no legacy data
 //     assumption), or
 //   - the data already decrypts/verifies under the new key.
 //

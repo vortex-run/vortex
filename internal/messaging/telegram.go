@@ -23,7 +23,7 @@ import (
 )
 
 // TelegramConfig configures the Telegram bot. The token comes from the
-// environment (VORTEX_TELEGRAM_TOKEN), never from the config file.
+// environment (GUBERN_TELEGRAM_TOKEN), never from the config file.
 type TelegramConfig struct {
 	Token       string  // bot token (from env)
 	AllowedIDs  []int64 // allowed chat/user IDs; empty means allow none

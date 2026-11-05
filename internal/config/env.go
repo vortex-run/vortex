@@ -4,10 +4,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/vortex-run/vortex/internal/legacyenv"
 )
 
 // envPrefix is prepended to every VORTEX environment override.
-const envPrefix = "VORTEX_"
+const envPrefix = "GUBERN_"
 
 // osEnv snapshots the current process environment into a map for override
 // lookup. Taken once per load so a reload sees a consistent view.
@@ -18,12 +20,13 @@ func osEnv() map[string]string {
 			m[kv[:i]] = kv[i+1:]
 		}
 	}
+	legacyenv.Fill(m) // pre-rename VORTEX_* names still work
 	return m
 }
 
-// applyEnvOverrides applies VORTEX_* environment variables on top of the
-// decoded config. The naming convention is VORTEX_<SECTION>_<FIELD>, e.g.
-// VORTEX_CLUSTER_NAME overrides cluster.name and VORTEX_OBSERVABILITY_LOG_LEVEL
+// applyEnvOverrides applies GUBERN_* environment variables on top of the
+// decoded config. The naming convention is GUBERN_<SECTION>_<FIELD>, e.g.
+// GUBERN_CLUSTER_NAME overrides cluster.name and GUBERN_OBSERVABILITY_LOG_LEVEL
 // overrides observability.log_level.
 //
 // Only scalar top-level fields of each section are overridable — this is the

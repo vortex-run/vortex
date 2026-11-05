@@ -21,6 +21,7 @@ import (
 
 	"github.com/vortex-run/vortex/internal/config"
 	vortexerrors "github.com/vortex-run/vortex/internal/errors"
+	"github.com/vortex-run/vortex/internal/legacyenv"
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
@@ -133,6 +134,11 @@ func NewRootCommand() *cobra.Command {
 
 // Execute runs the root command and exits the process with an appropriate code.
 func Execute() {
+	// Pre-rename VORTEX_* settings keep working (GUBERN_* wins). Done first so
+	// flag defaults and every later lookup see the new names.
+	if n := legacyenv.Notice(legacyenv.Apply()); n != "" {
+		fmt.Fprintln(os.Stderr, n)
+	}
 	// A Windows self-update leaves the previous binary as <exe>.old while it
 	// is still running; remove it once nothing uses it. No-op elsewhere.
 	if self, err := os.Executable(); err == nil {

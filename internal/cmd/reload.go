@@ -73,7 +73,7 @@ func newReloadCommand() *cobra.Command {
 
 // lastReloadStatus reads last_reload from GET /api/status (loopback-trusted
 // by default). ok is false when it can't: no reload recorded yet, an older
-// server, or VORTEX_TRUST_LOOPBACK=false.
+// server, or GUBERN_TRUST_LOOPBACK=false.
 func lastReloadStatus(apiPort int) (api.ReloadStatus, bool) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("http://" + localAPIAddr(apiPort) + "/api/status")

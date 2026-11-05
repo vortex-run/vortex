@@ -2,7 +2,7 @@ package cmd
 
 import "testing"
 
-func TestLocalAPIAddr_FollowsVORTEX_API_LISTEN(t *testing.T) {
+func TestLocalAPIAddr_FollowsGUBERN_API_LISTEN(t *testing.T) {
 	cases := []struct {
 		env, base string
 		port      int
@@ -17,18 +17,18 @@ func TestLocalAPIAddr_FollowsVORTEX_API_LISTEN(t *testing.T) {
 		{"127.0.0.1:99999", "http://127.0.0.1:9090", 9090},
 	}
 	for _, tc := range cases {
-		t.Setenv("VORTEX_API_LISTEN", tc.env)
+		t.Setenv("GUBERN_API_LISTEN", tc.env)
 		if got := defaultAPIBase(); got != tc.base {
-			t.Errorf("VORTEX_API_LISTEN=%q: base = %q, want %q", tc.env, got, tc.base)
+			t.Errorf("GUBERN_API_LISTEN=%q: base = %q, want %q", tc.env, got, tc.base)
 		}
 		if got := defaultAPIPort(); got != tc.port {
-			t.Errorf("VORTEX_API_LISTEN=%q: port = %d, want %d", tc.env, got, tc.port)
+			t.Errorf("GUBERN_API_LISTEN=%q: port = %d, want %d", tc.env, got, tc.port)
 		}
 	}
 }
 
 func TestClientCommands_DefaultToListenPort(t *testing.T) {
-	t.Setenv("VORTEX_API_LISTEN", "127.0.0.1:9191")
+	t.Setenv("GUBERN_API_LISTEN", "127.0.0.1:9191")
 	for _, c := range []struct {
 		name string
 		flag string

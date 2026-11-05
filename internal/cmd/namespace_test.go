@@ -23,7 +23,7 @@ func TestNamespace_CommandRegisters(t *testing.T) {
 }
 
 func TestNamespace_CreateRequiresOrg(t *testing.T) {
-	t.Setenv("VORTEX_NAMESPACE_STORE", t.TempDir()+"/ns.json")
+	t.Setenv("GUBERN_NAMESPACE_STORE", t.TempDir()+"/ns.json")
 	c := newNamespaceCommand()
 	var buf bytes.Buffer
 	c.SetOut(&buf)
@@ -38,7 +38,7 @@ func TestNamespace_CreateRequiresOrg(t *testing.T) {
 }
 
 func TestNamespace_CreateAndList(t *testing.T) {
-	t.Setenv("VORTEX_NAMESPACE_STORE", t.TempDir()+"/ns.json")
+	t.Setenv("GUBERN_NAMESPACE_STORE", t.TempDir()+"/ns.json")
 
 	run := func(args ...string) string {
 		c := newNamespaceCommand()
@@ -62,7 +62,7 @@ func TestNamespace_CreateAndList(t *testing.T) {
 }
 
 func TestNamespace_QuotaOutput(t *testing.T) {
-	t.Setenv("VORTEX_NAMESPACE_STORE", t.TempDir()+"/ns.json")
+	t.Setenv("GUBERN_NAMESPACE_STORE", t.TempDir()+"/ns.json")
 
 	create := newNamespaceCommand()
 	var cb bytes.Buffer

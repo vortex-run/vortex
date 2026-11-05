@@ -20,8 +20,8 @@ import (
 // WhatsAppConfig configures the WhatsApp Business (Meta Cloud API) bot. The
 // phone-number ID and access token come from the environment, never config.
 type WhatsAppConfig struct {
-	PhoneNumberID string // from env VORTEX_WA_PHONE_ID
-	AccessToken   string // from env VORTEX_WA_TOKEN
+	PhoneNumberID string // from env GUBERN_WA_PHONE_ID
+	AccessToken   string // from env GUBERN_WA_TOKEN
 	VerifyToken   string // webhook GET verification (hub.verify_token)
 	AppSecret     string // for X-Hub-Signature-256 HMAC verification
 	// AllowedNumbers lists the sender WhatsApp IDs (phone numbers, digits only)

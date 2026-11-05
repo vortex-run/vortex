@@ -159,8 +159,8 @@ func (p *VortexProcess) env() []string {
 		// Keep every listener on loopback: tests talk to 127.0.0.1 only, and
 		// binding all interfaces opens ports to the network (and raises a
 		// Windows Firewall prompt per freshly built binary).
-		"VORTEX_API_LISTEN=127.0.0.1:9090",
-		"VORTEX_EDGE_BIND_HOST=127.0.0.1",
+		"GUBERN_API_LISTEN=127.0.0.1:9090",
+		"GUBERN_EDGE_BIND_HOST=127.0.0.1",
 	)
 }
 
@@ -377,10 +377,10 @@ func WriteTestConfig(t *testing.T, content string) string {
 
 // startTimeout is how long StartVortex waits for "VORTEX started". Startup
 // takes ~3s on an idle machine; on a loaded one (e.g. a WSL VM sharing CPU
-// with host builds) it can exceed 15s. VORTEX_TEST_START_TIMEOUT (a Go
+// with host builds) it can exceed 15s. GUBERN_TEST_START_TIMEOUT (a Go
 // duration) raises it for such runs; the default is unchanged for CI.
 func startTimeout() time.Duration {
-	if v := os.Getenv("VORTEX_TEST_START_TIMEOUT"); v != "" {
+	if v := os.Getenv("GUBERN_TEST_START_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			return d
 		}

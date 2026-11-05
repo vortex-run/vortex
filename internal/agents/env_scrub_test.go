@@ -7,7 +7,7 @@ import (
 )
 
 func TestScrubbedEnv_DropsSecretsKeepsEssentials(t *testing.T) {
-	t.Setenv("VORTEX_ANTHROPIC_KEY", "sk-secret")
+	t.Setenv("GUBERN_ANTHROPIC_KEY", "sk-secret")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
 	t.Setenv("MY_APP_TOKEN", "tok")
 
@@ -19,7 +19,7 @@ func TestScrubbedEnv_DropsSecretsKeepsEssentials(t *testing.T) {
 		if up == "PATH" {
 			sawPath = true
 		}
-		if up == "VORTEX_ANTHROPIC_KEY" || up == "AWS_SECRET_ACCESS_KEY" || up == "MY_APP_TOKEN" {
+		if up == "GUBERN_ANTHROPIC_KEY" || up == "AWS_SECRET_ACCESS_KEY" || up == "MY_APP_TOKEN" {
 			t.Errorf("secret %s leaked into scrubbed env", name)
 		}
 		if strings.Contains(val, "sk-secret") || strings.Contains(val, "aws-secret") {
@@ -35,7 +35,7 @@ func TestScrubbedEnv_DropsSecretsKeepsEssentials(t *testing.T) {
 // asserts the canary secret is absent from ITS environment while the command
 // still resolves and runs (PATH survived).
 func TestRunCommand_EnvironmentIsScrubbed(t *testing.T) {
-	t.Setenv("VORTEX_CANARY_SECRET", "leaked-if-visible")
+	t.Setenv("GUBERN_CANARY_SECRET", "leaked-if-visible")
 
 	tool := RunCommandTool{SandboxDir: t.TempDir(), AllowedCommands: []string{"go"}, approved: true}
 	res, err := tool.Execute(context.Background(), map[string]any{

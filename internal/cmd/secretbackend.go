@@ -11,10 +11,10 @@ import (
 )
 
 // secretStorePath resolves the on-disk path for the local encrypted store. It
-// honours VORTEX_SECRET_STORE (used by tests and operators to relocate or share
+// honours GUBERN_SECRET_STORE (used by tests and operators to relocate or share
 // the store) and otherwise falls back to <user-cache>/vortex/secrets.
 func secretStorePath() string {
-	if override := os.Getenv("VORTEX_SECRET_STORE"); override != "" {
+	if override := os.Getenv("GUBERN_SECRET_STORE"); override != "" {
 		return override
 	}
 	cacheDir := userdir.Cache()

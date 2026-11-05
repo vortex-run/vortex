@@ -15,11 +15,11 @@ import (
 // unauthenticated (no API key) but verify their own platform signature, so an
 // empty/unsigned body is rejected with 4xx — crucially NOT 404.
 func TestMessaging_WebhookEndpointsExist(t *testing.T) {
-	t.Setenv("VORTEX_TELEGRAM_TOKEN", "123:FAKE")
-	t.Setenv("VORTEX_TELEGRAM_DEFAULT_CHAT", "555")
-	t.Setenv("VORTEX_TELEGRAM_SECRET", "s3cr3t")
-	t.Setenv("VORTEX_SLACK_WEBHOOK", "http://127.0.0.1:1/none")
-	t.Setenv("VORTEX_SLACK_SIGNING_SECRET", "sign")
+	t.Setenv("GUBERN_TELEGRAM_TOKEN", "123:FAKE")
+	t.Setenv("GUBERN_TELEGRAM_DEFAULT_CHAT", "555")
+	t.Setenv("GUBERN_TELEGRAM_SECRET", "s3cr3t")
+	t.Setenv("GUBERN_SLACK_WEBHOOK", "http://127.0.0.1:1/none")
+	t.Setenv("GUBERN_SLACK_SIGNING_SECRET", "sign")
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(""))
@@ -52,7 +52,7 @@ func TestMessaging_WebhookEndpointsExist(t *testing.T) {
 // TestMessaging_AIGatewayStub starts vortex with NO AI keys and confirms the
 // agent submit path still works using the stub coordinator (canned response).
 func TestMessaging_AIGatewayStub(t *testing.T) {
-	secret := seedAdminKey(t) // sets VORTEX_APIKEY_STORE before StartVortex
+	secret := seedAdminKey(t) // sets GUBERN_APIKEY_STORE before StartVortex
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(""))
 	p := testutil.StartVortex(t, bin, cfg)
@@ -75,8 +75,8 @@ func TestMessaging_AIGatewayStub(t *testing.T) {
 // TestMessaging_WebhookUnknownPlatform404 confirms an unregistered webhook path
 // returns 404.
 func TestMessaging_WebhookUnknownPlatform404(t *testing.T) {
-	t.Setenv("VORTEX_TELEGRAM_TOKEN", "123:FAKE")
-	t.Setenv("VORTEX_TELEGRAM_DEFAULT_CHAT", "555")
+	t.Setenv("GUBERN_TELEGRAM_TOKEN", "123:FAKE")
+	t.Setenv("GUBERN_TELEGRAM_DEFAULT_CHAT", "555")
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(""))

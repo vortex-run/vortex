@@ -196,10 +196,10 @@ func TestEnvOverride(t *testing.T) {
 	p := writeConfig(t, validConfig)
 	src, _ := os.ReadFile(p)
 	env := map[string]string{
-		"VORTEX_CLUSTER_NAME":            "overridden",
-		"VORTEX_OBSERVABILITY_LOG_LEVEL": "error",
-		"VORTEX_CLUSTER_GOSSIP_PORT":     "8000",
-		"VORTEX_SECURITY_BLOCK_CLOUDS":   "true",
+		"GUBERN_CLUSTER_NAME":            "overridden",
+		"GUBERN_OBSERVABILITY_LOG_LEVEL": "error",
+		"GUBERN_CLUSTER_GOSSIP_PORT":     "8000",
+		"GUBERN_SECURITY_BLOCK_CLOUDS":   "true",
 	}
 	cfg, err := loadFromBytes(p, src, schemaSource(t), env)
 	if err != nil {
@@ -342,4 +342,17 @@ func TestLoadFileNotFound(t *testing.T) {
 func schemaSource(t *testing.T) []byte {
 	t.Helper()
 	return schemaBytes()
+}
+
+// TestEnv_LegacyVORTEXNamesStillWork: after the rename, a deployment that
+// still sets VORTEX_* gets the same override; GUBERN_* wins when both are set.
+func TestEnv_LegacyVORTEXNamesStillWork(t *testing.T) {
+	t.Setenv("VORTEX_CLUSTER_NAME", "legacy-name")
+	if env := osEnv(); env["GUBERN_CLUSTER_NAME"] != "legacy-name" {
+		t.Errorf("legacy VORTEX_CLUSTER_NAME not honoured: %q", env["GUBERN_CLUSTER_NAME"])
+	}
+	t.Setenv("GUBERN_CLUSTER_NAME", "new-name")
+	if env := osEnv(); env["GUBERN_CLUSTER_NAME"] != "new-name" {
+		t.Errorf("GUBERN_ must win: %q", env["GUBERN_CLUSTER_NAME"])
+	}
 }

@@ -106,12 +106,12 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("AppData", t.TempDir())
 	// Ensure no provider env var triggers a "configured" state.
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 
 	// Isolate the API-key store so the test doesn't touch the real one.
-	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
+	t.Setenv("GUBERN_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
 
 	var out bytes.Buffer
 	// Enter (welcome), 10 (skip AI), 2 (skip Telegram), 1 (editor), Enter (key).
@@ -140,8 +140,8 @@ func setupTestEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("AppData", t.TempDir())
-	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	t.Setenv("GUBERN_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 }
@@ -257,7 +257,7 @@ func TestSetup_ProviderConfiguredEnvOverridesFile(t *testing.T) {
 	t.Setenv("AppData", t.TempDir())
 
 	// No file, env set → configured.
-	t.Setenv("VORTEX_ANTHROPIC_KEY", "sk-ant-x")
+	t.Setenv("GUBERN_ANTHROPIC_KEY", "sk-ant-x")
 	if !providerConfigured() {
 		t.Error("env var should mark provider as configured")
 	}
@@ -266,7 +266,7 @@ func TestSetup_ProviderConfiguredEnvOverridesFile(t *testing.T) {
 func TestSetup_ProviderConfiguredFromFile(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("AppData", t.TempDir())
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 	if providerConfigured() {

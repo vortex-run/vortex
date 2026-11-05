@@ -15,7 +15,7 @@ import (
 )
 
 // seedAdminKey issues an admin API key, saves the key store to a temp file, and
-// points VORTEX_APIKEY_STORE at it so the started server loads it. It returns
+// points GUBERN_APIKEY_STORE at it so the started server loads it. It returns
 // the plaintext admin secret.
 func seedAdminKey(t *testing.T) string {
 	t.Helper()
@@ -28,7 +28,7 @@ func seedAdminKey(t *testing.T) string {
 	if err := store.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VORTEX_APIKEY_STORE", path)
+	t.Setenv("GUBERN_APIKEY_STORE", path)
 	return secret
 }
 

@@ -23,7 +23,7 @@ observability: {}
 func setupAudit(t *testing.T) func(args ...string) (string, error) {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "audit.log")
-	t.Setenv("VORTEX_AUDIT_LOG", logPath)
+	t.Setenv("GUBERN_AUDIT_LOG", logPath)
 
 	cfgPath := filepath.Join(t.TempDir(), "vortex.cue")
 	if err := os.WriteFile(cfgPath, []byte(auditTestConfig), 0o600); err != nil {

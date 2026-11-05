@@ -11,7 +11,7 @@ import (
 // listen addresses and connection counts are shown only to trusted local
 // callers (the CLI, the local dashboard), like the cluster name.
 func TestHealth_RemoteCallersDontSeeRoutes(t *testing.T) {
-	t.Setenv("VORTEX_TRUST_LOOPBACK", "")
+	t.Setenv("GUBERN_TRUST_LOOPBACK", "")
 	s, _ := authedServer(t)
 	s.SetRouteStats(func() []RouteHealth {
 		return []RouteHealth{{Name: "billing-db", Protocol: "tcp", Listen: ":5432", Active: 7}}

@@ -12,7 +12,7 @@ import (
 // requests don't get the loopback bypass, while the CLI and a same-origin
 // dashboard still do.
 func TestLoopbackTrust_BrowserRequestsNeedAKey(t *testing.T) {
-	t.Setenv("VORTEX_TRUST_LOOPBACK", "")
+	t.Setenv("GUBERN_TRUST_LOOPBACK", "")
 	s, _ := authedServer(t)
 	shutdowns := make(chan struct{}, 8)
 	s.SetShutdownFunc(func() { shutdowns <- struct{}{} })

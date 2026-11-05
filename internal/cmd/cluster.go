@@ -29,7 +29,7 @@ func newClusterCommand() *cobra.Command {
 
 // clusterMode reports whether the loaded config describes a multi-node cluster.
 func clusterMode(cfg *config.Config) (multiNode bool) {
-	return len(cfg.Cluster.Nodes) > 1 || os.Getenv("VORTEX_BOOTSTRAP") == "true"
+	return len(cfg.Cluster.Nodes) > 1 || os.Getenv("GUBERN_BOOTSTRAP") == "true"
 }
 
 func newClusterStatusCommand() *cobra.Command {
@@ -78,7 +78,7 @@ func newClusterJoinCommand() *cobra.Command {
 			// to the node list and reload. (A live join RPC lands in a later
 			// milestone alongside the cluster control endpoint.)
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"To join %s: add it to cluster.nodes in vortex.cue and reload, or start this node with VORTEX_CLUSTER_BIND set and the peer in nodes.\n",
+				"To join %s: add it to cluster.nodes in vortex.cue and reload, or start this node with GUBERN_CLUSTER_BIND set and the peer in nodes.\n",
 				addr)
 			return nil
 		},

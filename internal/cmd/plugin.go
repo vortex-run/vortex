@@ -18,9 +18,9 @@ import (
 var errPlugin = errors.New("plugin command failed")
 
 // pluginStorePath returns the on-disk plugin registry path, honouring
-// VORTEX_PLUGIN_DIR and otherwise defaulting to <user-cache>/vortex/plugins.
+// GUBERN_PLUGIN_DIR and otherwise defaulting to <user-cache>/vortex/plugins.
 func pluginStorePath() string {
-	if override := os.Getenv("VORTEX_PLUGIN_DIR"); override != "" {
+	if override := os.Getenv("GUBERN_PLUGIN_DIR"); override != "" {
 		return override
 	}
 	cacheDir := userdir.Cache()

@@ -57,5 +57,6 @@ for t in sh dirname tr cat printf; do
 done
 run "no openssl warns" ok "$pub" "$work/checksums.txt" "$work/checksums.txt.sig" PATH="$work/bin"
 run "no openssl, required" fail "$pub" "$work/checksums.txt" "$work/checksums.txt.sig" PATH="$work/bin" VORTEX_REQUIRE_SIGNATURE=1
+run "unsigned release, required (new name)" fail "$pub" "$work/checksums.txt" "$work/missing.sig" GUBERN_REQUIRE_SIGNATURE=1
 
 exit "$fail"

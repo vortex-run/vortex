@@ -51,10 +51,10 @@ observability: { log_level: "info", log_sink: "stderr" }
 func startMTLSVortex(t *testing.T, cluster string) (addr, storeDir string) {
 	t.Helper()
 	storeDir = t.TempDir()
-	t.Setenv("VORTEX_MTLS_STORE", storeDir)
+	t.Setenv("GUBERN_MTLS_STORE", storeDir)
 	// Pin the master key so the vortex process and the test client derive the
 	// same mTLS-store key (C1 master-key change).
-	t.Setenv("VORTEX_MASTER_KEY", testMasterKey)
+	t.Setenv("GUBERN_MASTER_KEY", testMasterKey)
 
 	bin := getNetBinary(t)
 	bePort := tcpEcho(t)

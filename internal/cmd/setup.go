@@ -135,8 +135,8 @@ func loadProviderConfig() (AIProviderConfig, bool) {
 // file or any of the provider env vars.
 func providerConfigured() bool {
 	for _, env := range []string{
-		"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY",
-		"VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL",
+		"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY",
+		"GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL",
 	} {
 		if os.Getenv(env) != "" {
 			return true
@@ -359,7 +359,7 @@ func setupProviderStep(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	case "10", "":
 		fmt.Fprintln(out, "\nSkipping AI setup. You can configure later:")
 		fmt.Fprintln(out, "  vortex setup")
-		fmt.Fprintln(out, "  or set VORTEX_ANTHROPIC_KEY=... env var")
+		fmt.Fprintln(out, "  or set GUBERN_ANTHROPIC_KEY=... env var")
 	default:
 		fmt.Fprintln(out, "Unrecognised choice; skipping AI setup.")
 	}
@@ -825,7 +825,7 @@ func setupBedrock(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	fmt.Fprintf(out, "\n%s Selected: AWS Bedrock\n\n", brand.IconSuccess)
 	fmt.Fprintln(out, "AWS Bedrock uses your AWS credentials (SigV4-signed requests).")
 	fmt.Fprintln(out, "Set these environment variables before starting VORTEX:")
-	fmt.Fprintln(out, "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, VORTEX_BEDROCK_REGION")
+	fmt.Fprintln(out, "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, GUBERN_BEDROCK_REGION")
 	fmt.Fprint(out, "AWS region (default: us-east-1): ")
 	region := readLine(r)
 	if region == "" {

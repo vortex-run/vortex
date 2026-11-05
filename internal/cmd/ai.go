@@ -46,7 +46,7 @@ func newAIProbeCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			providers := aiProviders(slog.New(slog.NewTextHandler(io.Discard, nil)))
 			if len(providers) == 0 {
-				return errors.New("no AI provider configured: run `vortex setup` or set a provider key (e.g. VORTEX_OLLAMA_URL)")
+				return errors.New("no AI provider configured: run `vortex setup` or set a provider key (e.g. GUBERN_OLLAMA_URL)")
 			}
 			gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
 			if err != nil {

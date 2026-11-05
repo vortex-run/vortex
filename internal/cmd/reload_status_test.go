@@ -32,7 +32,7 @@ func TestLastReloadStatus(t *testing.T) {
 		t.Error("no last_reload: ok = true, want false")
 	}
 
-	code, body = http.StatusUnauthorized, `{"error":"authentication required"}` // VORTEX_TRUST_LOOPBACK=false
+	code, body = http.StatusUnauthorized, `{"error":"authentication required"}` // GUBERN_TRUST_LOOPBACK=false
 	if _, ok := lastReloadStatus(port); ok {
 		t.Error("401: ok = true, want false")
 	}

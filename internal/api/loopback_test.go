@@ -23,9 +23,9 @@ func TestLoopbackTrustEnabled(t *testing.T) {
 		"FALSE": false,
 	}
 	for val, want := range cases {
-		t.Setenv("VORTEX_TRUST_LOOPBACK", val)
+		t.Setenv("GUBERN_TRUST_LOOPBACK", val)
 		if got := loopbackTrustEnabled(); got != want {
-			t.Errorf("VORTEX_TRUST_LOOPBACK=%q: got %v, want %v", val, got, want)
+			t.Errorf("GUBERN_TRUST_LOOPBACK=%q: got %v, want %v", val, got, want)
 		}
 	}
 }
@@ -48,7 +48,7 @@ func authedServer(t *testing.T) (*Server, string) {
 func TestInternalShutdown_LoopbackTrustedByDefault(t *testing.T) {
 	// Default loopback trust: `vortex stop` posts keyless from the same host
 	// and must succeed (the SIGTERM equivalent).
-	t.Setenv("VORTEX_TRUST_LOOPBACK", "")
+	t.Setenv("GUBERN_TRUST_LOOPBACK", "")
 	s, _ := authedServer(t)
 	// The handler runs shutdownFunc in a goroutine after responding, so signal
 	// via a channel rather than a bool to avoid a race.
@@ -71,7 +71,7 @@ func TestInternalShutdown_LoopbackTrustedByDefault(t *testing.T) {
 func TestInternalShutdown_RequiresKeyWhenLoopbackUntrusted(t *testing.T) {
 	// Behind a same-host proxy operators disable loopback trust; then shutdown
 	// requires a credential (production audit M1).
-	t.Setenv("VORTEX_TRUST_LOOPBACK", "false")
+	t.Setenv("GUBERN_TRUST_LOOPBACK", "false")
 	s, secret := authedServer(t)
 	called := false
 	s.SetShutdownFunc(func() { called = true })

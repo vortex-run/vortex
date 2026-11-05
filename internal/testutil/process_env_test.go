@@ -26,8 +26,8 @@ func TestVortexProcessEnvIsolatesWindowsCacheDir(t *testing.T) {
 		"LOCALAPPDATA":    home,
 		// Children must listen on loopback only (no network exposure, no
 		// Windows Firewall prompts).
-		"VORTEX_API_LISTEN":     "127.0.0.1:9090",
-		"VORTEX_EDGE_BIND_HOST": "127.0.0.1",
+		"GUBERN_API_LISTEN":     "127.0.0.1:9090",
+		"GUBERN_EDGE_BIND_HOST": "127.0.0.1",
 	}
 	got := map[string]string{}
 	for _, e := range env {

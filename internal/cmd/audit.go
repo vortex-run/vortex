@@ -18,9 +18,9 @@ import (
 var errAudit = errors.New("audit command failed")
 
 // auditLogPath returns the on-disk path of the audit log, honouring
-// VORTEX_AUDIT_LOG and otherwise defaulting to <user-cache>/vortex/audit.log.
+// GUBERN_AUDIT_LOG and otherwise defaulting to <user-cache>/vortex/audit.log.
 func auditLogPath() string {
-	if override := os.Getenv("VORTEX_AUDIT_LOG"); override != "" {
+	if override := os.Getenv("GUBERN_AUDIT_LOG"); override != "" {
 		return override
 	}
 	cacheDir := userdir.Cache()

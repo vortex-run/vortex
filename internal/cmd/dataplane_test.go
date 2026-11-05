@@ -59,7 +59,7 @@ func dialOK(port int) bool {
 // TestDataPlane_FailedRebuildRestoresPreviousRoutes: a reload that adds a
 // route on a port already in use must not take the existing routes down.
 func TestDataPlane_FailedRebuildRestoresPreviousRoutes(t *testing.T) {
-	t.Setenv("VORTEX_EDGE_BIND_HOST", "127.0.0.1")
+	t.Setenv("GUBERN_EDGE_BIND_HOST", "127.0.0.1")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -12,8 +12,8 @@ import (
 // secrets, and the audit chain is keyed from it. Update this test only
 // together with a tested migration (see the Gubern migration design).
 func TestCompat_StatePaths(t *testing.T) {
-	for _, env := range []string{"VORTEX_MASTER_KEY_FILE", "VORTEX_AUDIT_LOG",
-		"VORTEX_SECRET_STORE", "VORTEX_PLUGIN_DIR", "VORTEX_NAMESPACE_STORE"} {
+	for _, env := range []string{"GUBERN_MASTER_KEY_FILE", "GUBERN_AUDIT_LOG",
+		"GUBERN_SECRET_STORE", "GUBERN_PLUGIN_DIR", "GUBERN_NAMESPACE_STORE"} {
 		t.Setenv(env, "")
 	}
 	cfg, err := os.UserConfigDir()
@@ -46,8 +46,8 @@ func TestCompat_StatePaths(t *testing.T) {
 // The override variables operators already use must keep working.
 func TestCompat_StatePathOverrides(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("VORTEX_AUDIT_LOG", filepath.Join(dir, "a.log"))
-	t.Setenv("VORTEX_MASTER_KEY_FILE", filepath.Join(dir, "m.key"))
+	t.Setenv("GUBERN_AUDIT_LOG", filepath.Join(dir, "a.log"))
+	t.Setenv("GUBERN_MASTER_KEY_FILE", filepath.Join(dir, "m.key"))
 	if auditLogPath() != filepath.Join(dir, "a.log") || masterKeyPath() != filepath.Join(dir, "m.key") {
 		t.Errorf("overrides ignored: audit=%q master=%q", auditLogPath(), masterKeyPath())
 	}

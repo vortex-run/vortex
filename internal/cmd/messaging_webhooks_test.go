@@ -32,10 +32,10 @@ func TestMessagingWebhookSpecs_InboundNeedsSecret(t *testing.T) {
 	}
 	paths := webhookPaths(t, messagingComponents{whatsapp: wa, slack: sl})
 	if paths["/webhook/whatsapp"] {
-		t.Error("/webhook/whatsapp mounted without VORTEX_WA_APP_SECRET")
+		t.Error("/webhook/whatsapp mounted without GUBERN_WA_APP_SECRET")
 	}
 	if paths["/webhook/slack"] {
-		t.Error("/webhook/slack mounted without VORTEX_SLACK_SIGNING_SECRET")
+		t.Error("/webhook/slack mounted without GUBERN_SLACK_SIGNING_SECRET")
 	}
 }
 

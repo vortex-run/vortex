@@ -53,8 +53,8 @@ Examples:
 	c.Flags().BoolVar(&noTeam, "solo", false, "force single-agent mode (no specialist team)")
 	c.Flags().BoolVar(&noTeam, "no-team", false, "alias for --solo")
 	c.Flags().BoolVar(&initMD, "init", false, "generate AGENTS.md for the current project, then exit")
-	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "VORTEX API address (default from VORTEX_API_LISTEN)")
-	c.Flags().StringVar(&key, "key", "", "API key (reads VORTEX_API_KEY if empty)")
+	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "VORTEX API address (default from GUBERN_API_LISTEN)")
+	c.Flags().StringVar(&key, "key", "", "API key (reads GUBERN_API_KEY if empty)")
 	return c
 }
 

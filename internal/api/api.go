@@ -382,7 +382,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		globalLimiter: security.NewGlobalRateLimiter(0),
 		burst:         security.NewBurstProtection(security.BurstProtectionConfig{}),
 		// Loopback trust defaults on; operators behind a same-host proxy set
-		// VORTEX_TRUST_LOOPBACK=false so a loopback RemoteAddr does not bypass
+		// GUBERN_TRUST_LOOPBACK=false so a loopback RemoteAddr does not bypass
 		// control-plane auth (production audit M1).
 		trustLoopback: loopbackTrustEnabled(),
 	}
@@ -399,7 +399,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
 	// /internal/shutdown is the SIGTERM equivalent used by `vortex stop` from
 	// the same host, so it honours loopback trust like reload. Operators behind
-	// a same-host reverse proxy set VORTEX_TRUST_LOOPBACK=false to require a
+	// a same-host reverse proxy set GUBERN_TRUST_LOOPBACK=false to require a
 	// credential here too (production audit M1) — see protected().
 	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
 	// /metrics is protected like the control plane: reachable from localhost
@@ -624,7 +624,7 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 // is enabled (the default). The /internal/* control-plane endpoints stand in
 // for SIGHUP/SIGTERM used by `vortex reload`/`stop`, so an on-box call is
 // implicitly trusted. Operators behind a same-host reverse proxy disable the
-// bypass with VORTEX_TRUST_LOOPBACK=false (production audit M1). With no auth
+// bypass with GUBERN_TRUST_LOOPBACK=false (production audit M1). With no auth
 // wired the handler runs unchanged.
 func (s *Server) protected(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -637,9 +637,9 @@ func (s *Server) protected(h http.Handler) http.Handler {
 }
 
 // loopbackTrustEnabled reports whether loopback callers bypass control-plane
-// auth. Enabled by default; set VORTEX_TRUST_LOOPBACK=false/0/no to disable.
+// auth. Enabled by default; set GUBERN_TRUST_LOOPBACK=false/0/no to disable.
 func loopbackTrustEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("VORTEX_TRUST_LOOPBACK"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUBERN_TRUST_LOOPBACK"))) {
 	case "false", "0", "no", "off":
 		return false
 	default:

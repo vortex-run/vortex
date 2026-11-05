@@ -23,7 +23,7 @@ observability: { log_level: "info", log_sink: "stderr" }
 
 func TestSecrets_SetAndList(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, secretsConfig("secret-cluster", `"TEST_KEY"`))
@@ -44,7 +44,7 @@ func TestSecrets_SetAndList(t *testing.T) {
 
 func TestSecrets_RevealValue(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, secretsConfig("secret-cluster", `"TEST_KEY"`))
@@ -65,7 +65,7 @@ func TestSecrets_RevealValue(t *testing.T) {
 
 func TestSecrets_MissingSecretWarnsNotFails(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	// Declare a secret that is never set.

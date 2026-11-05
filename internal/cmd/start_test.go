@@ -53,7 +53,7 @@ tls: {provider: "internal", acme_email: "test@example.com"}
 	// Bind management API to loopback only. Without this, runStart uses
 	// api.DefaultAddr (":9090"), which listens on all interfaces and triggers
 	// Windows Firewall prompts for the ephemeral cmd.test.exe binary.
-	t.Setenv("VORTEX_API_LISTEN", "127.0.0.1:0")
+	t.Setenv("GUBERN_API_LISTEN", "127.0.0.1:0")
 
 	// A pre-cancelled context makes lifecycle.Run return immediately, so
 	// runStart performs its full start→shutdown sequence without blocking.

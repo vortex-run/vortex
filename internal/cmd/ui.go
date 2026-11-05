@@ -30,8 +30,8 @@ func newUICommand() *cobra.Command {
 			return runUI(cmd.Context(), addr, key, start)
 		},
 	}
-	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "VORTEX API address (default from VORTEX_API_LISTEN)")
-	c.Flags().StringVar(&key, "key", "", "API key (reads VORTEX_API_KEY if empty)")
+	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "VORTEX API address (default from GUBERN_API_LISTEN)")
+	c.Flags().StringVar(&key, "key", "", "API key (reads GUBERN_API_KEY if empty)")
 	c.Flags().BoolVar(&start, "start", false, "start an embedded server if VORTEX is not running")
 	return c
 }

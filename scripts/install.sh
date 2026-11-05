@@ -18,8 +18,9 @@
 set -eu
 
 REPO="vortex-run/vortex"
-INSTALL_DIR="${VORTEX_INSTALL_DIR:-/usr/local/bin}"
-CONFIG_DIR="${VORTEX_CONFIG_DIR:-/etc/vortex}"
+# GUBERN_* settings; the pre-rename VORTEX_* names still work.
+INSTALL_DIR="${GUBERN_INSTALL_DIR:-${VORTEX_INSTALL_DIR:-/usr/local/bin}}"
+CONFIG_DIR="${GUBERN_CONFIG_DIR:-${VORTEX_CONFIG_DIR:-/etc/vortex}}"
 BIN_NAME="vortex"
 DOCS_URL="https://docs.vortex.run/install"
 # Ed25519 key that signs each release's checksums.txt. Must equal
@@ -44,15 +45,16 @@ usage() {
 Usage: install.sh [--version vX.Y.Z] [--install-dir DIR] [--no-service] [--help]
 
 Options:
-  --version vX.Y.Z   install a specific version (overrides VORTEX_VERSION)
+  --version vX.Y.Z   install a specific version (overrides GUBERN_VERSION)
   --install-dir DIR  install the binary to DIR instead of /usr/local/bin
   --no-service       skip the service-installation preview step
   --help             print this help and exit
 
 Environment:
-  VORTEX_VERSION     overrides the version to install (flag takes precedence)
-  VORTEX_INSTALL_DIR overrides the install directory
-  VORTEX_CONFIG_DIR  overrides the config directory (default /etc/vortex)
+  GUBERN_VERSION     overrides the version to install (flag takes precedence)
+  GUBERN_INSTALL_DIR overrides the install directory
+  GUBERN_CONFIG_DIR  overrides the config directory (default /etc/vortex)
+  (the older VORTEX_* names are still accepted)
 EOF
 }
 
@@ -198,10 +200,10 @@ sudo_for() {
 # trusting any line in it. This needs OpenSSL 3 (pkeyutl -rawin): present on
 # current Debian, Ubuntu, Fedora and Alpine, not on macOS (LibreSSL).
 
-# unverified_signature warns, or refuses when VORTEX_REQUIRE_SIGNATURE=1.
+# unverified_signature warns, or refuses when GUBERN_REQUIRE_SIGNATURE=1.
 unverified_signature() {
-  if [ "${VORTEX_REQUIRE_SIGNATURE:-0}" = "1" ]; then
-    err "$1; refusing to install (VORTEX_REQUIRE_SIGNATURE=1)"
+  if [ "${GUBERN_REQUIRE_SIGNATURE:-${VORTEX_REQUIRE_SIGNATURE:-0}}" = "1" ]; then
+    err "$1; refusing to install (GUBERN_REQUIRE_SIGNATURE=1)"
   fi
   warn "$1; the checksum is verified but the release signature is NOT"
 }
@@ -247,11 +249,12 @@ main() {
   os="$(detect_os)"
   arch="$(detect_arch)"
 
-  # Version resolution order: --version flag, then VORTEX_VERSION, then latest.
+  # Version resolution order: --version flag, then GUBERN_VERSION (or the
+  # older VORTEX_VERSION), then latest.
   if [ -n "$FLAG_VERSION" ]; then
     version="$FLAG_VERSION"
-  elif [ -n "${VORTEX_VERSION:-}" ]; then
-    version="$VORTEX_VERSION"
+  elif [ -n "${GUBERN_VERSION:-${VORTEX_VERSION:-}}" ]; then
+    version="${GUBERN_VERSION:-$VORTEX_VERSION}"
   else
     version="$(latest_version)"
   fi
@@ -355,5 +358,6 @@ Docs:   https://docs.vortex.run
 EOF
 }
 
-# VORTEX_INSTALL_LIB=1 loads the functions without running (for tests).
-[ "${VORTEX_INSTALL_LIB:-}" = "1" ] || main "$@"
+# GUBERN_INSTALL_LIB=1 (or VORTEX_INSTALL_LIB=1) loads the functions without
+# running (for tests).
+[ "${GUBERN_INSTALL_LIB:-${VORTEX_INSTALL_LIB:-}}" = "1" ] || main "$@"

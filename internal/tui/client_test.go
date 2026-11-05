@@ -245,7 +245,7 @@ func TestClient_SendsAPIKey(t *testing.T) {
 }
 
 func TestClient_LoadAPIKeyFromEnv(t *testing.T) {
-	t.Setenv("VORTEX_API_KEY", "env-key")
+	t.Setenv("GUBERN_API_KEY", "env-key")
 	c := NewClient(ClientConfig{})
 	if c.LoadAPIKey() != "env-key" {
 		t.Errorf("LoadAPIKey = %q, want env-key", c.LoadAPIKey())
@@ -293,7 +293,7 @@ func TestClient_StreamCommsErrorWhenDown(t *testing.T) {
 func TestClient_LoadAPIKeyFromCacheDir(t *testing.T) {
 	// No env var, no config-dir file: LoadAPIKey must fall back to the cache-dir
 	// tui-key (where `vortex start` auto-creates it).
-	t.Setenv("VORTEX_API_KEY", "")
+	t.Setenv("GUBERN_API_KEY", "")
 	home := t.TempDir()
 	// Push both config and cache dirs into the temp home; only write the cache one.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
@@ -343,7 +343,7 @@ func TestParsePrometheus(t *testing.T) {
 
 func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 	// No env var; key only in the persisted setup file.
-	t.Setenv("VORTEX_API_KEY", "")
+	t.Setenv("GUBERN_API_KEY", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir (Linux)
 	t.Setenv("AppData", t.TempDir())         // redirect on Windows
 
@@ -368,7 +368,7 @@ func TestClient_LoadAPIKeyEnvBeatsFile(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte("file-key"), 0o600)
 
-	t.Setenv("VORTEX_API_KEY", "env-key")
+	t.Setenv("GUBERN_API_KEY", "env-key")
 	c := NewClient(ClientConfig{})
 	if got := c.LoadAPIKey(); got != "env-key" {
 		t.Errorf("env var should win over file: got %q", got)

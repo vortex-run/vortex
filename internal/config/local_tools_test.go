@@ -176,8 +176,8 @@ func TestEnvOverrideAgentsLocalTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := map[string]string{
-		"VORTEX_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT": trusted,
-		"VORTEX_AGENTS_LOCAL_TOOLS_AUTO_MODE":    "true",
+		"GUBERN_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT": trusted,
+		"GUBERN_AGENTS_LOCAL_TOOLS_AUTO_MODE":    "true",
 	}
 	cfg, err := loadFromBytes(filepath.Join(work, "vortex.cue"), []byte(validConfig), schemaBytes(), env)
 	if err != nil {

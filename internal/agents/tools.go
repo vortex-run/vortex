@@ -604,7 +604,7 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 // safeEnvVars are the only environment variables agent-executed commands
 // inherit (production audit M5): enough for binaries to run, and none of the
 // process's secrets. Without this, every whitelisted or user-approved command
-// inherited the full server environment — VORTEX_* provider keys, AWS
+// inherited the full server environment — GUBERN_* provider keys, AWS
 // credentials, bot tokens, the master key — and could exfiltrate them.
 var safeEnvVars = map[string]bool{
 	// POSIX basics

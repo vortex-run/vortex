@@ -9,7 +9,7 @@
 # PASS/FAIL line per artifact and exits non-zero if any artifact fails.
 # Before trusting checksums.txt it verifies the release's Ed25519 signature
 # (checksums.txt.sig), using install.sh's check: a bad signature fails; an
-# unsigned release or no OpenSSL 3 warns (VORTEX_REQUIRE_SIGNATURE=1 fails).
+# unsigned release or no OpenSSL 3 warns (GUBERN_REQUIRE_SIGNATURE=1 fails; VORTEX_REQUIRE_SIGNATURE also accepted).
 set -euo pipefail
 
 REPO="vortex-run/vortex"
@@ -59,14 +59,14 @@ check_signature() {
   local lib
   lib="$(dirname "$0")/install.sh"
   if [ ! -f "$lib" ]; then
-    if [ "${VORTEX_REQUIRE_SIGNATURE:-0}" = "1" ]; then
+    if [ "${GUBERN_REQUIRE_SIGNATURE:-${VORTEX_REQUIRE_SIGNATURE:-0}}" = "1" ]; then
       err "install.sh not found next to this script; can't check the release signature"
     fi
     printf 'warning: install.sh not found next to this script; release signature NOT checked\n' >&2
     return 0
   fi
   # shellcheck source=install.sh
-  VORTEX_INSTALL_LIB=1 . "$lib"
+  GUBERN_INSTALL_LIB=1 . "$lib"
   verify_signature "$1" "$2"
 }
 

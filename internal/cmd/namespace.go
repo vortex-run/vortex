@@ -19,9 +19,9 @@ import (
 var errNamespace = errors.New("namespace command failed")
 
 // namespaceStorePath returns the on-disk namespace registry path, honouring
-// VORTEX_NAMESPACE_STORE and otherwise <user-cache>/vortex/namespaces.json.
+// GUBERN_NAMESPACE_STORE and otherwise <user-cache>/vortex/namespaces.json.
 func namespaceStorePath() string {
-	if override := os.Getenv("VORTEX_NAMESPACE_STORE"); override != "" {
+	if override := os.Getenv("GUBERN_NAMESPACE_STORE"); override != "" {
 		return override
 	}
 	cacheDir := userdir.Cache()

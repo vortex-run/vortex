@@ -5,7 +5,7 @@
 // exposed) cluster name (production audit C1).
 //
 // The master key comes from, in order:
-//  1. the VORTEX_MASTER_KEY environment variable (hex or base64, 32 bytes), or
+//  1. the GUBERN_MASTER_KEY environment variable (hex or base64, 32 bytes), or
 //  2. a 0600 key file generated with crypto/rand on first run.
 //
 // Stdlib + golang.org/x/crypto/hkdf only.
@@ -30,14 +30,14 @@ import (
 const MasterKeySize = 32
 
 // EnvMasterKey overrides the master-key file with an inline hex/base64 key.
-const EnvMasterKey = "VORTEX_MASTER_KEY"
+const EnvMasterKey = "GUBERN_MASTER_KEY"
 
 // Keyring holds the master key and derives purpose-scoped subkeys from it.
 type Keyring struct {
 	master []byte
 }
 
-// LoadOrCreate resolves the master key. If VORTEX_MASTER_KEY is set it is
+// LoadOrCreate resolves the master key. If GUBERN_MASTER_KEY is set it is
 // decoded and used (nothing is written to disk). Otherwise the key at path is
 // read, or — when absent — a fresh random key is generated and persisted with
 // 0600 permissions (its parent directory is created 0700).

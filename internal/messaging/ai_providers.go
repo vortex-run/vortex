@@ -17,7 +17,7 @@ import (
 // Anthropic-on-Bedrock invoke API signed with AWS Signature V4.
 
 // callGroq calls Groq's OpenAI-compatible chat completions API. Groq is very
-// fast and offers a free tier (env VORTEX_GROQ_KEY).
+// fast and offers a free tier (env GUBERN_GROQ_KEY).
 func (g *AIGateway) callGroq(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	if p.Endpoint == "" {
 		p.Endpoint = "https://api.groq.com/openai"
@@ -34,7 +34,7 @@ func (g *AIGateway) callGroq(ctx context.Context, p AIProvider, prompt, systemPr
 
 // callOpenRouter calls OpenRouter's OpenAI-compatible API, which fronts 75+
 // models. It adds the HTTP-Referer and X-Title headers OpenRouter uses for
-// app attribution (env VORTEX_OPENROUTER_KEY).
+// app attribution (env GUBERN_OPENROUTER_KEY).
 func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	base := p.Endpoint
 	if base == "" {
@@ -80,7 +80,7 @@ func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, sy
 // callAzureOpenAI calls an Azure OpenAI deployment. The request/response shape
 // is OpenAI's, but the URL embeds the deployment and an api-version query
 // parameter, and the API key is sent in the api-key header. The deployment is
-// taken from p.Models[0] (env VORTEX_AZURE_OPENAI_DEPLOYMENT); p.Endpoint is
+// taken from p.Models[0] (env GUBERN_AZURE_OPENAI_DEPLOYMENT); p.Endpoint is
 // the resource base (e.g. https://<resource>.openai.azure.com).
 func (g *AIGateway) callAzureOpenAI(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	if p.Endpoint == "" {
