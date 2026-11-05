@@ -137,7 +137,13 @@ func TestLSPTool_StaysInTheWorkspace(t *testing.T) {
 			t.Errorf("file %q: err = %v, want ErrWorkspaceEscape", f, err)
 		}
 	}
-	if got, err := tool.resolve("pkg/main.go"); err != nil || got != filepath.Join(work, "pkg", "main.go") {
-		t.Errorf("relative path resolved to %q, %v; want it under WorkDir", got, err)
+	// Compare real paths: the temp dir can sit behind a symlink (macOS
+	// /var → /private/var) or a short name (Windows RUNNER~1).
+	realWork, err := filepath.EvalSymlinks(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := tool.resolve("pkg/main.go"); err != nil || got != filepath.Join(realWork, "pkg", "main.go") {
+		t.Errorf("relative path resolved to %q, %v; want %q", got, err, filepath.Join(realWork, "pkg", "main.go"))
 	}
 }
