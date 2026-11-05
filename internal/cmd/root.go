@@ -125,6 +125,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newUICommand())
 	root.AddCommand(newCodeCommand())
 	root.AddCommand(newWatchdogCommand())
+	root.AddCommand(newAICommand())
 
 	return root
 }
@@ -141,7 +142,8 @@ func Execute() {
 			errors.Is(err, errCluster) || errors.Is(err, errPlugin) ||
 			errors.Is(err, errNamespace) || errors.Is(err, errTune) ||
 			errors.Is(err, errUINotRunning) || errors.Is(err, errCodeNotRunning) ||
-			errors.Is(err, errKeys) || errors.Is(err, errVerify) {
+			errors.Is(err, errKeys) || errors.Is(err, errVerify) ||
+			errors.Is(err, errProbe) {
 			os.Exit(1)
 		}
 		// Print a friendly, actionable explanation (brand redesign part 6)

@@ -2513,10 +2513,10 @@ func backupProvidersFromFile(log *slog.Logger) []messaging.AIProvider {
 // bots from environment variables. All credentials come from the environment,
 // never from the config file. Returns a struct whose fields are nil when the
 // corresponding integration is not configured.
-func buildMessaging(log *slog.Logger) messagingComponents {
-	var m messagingComponents
-
-	// --- AI gateway: assemble providers from env keys -----------------------
+// aiProviders assembles the AI providers from env keys, falling back to the
+// saved `vortex setup` config when no provider env var is set. Shared by
+// start and `vortex ai probe`, so both see the same providers.
+func aiProviders(log *slog.Logger) []messaging.AIProvider {
 	var providers []messaging.AIProvider
 	if k := os.Getenv("VORTEX_ANTHROPIC_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
@@ -2596,6 +2596,14 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			providers = append(providers, backupProvidersFromFile(log)...)
 		}
 	}
+	return providers
+}
+
+func buildMessaging(log *slog.Logger) messagingComponents {
+	var m messagingComponents
+
+	// --- AI gateway: assemble providers from env keys -----------------------
+	providers := aiProviders(log)
 	if len(providers) > 0 {
 		gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
 		if err != nil {

@@ -68,6 +68,41 @@ func (g *AIGateway) ChatWithTools(ctx context.Context, system string, msgs []Cha
 	return ToolChatResult{}, lastErr
 }
 
+// ProviderTools is one configured provider as a tool-calling model, with no
+// fallback to the others: what `vortex ai probe` tests one by one.
+type ProviderTools struct {
+	g *AIGateway
+	p AIProvider
+}
+
+// Name is the provider name; Model is the model it would use.
+func (pt ProviderTools) Name() string  { return pt.p.Name }
+func (pt ProviderTools) Model() string { return pt.g.modelOf(pt.p) }
+
+// ChatWithTools calls this provider only. Usage counts toward the budget.
+func (pt ProviderTools) ChatWithTools(ctx context.Context, system string, msgs []ChatMessage, tools []ToolDef) (ToolChatResult, error) {
+	if !SupportsNativeTools(pt.p) {
+		return ToolChatResult{}, ErrToolsUnsupported
+	}
+	if pt.g.budgetExceeded() {
+		return ToolChatResult{}, ErrBudgetExceeded
+	}
+	res, err := pt.g.chatToolsProvider(ctx, pt.p, system, msgs, tools)
+	if err == nil {
+		pt.g.recordCost(res.Model, res.Tokens)
+	}
+	return res, err
+}
+
+// EachProvider returns every configured provider, in priority order.
+func (g *AIGateway) EachProvider() []ProviderTools {
+	out := make([]ProviderTools, 0, len(g.cfg.Providers))
+	for _, p := range g.cfg.Providers {
+		out = append(out, ProviderTools{g: g, p: p})
+	}
+	return out
+}
+
 func (g *AIGateway) chatToolsProvider(ctx context.Context, p AIProvider, system string, msgs []ChatMessage, tools []ToolDef) (ToolChatResult, error) {
 	model := g.modelOf(p)
 	var res ToolChatResult

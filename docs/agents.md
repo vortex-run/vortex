@@ -53,6 +53,13 @@ Converse API, Ollama); the model itself must support tool use. Without
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 
+Not every model can drive this loop. `vortex ai probe` sends each configured
+provider a few small requests and checks that it calls a tool, uses typed
+arguments, reads a tool result back and ignores an instruction planted in a
+result; nothing is executed. It exits non-zero if any check fails, and
+`--provider ollama` limits it to one provider. Each provider costs a few
+short model calls.
+
 #### Skills
 
 `/agent` reads [Agent Skills](https://agentskills.io) — `SKILL.md` folders
