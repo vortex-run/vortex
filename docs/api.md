@@ -54,12 +54,18 @@ POST /api/agents/submit
   else                       → {"response":"...","session_id":"..."}
 
 GET  /api/agents/status              → {active_agents, total_messages, queue_depth}
-POST /api/agents/approve             → {"session_id":"...","approved":true}
+POST /api/agents/approve             → {"session_id":"...","approved":true,"action_id":"optional"}
 GET  /api/agents/history             → list sessions (newest first)
 GET  /api/agents/history/{id}        → messages for a session
 ```
 
 `session_id` must match `^[A-Za-z0-9_.-]{1,64}$`. Responses are capped at 8 MB.
+
+Each approval line ends with `(action <id>)`, a 16-hex-digit digest of the
+tool, its parameters and the preview. Send that id as `action_id` and the
+decision applies only to that action: if a different one is pending the call
+returns `409` and nothing changes. Without `action_id` the call resolves
+whatever is pending for the session, as before; the TUI always sends it.
 
 SSE chunks stream **as the model generates them** (true token streaming):
 direct coordinator answers arrive line by line while the reply is being

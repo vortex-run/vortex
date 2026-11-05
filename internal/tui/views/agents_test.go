@@ -678,3 +678,15 @@ func TestAgents_ApprovalRendersInWarningFrame(t *testing.T) {
 		t.Errorf("approval should render in the Approval Required frame:\n%s", out)
 	}
 }
+
+// TestAgents_ApprovalCapturesLastActionID: the decision is bound to the
+// action id on the newest approval line in the reply.
+func TestAgents_ApprovalCapturesLastActionID(t *testing.T) {
+	m := NewAgents(nil)
+	content := "[APPROVAL_REQUIRED|LOW RISK|write_file] Write a.txt (action 0123456789abcdef)\n✓ done\n" +
+		"[APPROVAL_REQUIRED|LOW RISK|write_file] Write b.txt (action fedcba9876543210)"
+	updated, _ := m.Update(agentResponse{content: content})
+	if got := updated.(AgentsModel).approvalAction; got != "fedcba9876543210" {
+		t.Errorf("approvalAction = %q", got)
+	}
+}

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,4 +112,57 @@ func TestApproval_ExpiredIsNotExecuted(t *testing.T) {
 		t.Error("expired approval executed the action")
 	}
 	wantEntries(t, rec, "agent.approval.requested|write_file", "agent.approval.expired|write_file")
+}
+
+// TestApproval_BoundToActionID: an approve call naming another action's id
+// is refused and leaves the pending action alone; the right id executes it.
+func TestApproval_BoundToActionID(t *testing.T) {
+	c, dir := agentCoord(t, toolGateway{writeScript()}, nil)
+	done := make(chan string, 1)
+	go func() {
+		reply, _ := c.HandleMessage(context.Background(), "/agent create hello.txt", "b1")
+		done <- reply
+	}()
+	for i := 0; !c.HasPendingApproval("b1"); i++ {
+		if i > 500 {
+			t.Fatal("no approval request")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.mu.Lock()
+	id := c.pending["b1"].actionID
+	c.mu.Unlock()
+	if len(id) != 16 {
+		t.Fatalf("action id = %q", id)
+	}
+	if _, matched, err := c.ApproveActionID("b1", "0000000000000000", true); !matched || !errors.Is(err, ErrActionMismatch) {
+		t.Fatalf("stale id: matched=%v err=%v", matched, err)
+	}
+	if !c.HasPendingApproval("b1") {
+		t.Fatal("mismatched approval consumed the pending action")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hello.txt")); err == nil {
+		t.Fatal("file written on a mismatched approval")
+	}
+	if _, matched, err := c.ApproveActionID("b1", id, true); !matched || err != nil {
+		t.Fatalf("right id: matched=%v err=%v", matched, err)
+	}
+	if reply := <-done; !strings.Contains(reply, "(action "+id+")") {
+		t.Errorf("approval line lacks the id: %q", reply)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "hello.txt")); string(data) != "hi" {
+		t.Errorf("file = %q", data)
+	}
+}
+
+func TestActionID_DependsOnWhatRuns(t *testing.T) {
+	a := ApprovalRequest{Tool: "run_terminal", Description: "run ls", Params: map[string]any{"command": "ls"}}
+	b := a
+	b.Params = map[string]any{"command": "rm -rf ."}
+	if ActionID(a) == ActionID(b) {
+		t.Error("different commands share an id")
+	}
+	if ActionID(a) != ActionID(ApprovalRequest{Tool: "run_terminal", Description: "run ls", Params: map[string]any{"command": "ls"}}) {
+		t.Error("id is not deterministic")
+	}
 }

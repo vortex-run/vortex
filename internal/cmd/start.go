@@ -1910,6 +1910,10 @@ func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) (string, 
 	return a.rt.Approve(sessionID, approved)
 }
 
+func (a *agentRuntimeAdapter) ApproveAction(sessionID, actionID string, approved bool) (string, bool, error) {
+	return a.rt.ApproveAction(sessionID, actionID, approved)
+}
+
 func (a *agentRuntimeAdapter) ListSessions() []api.SessionSummary {
 	src := a.rt.ListSessions()
 	out := make([]api.SessionSummary, 0, len(src))

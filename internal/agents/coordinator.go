@@ -2,6 +2,9 @@ package agents
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -171,6 +174,7 @@ type pendingApproval struct {
 	params      map[string]any
 	result      chan bool
 	description string    // what was shown for approval, for the audit record
+	actionID    string    // ActionID of the request; approve calls may be bound to it
 	created     time.Time // pending approvals expire after approvalTTL
 }
 
@@ -785,12 +789,13 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	// approve/reject POST arrives.
 	// Encode the risk level + tool so the TUI can render a risk badge and the
 	// matching header severity (brand redesign part 6).
-	emit("[APPROVAL_REQUIRED|" + ae.Request.Risk() + "|" + ae.Request.Tool + "] " + ae.Request.Description)
+	actionID := ActionID(ae.Request)
+	emit(approvalLine(ae.Request, actionID))
 	if ae.Request.Preview != "" {
 		emit(ae.Request.Preview)
 	}
 	c.auditAction(ctx, "agent.approval.requested", session, name, map[string]any{
-		"risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description),
+		"risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description), "action_id": actionID,
 	})
 
 	if c.cfg.Approval != nil {
@@ -818,11 +823,41 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 		toolName: name, tool: tool, params: params,
 		result:      make(chan bool, 1),
 		description: ae.Request.Description,
+		actionID:    actionID,
 		created:     time.Now(),
 	}
 	c.mu.Unlock()
 	return nil, nil
 }
+
+// ActionID is a short digest of exactly what an approval request would do
+// (tool, parameters, description). It is shown with the request, and an
+// approve call that names an action_id is accepted only for that action, so
+// an approval can't land on a different action queued in the meantime.
+func ActionID(req ApprovalRequest) string {
+	b, err := json.Marshal(struct {
+		Tool        string         `json:"t"`
+		Params      map[string]any `json:"p"`
+		Description string         `json:"d"`
+		Preview     string         `json:"v"`
+	}{req.Tool, req.Params, req.Description, req.Preview})
+	if err != nil { // unmarshalable params: fall back to the visible parts
+		b = []byte(req.Tool + "\x00" + req.Description + "\x00" + req.Preview)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+// approvalLine is the marker line the TUI and API clients look for. The
+// action id goes after the description so the existing
+// "[APPROVAL_REQUIRED|risk|tool]" prefix keeps its shape.
+func approvalLine(req ApprovalRequest, actionID string) string {
+	return "[APPROVAL_REQUIRED|" + req.Risk() + "|" + req.Tool + "] " + req.Description + " (action " + actionID + ")"
+}
+
+// ErrActionMismatch means an approve call named an action_id that is not the
+// action pending for the session. The pending action is left untouched.
+var ErrActionMismatch = errors.New("agents: action_id does not match the pending action")
 
 // auditAction records one step of an approval-gated action in the audit log.
 // Best effort: a failed write is logged and never blocks or changes the
@@ -876,15 +911,32 @@ func (c *Coordinator) ExecuteLocalToolSync(name string, params map[string]any) (
 // original Submit already returned the preview, so the work happens here).
 // matched is false when no action was pending for the session.
 func (c *Coordinator) ApproveAction(session string, approved bool) (transcript string, matched bool) {
+	transcript, matched, _ = c.ApproveActionID(session, "", approved)
+	return transcript, matched
+}
+
+// ApproveActionID is ApproveAction bound to a specific action: when actionID
+// is non-empty and differs from the pending action's id, nothing is resolved
+// and ErrActionMismatch is returned (matched is true: something is pending).
+// An empty actionID keeps the unbound behaviour for older clients.
+func (c *Coordinator) ApproveActionID(session, actionID string, approved bool) (transcript string, matched bool, err error) {
 	c.mu.Lock()
 	p, ok := c.pending[session]
+	if ok && actionID != "" && p.actionID != actionID {
+		c.mu.Unlock()
+		return "", true, ErrActionMismatch
+	}
 	if ok {
 		delete(c.pending, session)
 	}
 	c.mu.Unlock()
 	if !ok {
-		return "", false
+		return "", false, nil
 	}
+	return c.resolvePending(session, p, approved), true, nil
+}
+
+func (c *Coordinator) resolvePending(session string, p *pendingApproval, approved bool) string {
 
 	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
 	defer cancel()
@@ -896,7 +948,7 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 		case p.result <- false:
 		default:
 		}
-		return "✗ Approval expired (older than " + approvalTTL.String() + "); ask again", true
+		return "✗ Approval expired (older than " + approvalTTL.String() + "); ask again"
 	}
 
 	// Legacy synchronous (Telegram) waiter, if any, still gets the decision.
@@ -909,10 +961,10 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 	})
 	if !approved {
 		slog.Default().Info("approval rejected", "tool", p.toolName, "session", session)
-		return "✗ Action rejected by user", true
+		return "✗ Action rejected by user"
 	}
 	if p.tool == nil {
-		return "✓ Action approved", true
+		return "✓ Action approved"
 	}
 
 	slog.Default().Info("approval received, executing tool", "tool", p.toolName, "session", session)
@@ -920,10 +972,10 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 	c.auditExecuted(ctx, session, p.toolName, err)
 	if err != nil {
 		slog.Default().Error("tool execution after approval failed", "tool", p.toolName, "err", err)
-		return "⚠ " + err.Error(), true
+		return "⚠ " + err.Error()
 	}
 	slog.Default().Info("tool executed after approval", "tool", p.toolName, "result", result)
-	return toolDoneLine(p.toolName, result), true
+	return toolDoneLine(p.toolName, result)
 }
 
 // HasPendingApproval reports whether a session has an action awaiting approval.
@@ -2061,13 +2113,14 @@ func (c *Coordinator) loopApprover(sessionID string, emit func(string)) Approval
 		return c.cfg.Approval
 	}
 	return func(ctx context.Context, req ApprovalRequest) bool {
-		emit("[APPROVAL_REQUIRED|" + req.Risk() + "|" + req.Tool + "] " + req.Description)
+		actionID := ActionID(req)
+		emit(approvalLine(req, actionID))
 		if req.Preview != "" {
 			emit(req.Preview)
 		}
 		p := &pendingApproval{
 			toolName: req.Tool, result: make(chan bool, 1),
-			description: req.Description, created: time.Now(),
+			description: req.Description, actionID: actionID, created: time.Now(),
 		}
 		c.mu.Lock()
 		c.pending[sessionID] = p

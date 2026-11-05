@@ -134,7 +134,9 @@ generate one.
 
 Tools that touch the real machine require explicit approval (TUI `[Y]/[N]`,
 Telegram reply, or `POST /api/agents/approve`). This is the primary safety
-control for unattended runs — keep it on in production.
+control for unattended runs — keep it on in production. Approvals can be
+bound to the exact action shown (`action_id`, see [api.md](api.md)) and
+expire after 15 minutes.
 
 ### Local workspace trust (Auto Mode foundations)
 

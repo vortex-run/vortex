@@ -547,7 +547,17 @@ func ssePayloads(body io.Reader, fn func(payload string) bool) {
 // returns the result transcript (the action executes server-side on approval,
 // which may call a slow tool, so this uses the long submit timeout).
 func (c *Client) Approve(sessionID string, approved bool) (string, error) {
-	body, _ := json.Marshal(map[string]any{"session_id": sessionID, "approved": approved})
+	return c.ApproveAction(sessionID, "", approved)
+}
+
+// ApproveAction is Approve bound to the action id shown on the approval line;
+// the server refuses (409) if a different action is now pending.
+func (c *Client) ApproveAction(sessionID, actionID string, approved bool) (string, error) {
+	payload := map[string]any{"session_id": sessionID, "approved": approved}
+	if actionID != "" {
+		payload["action_id"] = actionID
+	}
+	body, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/approve", bytes.NewReader(body))

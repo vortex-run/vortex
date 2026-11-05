@@ -38,6 +38,7 @@ type AgentsModel struct {
 	sessionID      string
 	awaiting       bool                // an approval is pending (awaiting Y/N then Enter)
 	approvalID     string              // session the pending approval belongs to
+	approvalAction string              // action id from the approval line ("" for older servers)
 	approvalReady  bool                // box has rendered a frame; Y/N now accepted
 	approvalChoice string              // staged choice: "" | "approve" | "reject"
 	forgeJob       string              // active forge job id being polled ("" = none)
@@ -133,6 +134,10 @@ var jobIDPattern = regexp.MustCompile(`Job ID:\s*(job-[A-Za-z0-9_-]+|[A-Za-z0-9]
 // approvalMarker matches the coordinator's approval line, optionally carrying
 // "|<risk>|<tool>" metadata: "[APPROVAL_REQUIRED|HIGH RISK|run_terminal] ...".
 var approvalMarker = regexp.MustCompile(`\[APPROVAL_REQUIRED(?:\|([^|]*)\|([^\]]*))?\]`)
+
+// approvalActionID matches the "(action <id>)" suffix the coordinator adds so
+// the decision is bound to the action the user actually saw.
+var approvalActionID = regexp.MustCompile(`\(action ([0-9a-f]{16})\)`)
 
 // riskHeaders maps a risk level to its approval-box header (escalating warnings).
 var riskHeaders = map[string]string{
@@ -300,6 +305,11 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.approvalReady = false // ignore keys until the box has rendered a frame
 			m.approvalChoice = ""
 			m.approvalID = m.sessionID
+			m.approvalAction = ""
+			// The last id is the one now pending (a transcript can hold earlier ones).
+			if all := approvalActionID.FindAllStringSubmatch(content, -1); len(all) > 0 {
+				m.approvalAction = all[len(all)-1][1]
+			}
 			content = formatApproval(content)
 			content += "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
 			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
@@ -720,11 +730,15 @@ func (m AgentsModel) ApprovalChoice() string { return m.approvalChoice }
 // and carries back the result transcript (the action executes on approval).
 func (m AgentsModel) sendApproval(approved bool) tea.Cmd {
 	c := m.client
-	sid := m.approvalID
+	sid, action := m.approvalID, m.approvalAction
 	return func() tea.Msg {
 		result := ""
 		if c != nil {
-			result, _ = c.Approve(sid, approved)
+			var err error
+			result, err = c.ApproveAction(sid, action, approved)
+			if err != nil && result == "" {
+				result = "⚠ " + err.Error()
+			}
 		}
 		return approvalResult{approved: approved, result: result}
 	}
