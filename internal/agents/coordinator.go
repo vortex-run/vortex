@@ -152,6 +152,9 @@ type CoordinatorConfig struct {
 	// directory and passes recent context to the AI. Optional.
 	MemoryStore string
 	WorkingDir  string // directory relative paths resolve against
+	// Audit, when set, records every approval-gated local action: the
+	// request, the decision, and the execution result. Optional.
+	Audit AuditLogger
 }
 
 // pendingApproval holds a tool action awaiting the user's approve/reject via
@@ -161,10 +164,11 @@ type CoordinatorConfig struct {
 // approve/reject POST arrives — the original Submit has already returned the
 // preview, so it cannot block waiting.
 type pendingApproval struct {
-	toolName string
-	tool     Tool
-	params   map[string]any
-	result   chan bool
+	toolName    string
+	tool        Tool
+	params      map[string]any
+	result      chan bool
+	description string // what was shown for approval, for the audit record
 }
 
 // SessionState tracks per-conversation context so a multi-turn build (with
@@ -777,14 +781,21 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	if ae.Request.Preview != "" {
 		emit(ae.Request.Preview)
 	}
+	c.auditAction(ctx, "agent.approval.requested", session, name, map[string]any{
+		"risk": ae.Request.Risk(), "action": truncateForAudit(ae.Request.Description),
+	})
 
 	if c.cfg.Approval != nil {
 		approved := c.cfg.Approval(ctx, ae.Request)
+		c.auditAction(ctx, "agent.approval.decided", session, name, map[string]any{
+			"approved": approved, "via": "approver", "action": truncateForAudit(ae.Request.Description),
+		})
 		if !approved {
 			emit("✗ Action rejected by user")
 			return nil, fmt.Errorf("agents: action rejected by user")
 		}
 		approvedResult, aerr := executeApprovedLocal(ctx, tool, params)
+		c.auditExecuted(ctx, session, name, aerr)
 		if aerr != nil {
 			emit("⚠ " + aerr.Error())
 			return nil, aerr
@@ -797,10 +808,44 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	c.mu.Lock()
 	c.pending[session] = &pendingApproval{
 		toolName: name, tool: tool, params: params,
-		result: make(chan bool, 1),
+		result:      make(chan bool, 1),
+		description: ae.Request.Description,
 	}
 	c.mu.Unlock()
 	return nil, nil
+}
+
+// auditAction records one step of an approval-gated action in the audit log.
+// Best effort: a failed write is logged and never blocks or changes the
+// action. Before this, approvals and approved executions only reached the
+// process log, so the tamper-evident audit trail had no record of who
+// approved what or what the agent then ran.
+func (c *Coordinator) auditAction(ctx context.Context, action, session, tool string, detail map[string]any) {
+	if c.cfg.Audit == nil {
+		return
+	}
+	detail["session"] = session
+	if err := c.cfg.Audit.Append(ctx, "agent", action, tool, detail); err != nil {
+		slog.Default().Warn("audit write failed", "action", action, "tool", tool, "err", err)
+	}
+}
+
+// auditExecuted records the outcome of an approved action.
+func (c *Coordinator) auditExecuted(ctx context.Context, session, tool string, err error) {
+	detail := map[string]any{"ok": err == nil}
+	if err != nil {
+		detail["error"] = truncateForAudit(err.Error())
+	}
+	c.auditAction(ctx, "agent.action.executed", session, tool, detail)
+}
+
+// truncateForAudit bounds free text (commands, errors) stored in audit detail.
+func truncateForAudit(s string) string {
+	const limit = 512
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "…"
 }
 
 // ExecuteLocalToolSync runs a read-only local tool and returns its transcript
@@ -838,6 +883,11 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 	default:
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
+	defer cancel()
+	c.auditAction(ctx, "agent.approval.decided", session, p.toolName, map[string]any{
+		"approved": approved, "via": "api", "action": truncateForAudit(p.description),
+	})
 	if !approved {
 		slog.Default().Info("approval rejected", "tool", p.toolName, "session", session)
 		return "✗ Action rejected by user", true
@@ -847,9 +897,8 @@ func (c *Coordinator) ApproveAction(session string, approved bool) (transcript s
 	}
 
 	slog.Default().Info("approval received, executing tool", "tool", p.toolName, "session", session)
-	ctx, cancel := context.WithTimeout(context.Background(), handleMessageTimeout)
-	defer cancel()
 	result, err := executeApprovedLocal(ctx, p.tool, p.params)
+	c.auditExecuted(ctx, session, p.toolName, err)
 	if err != nil {
 		slog.Default().Error("tool execution after approval failed", "tool", p.toolName, "err", err)
 		return "⚠ " + err.Error(), true

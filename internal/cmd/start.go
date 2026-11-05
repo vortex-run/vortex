@@ -1793,7 +1793,12 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		localRegistry = nil
 	}
 
+	var coordAudit agents.AuditLogger
+	if auditLog != nil { // a nil *audit.Log in the interface would not be nil
+		coordAudit = auditLog
+	}
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
+		Audit:             coordAudit,
 		Bus:               bus,
 		Tools:             sandboxed,
 		LocalTools:        localRegistry,
