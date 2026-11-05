@@ -2,6 +2,8 @@ package agents
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -116,5 +118,26 @@ func TestURIToPath_PlatformForms(t *testing.T) {
 	// Windows drive path must drop the URI's leading slash.
 	if got := uriToPath("file:///C:/proj/main.go"); filepath.ToSlash(got) != "C:/proj/main.go" {
 		t.Errorf("windows uriToPath = %q, want C:/proj/main.go", got)
+	}
+}
+
+// TestLSPTool_StaysInTheWorkspace: a file outside WorkDir is refused before
+// anything reads it or starts a language server.
+func TestLSPTool_StaysInTheWorkspace(t *testing.T) {
+	work, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "secret.go")
+	if err := os.WriteFile(secret, []byte("package x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := &LSPDiagnosticsTool{WorkDir: work}
+	defer tool.Close()
+	rel, _ := filepath.Rel(work, secret)
+	for _, f := range []string{secret, rel} {
+		if _, err := tool.Execute(context.Background(), map[string]any{"file": f}); !errors.Is(err, ErrWorkspaceEscape) {
+			t.Errorf("file %q: err = %v, want ErrWorkspaceEscape", f, err)
+		}
+	}
+	if got, err := tool.resolve("pkg/main.go"); err != nil || got != filepath.Join(work, "pkg", "main.go") {
+		t.Errorf("relative path resolved to %q, %v; want it under WorkDir", got, err)
 	}
 }
