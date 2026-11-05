@@ -87,7 +87,8 @@ load, `allowed-tools` is ignored for now, and every action a skill suggests
 still goes through the approval gate. Invalid skills (bad name, name not
 matching the folder, missing description, unsupported YAML such as `[a, b]`
 lists, symlinked files, files over 256 KiB) are skipped with a warning in the
-log. Skills are re-read on every run.
+log. Skills are re-read on every run. `vortex skills list` (or `--dir <workspace>`)
+shows which ones load and why any are skipped.
 
 ### VORTEX Forge — autonomous app builds
 
