@@ -172,3 +172,31 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	req.URL.Host = u.Host
 	return rt.base.RoundTrip(req)
 }
+
+// TestBedrock_ModelIDEncodedInPathAndSignature: the ':' in a model ID is
+// sent as %3A and signed as %253A (SigV4 double-encodes non-S3 paths).
+func TestBedrock_ModelIDEncodedInPathAndSignature(t *testing.T) {
+	var rawURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawURI = r.RequestURI
+		_, _ = io.WriteString(w, `{"content":[{"text":"ok"}],"usage":{}}`)
+	}))
+	defer srv.Close()
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{
+			Name: ProviderBedrock, APIKey: "AKIA:secret", Endpoint: "us-east-1",
+			Models: []string{"anthropic.claude-3-5-sonnet-20240620-v1:0"},
+		}},
+	})
+	g.client = &http.Client{Transport: rewriteTransport{to: srv.URL, base: srv.Client().Transport}}
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if rawURI != "/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/invoke" {
+		t.Errorf("request URI = %q", rawURI)
+	}
+	wire, canonical := bedrockModelPath("m-v1:0", "invoke")
+	if wire != "/model/m-v1%3A0/invoke" || canonical != "/model/m-v1%253A0/invoke" {
+		t.Errorf("wire=%q canonical=%q", wire, canonical)
+	}
+}

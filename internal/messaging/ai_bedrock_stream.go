@@ -39,7 +39,7 @@ func (g *AIGateway) streamBedrock(ctx context.Context, p AIProvider, prompt, sys
 		model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 	}
 	host := fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", region)
-	path := "/model/" + model + "/invoke-with-response-stream"
+	path, canonicalPath := bedrockModelPath(model, "invoke-with-response-stream")
 
 	body, err := json.Marshal(map[string]any{
 		"anthropic_version": "bedrock-2023-05-31",
@@ -51,7 +51,7 @@ func (g *AIGateway) streamBedrock(ctx context.Context, p AIProvider, prompt, sys
 		return "", 0, err
 	}
 	headers := map[string]string{"Content-Type": "application/json"}
-	bedrockSignV4(headers, body, "POST", host, path, accessKey, secretKey, region, "bedrock", g.now())
+	bedrockSignV4(headers, body, "POST", host, canonicalPath, accessKey, secretKey, region, "bedrock", g.now())
 
 	callCtx, cancel := context.WithTimeout(ctx, maxStreamDuration)
 	defer cancel()

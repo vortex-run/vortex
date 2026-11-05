@@ -139,7 +139,8 @@ func (g *AIGateway) callBedrock(ctx context.Context, p AIProvider, prompt, syste
 		model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 	}
 	host := fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", region)
-	url := fmt.Sprintf("https://%s/model/%s/invoke", host, model)
+	wirePath, canonicalPath := bedrockModelPath(model, "invoke")
+	url := "https://" + host + wirePath
 
 	payload := map[string]any{
 		"anthropic_version": "bedrock-2023-05-31",
@@ -158,7 +159,7 @@ func (g *AIGateway) callBedrock(ctx context.Context, p AIProvider, prompt, syste
 		} `json:"usage"`
 	}
 	signer := func(headers map[string]string, body []byte) {
-		bedrockSignV4(headers, body, "POST", host, "/model/"+model+"/invoke",
+		bedrockSignV4(headers, body, "POST", host, canonicalPath,
 			accessKey, secretKey, region, "bedrock", g.now())
 	}
 	_, err := g.doSignedJSON(ctx, url, signer, payload, &out)
@@ -187,6 +188,16 @@ func splitBedrockKey(key string) (access, secret string, ok bool) {
 // SigV4-signed request. It mirrors the signer in internal/secrets/awsssm.go;
 // kept here to avoid exporting cross-package internals. headers is mutated in
 // place; the caller has already set Host/Content-Type.
+// bedrockModelPath returns the request path for a model action and the
+// canonical URI to sign. Model IDs contain ':' ("...-v1:0"), which must be
+// percent-encoded on the wire, and SigV4 for non-S3 services encodes each
+// path segment again in the canonical request (":" → "%3A" → "%253A"), as the
+// AWS SDKs do. Signing the raw ':' path doesn't match what AWS computes.
+func bedrockModelPath(model, action string) (wire, canonical string) {
+	enc := awsigv4.URIEncode(model)
+	return "/model/" + enc + "/" + action, "/model/" + awsigv4.URIEncode(enc) + "/" + action
+}
+
 func bedrockSignV4(headers map[string]string, payload []byte, method, host, path, accessKey, secretKey, region, service string, now time.Time) {
 	amzDate := now.UTC().Format("20060102T150405Z")
 	dateStamp := now.UTC().Format("20060102")

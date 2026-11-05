@@ -25,3 +25,17 @@ func TestSigningKeyDeterministic(t *testing.T) {
 		t.Fatalf("signature hex len = %d", len(sig))
 	}
 }
+
+func TestURIEncode(t *testing.T) {
+	cases := map[string]string{
+		"anthropic.claude-3-5-sonnet-20240620-v1:0": "anthropic.claude-3-5-sonnet-20240620-v1%3A0",
+		"a b/c~d_e":       "a%20b%2Fc~d_e",
+		"ሴ":               "%E1%88%B4",
+		URIEncode("v1:0"): "v1%253A0", // second pass, as non-S3 canonical URIs need
+	}
+	for in, want := range cases {
+		if got := URIEncode(in); got != want {
+			t.Errorf("URIEncode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
