@@ -106,10 +106,12 @@ func TestAgentCommand_AsyncReject(t *testing.T) {
 	}
 }
 
+// TestAgentCommand_GatewayWithoutTools: a gateway with no native tool
+// calling falls back to the text protocol instead of refusing.
 func TestAgentCommand_GatewayWithoutTools(t *testing.T) {
-	c, _ := agentCoord(t, StubAIGateway{}, nil)
+	c, _ := agentCoord(t, StubAIGateway{AnswerReply: "All done."}, nil)
 	reply, err := c.HandleMessage(context.Background(), "/agent do something", "s4")
-	if err != nil || !strings.Contains(reply, "doesn't support tool calling") {
+	if err != nil || !strings.Contains(reply, "text protocol") || !strings.Contains(reply, "All done.") {
 		t.Errorf("reply = %q, err = %v", reply, err)
 	}
 }

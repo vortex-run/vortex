@@ -345,6 +345,12 @@ func (g *AIGateway) toolsOllama(ctx context.Context, p AIProvider, model, system
 		PromptEvalCount int    `json:"prompt_eval_count"`
 	}
 	if _, err := g.doJSON(ctx, strings.TrimRight(base, "/")+"/api/chat", nil, payload, &out); err != nil {
+		// Many local models have no tool support; Ollama answers 400
+		// "<model> does not support tools". Report that as the capability
+		// gap it is, so callers can fall back to a text protocol.
+		if strings.Contains(err.Error(), "does not support tools") {
+			return ToolChatResult{}, fmt.Errorf("ollama: %w (%v)", ErrToolsUnsupported, err)
+		}
 		return ToolChatResult{}, fmt.Errorf("ollama: %w", err)
 	}
 	res := ToolChatResult{Text: out.Message.Content, Stop: out.DoneReason, Tokens: out.EvalCount + out.PromptEvalCount}

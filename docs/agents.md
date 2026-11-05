@@ -48,7 +48,10 @@ TUI/API approve call; pending approvals expire after 15 minutes), and each
 decision is in the audit log. A run stops after 20 model turns or about two
 minutes, or at 250k tokens. Works with every built-in provider (Claude,
 OpenAI, DeepSeek, Groq, OpenRouter, Azure OpenAI, Gemini, Bedrock via the
-Converse API, Ollama); the model itself must support tool use. Without
+Converse API, Ollama). Models without native tool calling (many small
+local models) fall back to a text protocol: the model asks for a tool in a
+JSON block. It is less reliable, and every call still goes through the same
+checks and approvals. Without
 `/agent`, requests use the existing command and keyword routing.
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_

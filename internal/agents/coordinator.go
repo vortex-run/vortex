@@ -2038,12 +2038,11 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 	if task == "" {
 		return "Usage: /agent <task>", nil
 	}
-	model, ok := c.cfg.AIGateway.(ToolChatter)
-	if !ok {
-		return "The configured AI gateway doesn't support tool calling, so /agent isn't available.", nil
-	}
 	if c.cfg.LocalTools == nil {
 		return "No local tools are configured, so /agent isn't available.", nil
+	}
+	if c.cfg.AIGateway == nil {
+		return "No AI provider is configured, so /agent isn't available (run vortex setup).", nil
 	}
 	var transcript []string
 	emit := func(line string) {
@@ -2051,6 +2050,18 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		if sf != nil {
 			sf.Write(line + "\n")
 		}
+	}
+	// Native tool calling when the gateway and model have it; otherwise the
+	// text protocol (PromptedTools), which many small local models need.
+	// Either way every call goes through the same validation and approval.
+	prompted := PromptedTools{Model: c.cfg.AIGateway}
+	var model ToolChatter = prompted
+	if native, ok := c.cfg.AIGateway.(ToolChatter); ok {
+		model = &FallbackTools{Native: native, Prompted: prompted, OnFallback: func(error) {
+			emit("ℹ This model has no native tool calling; using a text protocol (less reliable).")
+		}}
+	} else {
+		emit("ℹ This AI gateway has no native tool calling; using a text protocol (less reliable).")
 	}
 	catalog, skillFiles := c.skillCatalog()
 	res := RunLoop(ctx, LoopConfig{

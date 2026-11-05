@@ -309,3 +309,19 @@ func TestChatWithTools_BedrockConverse(t *testing.T) {
 		t.Errorf("system = %v", req["system"])
 	}
 }
+
+// TestChatWithTools_OllamaModelWithoutTools: Ollama's 400 for a model with
+// no tool support is reported as ErrToolsUnsupported, so /agent can fall
+// back to the text protocol.
+func TestChatWithTools_OllamaModelWithoutTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"registry.ollama.ai/library/gemma:2b does not support tools"}`)
+	}))
+	t.Cleanup(srv.Close)
+	g := toolGateway(t, AIProvider{Name: ProviderOllama, Endpoint: srv.URL, Models: []string{"gemma:2b"}})
+	_, err := g.ChatWithTools(context.Background(), "", []ChatMessage{{Role: "user", Content: "hi"}}, []ToolDef{readFileTool})
+	if !errors.Is(err, ErrToolsUnsupported) {
+		t.Errorf("err = %v, want ErrToolsUnsupported", err)
+	}
+}
