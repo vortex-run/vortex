@@ -118,3 +118,20 @@ func TestAgentCommand_RunFinishedIsAudited(t *testing.T) {
 		t.Errorf("detail = %v", d)
 	}
 }
+
+// TestAgentCommand_RunIsInHistory: an /agent run is recorded in the
+// session's conversation history (it used to be missing from /history).
+func TestAgentCommand_RunIsInHistory(t *testing.T) {
+	c, _ := agentCoord(t, toolGateway{writeScript()}, func(context.Context, ApprovalRequest) bool { return true })
+	c.cfg.MemoryStore = t.TempDir()
+	if _, err := c.HandleMessage(context.Background(), `/agent --check "exit 0" create hello.txt`, "hist1"); err != nil {
+		t.Fatal(err)
+	}
+	msgs := c.SessionHistory("hist1")
+	if len(msgs) != 2 {
+		t.Fatalf("history = %+v", msgs)
+	}
+	if msgs[0].Content != `/agent --check "exit 0" create hello.txt` || !strings.Contains(msgs[1].Content, "Created hello.txt.") {
+		t.Errorf("history = %+v", msgs)
+	}
+}

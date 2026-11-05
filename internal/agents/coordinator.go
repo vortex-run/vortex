@@ -2044,6 +2044,7 @@ func (s *subAgent) Tools() []string { return s.tools }
 // handleAgentLoop runs a task through the model-driven loop with the local
 // tools. Progress lines stream to sf when the caller streams.
 func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task string, sf *streamFilter) (string, error) {
+	userLine := "/agent " + task // as the user typed it, for history
 	check, task, err := parseAgentFlags(task)
 	if err != nil {
 		return "Usage: /agent [--check \"<command>\"] <task>  (" + err.Error() + ")", nil
@@ -2116,7 +2117,11 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 	default:
 		emit("Stopped: " + errString(res.Err))
 	}
-	return strings.Join(transcript, "\n"), nil
+	reply := strings.Join(transcript, "\n")
+	// Keep the run in the conversation like any other exchange, so /history
+	// and /resume show it and the next message has it as context.
+	c.recordExchange(sessionID, userLine, reply)
+	return reply, nil
 }
 
 // skillCatalog lists the workspace skills (names and descriptions only) for
