@@ -71,13 +71,13 @@ func newStatusCommand() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
-	c.Flags().IntVar(&apiPort, "api-port", 9090, "management API port")
+	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port")
 	c.Flags().BoolVar(&jsonOut, "json", false, "output raw JSON from /health instead of a table")
 	return c
 }
 
 func fetchHealth(apiPort int) ([]byte, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/health", apiPort)
+	url := "http://" + localAPIAddr(apiPort) + "/health"
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -97,5 +97,5 @@ func printStatusTable(out io.Writer, pid, apiPort int, h statusHealth) {
 	fmt.Fprintf(out, "Uptime:   %s\n", h.Uptime)
 	fmt.Fprintf(out, "Config:   %s (hash: %s)\n", flags.configPath, shortHash(h.ConfigHash))
 	fmt.Fprintf(out, "Cluster:  %s\n", h.ClusterName)
-	fmt.Fprintf(out, "API:      http://127.0.0.1:%d\n", apiPort)
+	fmt.Fprintf(out, "API:      http://%s\n", localAPIAddr(apiPort))
 }

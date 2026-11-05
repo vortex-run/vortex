@@ -67,7 +67,7 @@ func newReloadCommand() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
-	c.Flags().IntVar(&apiPort, "api-port", 9090, "management API port")
+	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port")
 	return c
 }
 
@@ -76,7 +76,7 @@ func newReloadCommand() *cobra.Command {
 // server, or VORTEX_TRUST_LOOPBACK=false.
 func lastReloadStatus(apiPort int) (api.ReloadStatus, bool) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/status", apiPort))
+	resp, err := client.Get("http://" + localAPIAddr(apiPort) + "/api/status")
 	if err != nil {
 		return api.ReloadStatus{}, false
 	}

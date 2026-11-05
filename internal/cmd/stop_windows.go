@@ -11,7 +11,7 @@ import (
 // requestStop triggers shutdown on Windows, which has no SIGTERM, by calling
 // the localhost-only POST /internal/shutdown endpoint on the management API.
 func requestStop(_ int, apiPort int) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/internal/shutdown", apiPort)
+	url := "http://" + localAPIAddr(apiPort) + "/internal/shutdown"
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(url, "application/json", nil)
 	if err != nil {

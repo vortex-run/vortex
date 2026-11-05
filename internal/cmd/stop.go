@@ -55,6 +55,6 @@ func newStopCommand() *cobra.Command {
 	}
 	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
 	c.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for the server to stop")
-	c.Flags().IntVar(&apiPort, "api-port", 9090, "management API port (used for the Windows shutdown path)")
+	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port (used for the Windows shutdown path)")
 	return c
 }

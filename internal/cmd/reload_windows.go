@@ -14,7 +14,7 @@ import (
 // localhost-only POST /internal/reload endpoint on the management API. A
 // rejected file or routes that failed to start come back as the error.
 func requestReload(_ int, apiPort int) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d/internal/reload", apiPort)
+	url := "http://" + localAPIAddr(apiPort) + "/internal/reload"
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Post(url, "application/json", nil)
 	if err != nil {

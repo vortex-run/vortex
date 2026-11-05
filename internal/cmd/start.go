@@ -79,7 +79,7 @@ func newStartCommand() *cobra.Command {
 			if withUI {
 				// Start the server in the background, then open the TUI; the TUI
 				// owns the foreground until the user quits.
-				return runUI(cmd.Context(), "http://localhost:9090", "", true)
+				return runUI(cmd.Context(), defaultAPIBase(), "", true)
 			}
 			return runStart(cmd.Context(), pidfile)
 		},
