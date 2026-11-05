@@ -346,6 +346,10 @@ func runBinary(t *testing.T, bin string, env []string, args ...string) (string, 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
+	// On a hang, ask for goroutine stacks (SIGQUIT on Unix) rather than a
+	// silent kill, so the failure output shows where it was stuck.
+	cmd.Cancel = func() error { return quitForStacks(cmd.Process) }
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {

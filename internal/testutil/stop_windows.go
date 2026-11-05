@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -45,3 +46,6 @@ func waitExit(t *testing.T, p *VortexProcess, d time.Duration) {
 
 // dumpStacks is Unix-only (SIGQUIT); Windows has no equivalent signal.
 func dumpStacks(*VortexProcess) {}
+
+// quitForStacks has no SIGQUIT equivalent on Windows; it just kills.
+func quitForStacks(p *os.Process) error { return p.Kill() }

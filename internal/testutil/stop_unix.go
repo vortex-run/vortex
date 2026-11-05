@@ -3,6 +3,7 @@
 package testutil
 
 import (
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -52,3 +53,6 @@ func dumpStacks(p *VortexProcess) {
 	}
 	p.stopped = true // reaped here; the cleanup must not wait again
 }
+
+// quitForStacks makes a Go process print its goroutine stacks and exit.
+func quitForStacks(p *os.Process) error { return p.Signal(syscall.SIGQUIT) }
