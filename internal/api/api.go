@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -35,6 +36,7 @@ const correlationHeader = "X-Correlation-ID"
 // Server is the management HTTP server.
 type Server struct {
 	srv       *http.Server
+	ln        net.Listener // set by Listen; Start serves on it
 	holder    *config.Holder
 	log       *slog.Logger
 	version   string
@@ -760,12 +762,32 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// Start begins serving in a background goroutine. It returns immediately; serve
+// Listen binds the management address now, so a busy port is a startup
+// error instead of a log line from a goroutine. Without it the process kept
+// running with no management API: no /health, no auth'd API, and on Windows
+// no way for `vortex stop` (which goes through /internal/shutdown) to reach it.
+func (s *Server) Listen() error {
+	ln, err := net.Listen("tcp", s.srv.Addr)
+	if err != nil {
+		return err
+	}
+	s.ln = ln
+	return nil
+}
+
+// Start begins serving in a background goroutine on the listener from Listen
+// (or binds itself if Listen wasn't called). It returns immediately; serve
 // errors other than graceful shutdown are logged.
 func (s *Server) Start() {
 	go func() {
 		s.log.Info("management API listening", "addr", s.srv.Addr)
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.ln != nil {
+			err = s.srv.Serve(s.ln)
+		} else {
+			err = s.srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			s.log.Error("management API stopped unexpectedly", "err", err)
 		}
 	}()

@@ -660,6 +660,11 @@ func runStart(ctx context.Context, pidfile string) error {
 		return reloadOutcome()
 	})
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
+	if err := apiSrv.Listen(); err != nil {
+		_ = removeOwnPIDFile(pidfile)
+		return fmt.Errorf("management API can't listen on %s (is another vortex or program using it? set VORTEX_API_LISTEN to change it): %w",
+			managementAPIListenAddr(), err)
+	}
 	apiSrv.Start()
 	// Background sweeps that bound the rate-limiter maps (production audit H5).
 	apiSrv.StartCleanup(ctx)
