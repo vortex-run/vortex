@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	neturl "net/url"
+	pathpkg "path"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -703,6 +704,21 @@ var vortexAPIDeniedPaths = []string{
 	"/internal/reload",
 }
 
+// canonicalAPIPath refuses a path the server would route differently from how
+// it reads: percent-encoding (/api/%61gents/submit is decoded to the agent
+// endpoint), backslashes, and dot segments or doubled slashes (ServeMux
+// redirects those to the clean path) all slipped past the prefix checks.
+func canonicalAPIPath(raw string) error {
+	p, _, _ := strings.Cut(raw, "?")
+	if strings.ContainsAny(p, `%\#`) {
+		return fmt.Errorf("%w: encoded or unusual characters in path %q", ErrSandboxViolation, raw)
+	}
+	if clean := pathpkg.Clean(p); p != clean && p != clean+"/" {
+		return fmt.Errorf("%w: path %q is not in canonical form (use %q)", ErrSandboxViolation, raw, clean)
+	}
+	return nil
+}
+
 // VortexAPITool calls the Gubern management API. Only /api/* paths are allowed,
 // excluding the agent and control-plane paths in vortexAPIDeniedPaths.
 type VortexAPITool struct {
@@ -726,6 +742,9 @@ func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any,
 	if err != nil {
 		return nil, err
 	}
+	if err := canonicalAPIPath(path); err != nil {
+		return nil, err
+	}
 	if !strings.HasPrefix(path, "/api/") {
 		return nil, fmt.Errorf("%w: only /api/* paths allowed", ErrSandboxViolation)
 	}
@@ -741,6 +760,10 @@ func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any,
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
+	// Never follow a redirect: its target never went through the checks above.
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client = &noRedirect
 	req, err := http.NewRequestWithContext(ctx, method, t.BaseURL+path, strings.NewReader(body))
 	if err != nil {
 		return nil, err

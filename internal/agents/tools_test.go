@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -463,5 +464,47 @@ func TestSandbox_BrokenSymlinkHandledSafely(t *testing.T) {
 	// Must error (EvalSymlinks fails on a broken link) and must not panic.
 	if err == nil {
 		t.Error("reading a broken symlink should return an error")
+	}
+}
+
+// TestVortexAPITool_DenylistCannotBeSidestepped: spellings the server routes
+// to a denied endpoint are refused, and redirects are not followed.
+func TestVortexAPITool_DenylistCannotBeSidestepped(t *testing.T) {
+	var hits []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, r.URL.Path)
+		if r.URL.Path == "/api/redirect" {
+			http.Redirect(w, r, "/api/agents/status", http.StatusFound)
+			return
+		}
+		_, _ = io.WriteString(w, "{}")
+	}))
+	defer srv.Close()
+	tool := VortexAPITool{BaseURL: srv.URL, Client: srv.Client()}
+	for _, p := range []string{
+		"/api/%61gents/submit", "/api/x/../agents/submit", "/api//agents/submit",
+		"/api/./agents/submit", `/api\agents\submit`, "/api/agents%2Fsubmit",
+	} {
+		if _, err := tool.Execute(context.Background(), map[string]any{"method": "POST", "path": p}); !errors.Is(err, ErrSandboxViolation) {
+			t.Errorf("path %q: err = %v, want ErrSandboxViolation", p, err)
+		}
+	}
+	if len(hits) != 0 {
+		t.Fatalf("refused paths reached the server: %v", hits)
+	}
+	res, err := tool.Execute(context.Background(), map[string]any{"method": "GET", "path": "/api/redirect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := res.(map[string]any)["status"].(int); st != http.StatusFound {
+		t.Errorf("status = %d, want the 302 itself", st)
+	}
+	for _, h := range hits {
+		if strings.HasPrefix(h, "/api/agents/") {
+			t.Errorf("redirect was followed to %s", h)
+		}
+	}
+	if _, err := tool.Execute(context.Background(), map[string]any{"method": "GET", "path": "/api/routes/?limit=5"}); err != nil {
+		t.Errorf("trailing slash + query should be fine: %v", err)
 	}
 }
