@@ -41,3 +41,22 @@ func TestWithUserDirs(t *testing.T) {
 		t.Errorf("Config() = %q, Cache() = %q; want both set", Config(), Cache())
 	}
 }
+
+func TestApp_NewLegacyAndBoth(t *testing.T) {
+	base := t.TempDir()
+	if got := App(base); got != filepath.Join(base, "gubern") {
+		t.Errorf("fresh: %s", got)
+	}
+	if err := os.Mkdir(filepath.Join(base, "vortex"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := App(base); got != filepath.Join(base, "vortex") {
+		t.Errorf("legacy only: %s (existing data must keep being used)", got)
+	}
+	if err := os.Mkdir(filepath.Join(base, "gubern"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := App(base); got != filepath.Join(base, "gubern") {
+		t.Errorf("both: %s (new dir wins)", got)
+	}
+}

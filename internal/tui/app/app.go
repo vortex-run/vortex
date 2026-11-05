@@ -536,7 +536,7 @@ var tutorialSteps = []string{
 // tutorialDonePath is the first-run flag file.
 func tutorialDonePath() string {
 	dir := userdir.Config()
-	return filepath.Join(dir, "vortex", "tutorial-done")
+	return filepath.Join(userdir.App(dir), "tutorial-done")
 }
 
 // startTutorialIfFirstRun activates the tutorial when its done-flag is absent.

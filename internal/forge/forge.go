@@ -82,7 +82,7 @@ func (f *Forge) setQuestions(qs []ClarifyingQuestion) {
 func NewForge(cfg ForgeConfig) (*Forge, error) {
 	if cfg.SandboxBase == "" {
 		base := userdir.Cache()
-		cfg.SandboxBase = filepath.Join(base, "vortex", "agents", "forge")
+		cfg.SandboxBase = filepath.Join(userdir.App(base), "agents", "forge")
 	}
 	return &Forge{cfg: cfg}, nil
 }

@@ -25,7 +25,7 @@ func namespaceStorePath() string {
 		return override
 	}
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "namespaces.json")
+	return filepath.Join(userdir.App(cacheDir), "namespaces.json")
 }
 
 // openNamespaceRegistry loads the namespace registry from disk.

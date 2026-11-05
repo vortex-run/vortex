@@ -24,7 +24,7 @@ func masterKeyPath() string {
 		return override
 	}
 	dir := userdir.Config()
-	return filepath.Join(dir, "vortex", "master.key")
+	return filepath.Join(userdir.App(dir), "master.key")
 }
 
 // sharedKeyring loads (or creates on first run) the process master key once

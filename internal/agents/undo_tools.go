@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // Undo support: before write_file overwrites an existing file, a backup is
@@ -43,7 +45,7 @@ func defaultBackupRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "vortex", "backups"), nil
+	return filepath.Join(userdir.App(dir), "backups"), nil
 }
 
 // safeBackupSession matches session IDs usable as a directory name as-is.

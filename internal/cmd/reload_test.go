@@ -11,7 +11,7 @@ func TestReloadCommandRegisters(t *testing.T) {
 func TestReloadFlagDefaults(t *testing.T) {
 	c := newReloadCommand()
 	cases := map[string]string{
-		"pidfile":  "vortex.pid",
+		"pidfile":  "gubern.pid",
 		"api-port": "9090",
 	}
 	for name, want := range cases {

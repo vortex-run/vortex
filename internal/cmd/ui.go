@@ -67,7 +67,7 @@ func startEmbeddedServer(ctx context.Context, client *tui.Client) error {
 	go func() {
 		// runStart blocks until shutdown; run it detached. Errors surface via the
 		// readiness poll below.
-		_ = runStart(ctx, "vortex.pid")
+		_ = runStart(ctx, defaultPidfile)
 	}()
 
 	deadline := time.Now().Add(5 * time.Second)

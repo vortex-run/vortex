@@ -74,9 +74,7 @@ func (es LoadErrors) Error() string {
 //
 // path may be "" to use DefaultPath.
 func Load(path string) (*Config, error) {
-	if path == "" {
-		path = DefaultPath
-	}
+	path = ResolvePath(path)
 
 	userSrc, err := os.ReadFile(path)
 	if err != nil {

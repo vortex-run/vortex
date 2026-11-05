@@ -20,8 +20,8 @@ func TestStartPidfileFlagDefault(t *testing.T) {
 	if f == nil {
 		t.Fatal("--pidfile flag not registered")
 	}
-	if f.DefValue != "vortex.pid" {
-		t.Errorf("--pidfile default = %q, want vortex.pid", f.DefValue)
+	if f.DefValue != "gubern.pid" {
+		t.Errorf("--pidfile default = %q, want gubern.pid", f.DefValue)
 	}
 }
 

@@ -37,12 +37,7 @@ func NewManager(path string, log *slog.Logger) (*Manager, error) {
 	}, nil
 }
 
-func pathOrDefault(path string) string {
-	if path == "" {
-		return DefaultPath
-	}
-	return path
-}
+func pathOrDefault(path string) string { return ResolvePath(path) }
 
 // Holder returns the thread-safe holder for the active config, suitable for
 // passing to subsystems that need to read config concurrently.

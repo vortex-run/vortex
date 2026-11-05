@@ -84,7 +84,7 @@ func newStartCommand() *cobra.Command {
 			return runStart(cmd.Context(), pidfile)
 		},
 	}
-	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().StringVar(&pidfile, "pidfile", defaultPidfile, "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
 	c.Flags().BoolVar(&startVerbose, "verbose", false, "show raw structured logs instead of the clean startup sequence")
@@ -990,7 +990,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// next boot — completed tasks keep their results and never re-execute.
 	var orchStore *orchestration.RunStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
-		orchDB := filepath.Join(cacheDir, "vortex", "memory", "orchestration.db")
+		orchDB := filepath.Join(userdir.App(cacheDir), "memory", "orchestration.db")
 		if rs, rerr := orchestration.NewRunStore(orchDB); rerr != nil {
 			log.Warn("orchestration run store unavailable, crash recovery disabled", "err", rerr)
 		} else {
@@ -1005,7 +1005,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// startup resume below can notify via the messaging router.
 	var workflowStore *agents.WorkflowStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
-		wfDB := filepath.Join(cacheDir, "vortex", "memory", "workflows.db")
+		wfDB := filepath.Join(userdir.App(cacheDir), "memory", "workflows.db")
 		if ws, werr := agents.NewWorkflowStore(wfDB); werr != nil {
 			log.Warn("workflow store unavailable, crash recovery disabled", "err", werr)
 		} else {
@@ -1246,7 +1246,7 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 		return nil, nil
 	}
 	cacheDir := userdir.Cache()
-	storePath := filepath.Join(cacheDir, "vortex", "certs")
+	storePath := filepath.Join(userdir.App(cacheDir), "certs")
 	storeKey, err := deriveKey("tls-store")
 	if err != nil {
 		return nil, err
@@ -1287,7 +1287,7 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 	storePath := os.Getenv("GUBERN_MTLS_STORE")
 	if storePath == "" {
 		cacheDir := userdir.Cache()
-		storePath = filepath.Join(cacheDir, "vortex", "mtls")
+		storePath = filepath.Join(userdir.App(cacheDir), "mtls")
 	}
 	mtlsKey, err := deriveKey("mtls-store")
 	if err != nil {
@@ -1332,7 +1332,7 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 	path := os.Getenv("GUBERN_APIKEY_STORE")
 	if path == "" {
 		cacheDir := userdir.Cache()
-		path = filepath.Join(cacheDir, "vortex", "apikeys.json")
+		path = filepath.Join(userdir.App(cacheDir), "apikeys.json")
 	}
 	// Ensure the parent directory exists so Save on shutdown succeeds.
 	if derr := os.MkdirAll(filepath.Dir(path), 0o700); derr != nil {
@@ -1350,7 +1350,7 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 // computed locally so the server path does not import the TUI package.
 func tuiKeyPath() string {
 	dir := userdir.Config()
-	return filepath.Join(dir, "vortex", "tui-key")
+	return filepath.Join(userdir.App(dir), "tui-key")
 }
 
 // ensureAPIKey guarantees the store holds at least one usable key so the local
@@ -1768,7 +1768,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 // returns nil if construction fails (the server still runs without agents).
 func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, localFS agents.LocalFSConfig, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
 	cacheDir := userdir.Cache()
-	sandboxBase := filepath.Join(cacheDir, "vortex", "agents")
+	sandboxBase := filepath.Join(userdir.App(cacheDir), "agents")
 
 	bus := agents.NewBus()
 	registry := agents.NewToolRegistry()
@@ -1817,7 +1817,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		DevOps:            devops,
 		Pipeline:          pipeline,
 		Orchestrate:       orchestrate,
-		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
+		MemoryStore:       filepath.Join(userdir.App(cacheDir), "memory"),
 		WorkingDir:        workingDir,
 	})
 	if err != nil {
@@ -1828,7 +1828,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// SQLite conversation store (M20): supersedes the JSON memory directory for
 	// persistence, listing, history, and full-text search. On first run, legacy
 	// per-session JSON files are migrated into the database (idempotent).
-	memoryDir := filepath.Join(cacheDir, "vortex", "memory")
+	memoryDir := filepath.Join(userdir.App(cacheDir), "memory")
 	if store, serr := agents.NewMemoryStore(filepath.Join(memoryDir, "conversations.db")); serr != nil {
 		log.Warn("SQLite conversation store unavailable, using JSON memory", "err", serr)
 	} else {
@@ -1843,7 +1843,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 
 	// Learned-skill store (upgrade 1 — self-improving agent): proven procedures
 	// are recalled into prompts and new ones distilled from completed tasks.
-	skillsDB := filepath.Join(cacheDir, "vortex", "memory", "skills.db")
+	skillsDB := filepath.Join(userdir.App(cacheDir), "memory", "skills.db")
 	if skills, serr := agents.NewSkillStore(skillsDB); serr != nil {
 		log.Warn("skill store unavailable, agent will not learn skills", "err", serr)
 	} else {
@@ -1853,7 +1853,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 
 	// Episodic memory (upgrade 2 — tier-2 cross-session memory): durable facts
 	// recalled into prompts; new facts mined from each exchange in background.
-	episodesDB := filepath.Join(cacheDir, "vortex", "memory", "episodes.db")
+	episodesDB := filepath.Join(userdir.App(cacheDir), "memory", "episodes.db")
 	if episodes, eerr := agents.NewEpisodicStore(episodesDB); eerr != nil {
 		log.Warn("episodic memory unavailable", "err", eerr)
 	} else {
@@ -1948,9 +1948,9 @@ func buildForge(gateway agents.AIGateway, msg messagingComponents, log *slog.Log
 		return nil
 	}
 	cacheDir := userdir.Cache()
-	sandboxBase := filepath.Join(cacheDir, "vortex", "agents", "forge")
+	sandboxBase := filepath.Join(userdir.App(cacheDir), "agents", "forge")
 
-	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(cacheDir, "vortex", "forge-serve")}
+	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(userdir.App(cacheDir), "forge-serve")}
 	if msg.router != nil {
 		delivery.Sender = &routerNotify{router: msg.router}
 	}
@@ -2244,7 +2244,7 @@ var (
 func openEffectLedger(log *slog.Logger) *agents.EffectLedger {
 	effectLedgerOnce.Do(func() {
 		cacheDir := userdir.Cache()
-		ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db"))
+		ledger, lerr := agents.NewEffectLedger(filepath.Join(userdir.App(cacheDir), "memory", "effects.db"))
 		if lerr != nil {
 			log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
 			return
@@ -2862,7 +2862,7 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 	cacheDir := userdir.Cache()
 	cs, cerr := studio.NewCodeServer(studio.CodeServerConfig{
 		WorkspaceDir: workspace,
-		DataDir:      filepath.Join(cacheDir, "vortex", "code-server"),
+		DataDir:      filepath.Join(userdir.App(cacheDir), "code-server"),
 		Logger:       log,
 	})
 	codeServerOK := false

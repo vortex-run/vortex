@@ -18,7 +18,7 @@ func secretStorePath() string {
 		return override
 	}
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "secrets")
+	return filepath.Join(userdir.App(cacheDir), "secrets")
 }
 
 // buildAdapterConfig maps cfg.Secrets.Store (the backend kind) plus the

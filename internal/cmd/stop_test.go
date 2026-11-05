@@ -17,7 +17,7 @@ func TestStopCommandRegisters(t *testing.T) {
 func TestStopFlagDefaults(t *testing.T) {
 	c := newStopCommand()
 	cases := map[string]string{
-		"pidfile":  "vortex.pid",
+		"pidfile":  "gubern.pid",
 		"timeout":  (10 * time.Second).String(),
 		"api-port": "9090",
 	}

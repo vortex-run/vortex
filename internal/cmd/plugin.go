@@ -24,7 +24,7 @@ func pluginStorePath() string {
 		return override
 	}
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "plugins")
+	return filepath.Join(userdir.App(cacheDir), "plugins")
 }
 
 // openRegistry opens the plugin registry.

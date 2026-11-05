@@ -43,7 +43,7 @@ func newStatusCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
-			alive, pid, err := pidfile.IsRunning(pidfilePath)
+			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (err == nil && !alive) {
 				fmt.Fprintln(out, "VORTEX is not running")
 				return errNotRunning
@@ -70,7 +70,7 @@ func newStatusCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().StringVar(&pidfilePath, "pidfile", defaultPidfile, "path to the PID file")
 	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port")
 	c.Flags().BoolVar(&jsonOut, "json", false, "output raw JSON from /health instead of a table")
 	return c

@@ -97,12 +97,12 @@ func NewRootCommand() *cobra.Command {
 		// With no subcommand, boot VORTEX using the default pidfile — the same
 		// path as `vortex start`.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runStart(cmd.Context(), "vortex.pid")
+			return runStart(cmd.Context(), defaultPidfile)
 		},
 	}
 
 	pf := root.PersistentFlags()
-	pf.StringVar(&flags.configPath, "config", config.DefaultPath, "path to vortex.cue")
+	pf.StringVar(&flags.configPath, "config", config.DefaultPath, "path to the config file (default gubern.cue; an existing vortex.cue is used if gubern.cue is absent)")
 	pf.StringVar(&flags.logLevel, "log-level", "info", "log level: debug|info|warn|error")
 	pf.BoolVar(&flags.jsonLog, "json", false, "emit logs as JSON instead of human-readable text")
 

@@ -786,7 +786,7 @@ func (c *Client) IsConnected() bool {
 // the setup wizard writes the secret here once for the local dashboard/TUI.
 func APIKeyFilePath() string {
 	dir := userdir.Config()
-	return filepath.Join(dir, "vortex", "tui-key")
+	return filepath.Join(userdir.App(dir), "tui-key")
 }
 
 // LoadAPIKey resolves an API key, checking in order: the GUBERN_API_KEY env
@@ -812,7 +812,7 @@ func (c *Client) LoadAPIKey() string {
 func apiKeyFileCandidates() []string {
 	paths := []string{APIKeyFilePath()}
 	if cache, err := os.UserCacheDir(); err == nil {
-		paths = append(paths, filepath.Join(cache, "vortex", "tui-key"))
+		paths = append(paths, filepath.Join(userdir.App(cache), "tui-key"))
 	}
 	return paths
 }

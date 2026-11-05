@@ -29,7 +29,7 @@ func newStopCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
-			alive, pid, err := pidfile.IsRunning(pidfilePath)
+			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (!alive && err == nil) {
 				fmt.Fprintln(out, "VORTEX is not running")
 				return nil
@@ -44,7 +44,7 @@ func newStopCommand() *cobra.Command {
 
 			deadline := time.Now().Add(timeout)
 			for time.Now().Before(deadline) {
-				if alive, _, _ := pidfile.IsRunning(pidfilePath); !alive {
+				if alive, _, _ := pidfile.IsRunning(resolvePidfile(pidfilePath)); !alive {
 					fmt.Fprintln(out, "VORTEX stopped")
 					return nil
 				}
@@ -53,7 +53,7 @@ func newStopCommand() *cobra.Command {
 			return fmt.Errorf("VORTEX did not stop within %s", timeout)
 		},
 	}
-	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().StringVar(&pidfilePath, "pidfile", defaultPidfile, "path to the PID file")
 	c.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for the server to stop")
 	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port (used for the Windows shutdown path)")
 	return c

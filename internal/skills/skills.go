@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/vortex-run/vortex/internal/userdir"
 )
 
 // Skill is one installed skill.
@@ -177,7 +179,7 @@ func Discover(roots []Root) ([]Skill, []Problem) {
 func DefaultRoots(workspace, userConfigDir string) []Root {
 	var roots []Root
 	if userConfigDir != "" {
-		roots = append(roots, Root{Dir: filepath.Join(userConfigDir, "vortex", "skills"), Scope: "user"})
+		roots = append(roots, Root{Dir: filepath.Join(userdir.App(userConfigDir), "skills"), Scope: "user"})
 	}
 	if workspace != "" {
 		for _, d := range []string{".opencode/skills", ".claude/skills", ".agents/skills"} {

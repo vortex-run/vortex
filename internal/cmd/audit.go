@@ -24,7 +24,7 @@ func auditLogPath() string {
 		return override
 	}
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "audit.log")
+	return filepath.Join(userdir.App(cacheDir), "audit.log")
 }
 
 // openAuditLog opens the audit log keyed by the master-key-derived audit

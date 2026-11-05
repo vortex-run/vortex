@@ -37,8 +37,8 @@ func TestConfigFlagDefault(t *testing.T) {
 	if f == nil {
 		t.Fatal("--config not registered")
 	}
-	if f.DefValue != "vortex.cue" {
-		t.Errorf("--config default = %q, want vortex.cue", f.DefValue)
+	if f.DefValue != "gubern.cue" {
+		t.Errorf("--config default = %q, want gubern.cue", f.DefValue)
 	}
 }
 

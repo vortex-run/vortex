@@ -53,7 +53,7 @@ type BackupKey struct {
 // aiProviderConfigPath returns <user-config>/vortex/ai-provider.json.
 func aiProviderConfigPath() string {
 	dir := userdir.Config()
-	return filepath.Join(dir, "vortex", "ai-provider.json")
+	return filepath.Join(userdir.App(dir), "ai-provider.json")
 }
 
 // machineKey derives a 32-byte key from the hostname so the API key is

@@ -24,7 +24,7 @@ var errKeys = fmt.Errorf("keys command failed")
 // keystorePath resolves the on-disk key-slot database.
 func keystorePath() string {
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "keyslots.db")
+	return filepath.Join(userdir.App(cacheDir), "keyslots.db")
 }
 
 // openKeyStore opens the key-slot store under the master-derived "keystore"
@@ -354,7 +354,7 @@ func newKeysTestCommand() *cobra.Command {
 // keysModePath stores the selected routing mode.
 func keysModePath() string {
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "keys-mode")
+	return filepath.Join(userdir.App(cacheDir), "keys-mode")
 }
 
 // saveKeysMode persists the routing mode for start.go to read.

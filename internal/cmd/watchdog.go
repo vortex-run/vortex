@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vortex-run/vortex/internal/config"
 	"github.com/vortex-run/vortex/internal/healing"
 )
 
@@ -37,9 +38,9 @@ func newWatchdogStartCommand() *cobra.Command {
 				binary, _ = os.Executable()
 			}
 			w := healing.NewWatchdog(healing.WatchdogConfig{
-				PIDFile:         pidFile,
+				PIDFile:         resolvePidfile(pidFile),
 				BinaryPath:      binary,
-				ConfigPath:      configPath,
+				ConfigPath:      config.ResolvePath(configPath),
 				MaxRestarts:     maxRestarts,
 				NotifyOnRestart: notify,
 			})
@@ -53,9 +54,9 @@ func newWatchdogStartCommand() *cobra.Command {
 			return err
 		},
 	}
-	c.Flags().StringVar(&pidFile, "pid-file", "vortex.pid", "VORTEX pidfile to watch")
+	c.Flags().StringVar(&pidFile, "pid-file", defaultPidfile, "pidfile to watch")
 	c.Flags().StringVar(&binary, "binary", "", "path to the vortex binary (default: this binary)")
-	c.Flags().StringVar(&configPath, "config", "vortex.cue", "vortex config path to start with")
+	c.Flags().StringVar(&configPath, "config", "", "config file to start with (default gubern.cue, or an existing vortex.cue)")
 	c.Flags().IntVar(&maxRestarts, "max-restarts", 10, "max restarts per hour before giving up")
 	c.Flags().BoolVar(&notify, "notify", false, "send a Telegram alert on restart")
 	return c
@@ -69,6 +70,7 @@ func newWatchdogStatusCommand() *cobra.Command {
 		Short: "Show whether VORTEX is running",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			pidFile = resolvePidfile(pidFile)
 			alive := healing.PidfileAlive(pidFile)
 			if alive {
 				fmt.Printf("vortex: running (pidfile=%s)\n", pidFile)
@@ -78,6 +80,6 @@ func newWatchdogStatusCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&pidFile, "pid-file", "vortex.pid", "VORTEX pidfile to check")
+	c.Flags().StringVar(&pidFile, "pid-file", defaultPidfile, "pidfile to check")
 	return c
 }

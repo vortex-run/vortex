@@ -356,3 +356,28 @@ func TestEnv_LegacyVORTEXNamesStillWork(t *testing.T) {
 		t.Errorf("GUBERN_ must win: %q", env["GUBERN_CLUSTER_NAME"])
 	}
 }
+
+func TestResolvePath_LegacyConfigFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if got := ResolvePath(""); got != DefaultPath {
+		t.Errorf("nothing present: %s", got)
+	}
+	if err := os.WriteFile(LegacyPath, []byte("cluster: {name: \"x\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(""); got != LegacyPath {
+		t.Errorf("only vortex.cue: %s", got)
+	}
+	if got := ResolvePath(DefaultPath); got != LegacyPath {
+		t.Errorf("default flag value with only vortex.cue: %s", got)
+	}
+	if err := os.WriteFile(DefaultPath, []byte("cluster: {name: \"y\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(""); got != DefaultPath {
+		t.Errorf("both: %s (gubern.cue wins)", got)
+	}
+	if got := ResolvePath("other.cue"); got != "other.cue" {
+		t.Errorf("explicit: %s", got)
+	}
+}

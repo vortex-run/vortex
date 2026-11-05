@@ -20,7 +20,7 @@ var errTune = errors.New("tune command failed")
 // (<user-cache>/vortex/bench-baseline.json).
 func benchBaselinePath() string {
 	cacheDir := userdir.Cache()
-	return filepath.Join(cacheDir, "vortex", "bench-baseline.json")
+	return filepath.Join(userdir.App(cacheDir), "bench-baseline.json")
 }
 
 // newTuneCommand builds `vortex tune` with show/apply/bench subcommands.

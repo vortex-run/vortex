@@ -13,6 +13,7 @@ package userdir
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Config returns the user's config directory, or "" (the working directory
@@ -45,4 +46,27 @@ func Check() error {
 		return fmt.Errorf("can't find a private cache directory (%w); set HOME, or XDG_CACHE_HOME", err)
 	}
 	return nil
+}
+
+// Name is the per-user directory name for the app's files; LegacyName is the
+// pre-rename one (the product was renamed from VORTEX to Gubern).
+const (
+	Name       = "gubern"
+	LegacyName = "vortex"
+)
+
+// App returns the app's directory under base (a config or cache dir):
+// base/gubern, unless only a pre-rename base/vortex exists, in which case
+// that one keeps being used so existing keys, audit logs and databases are
+// found where they are. Nothing is moved.
+func App(base string) string {
+	cur := filepath.Join(base, Name)
+	if _, err := os.Stat(cur); err == nil {
+		return cur
+	}
+	legacy := filepath.Join(base, LegacyName)
+	if fi, err := os.Stat(legacy); err == nil && fi.IsDir() {
+		return legacy
+	}
+	return cur
 }

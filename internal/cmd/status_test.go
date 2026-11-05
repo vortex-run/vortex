@@ -17,7 +17,7 @@ func TestStatusCommandRegisters(t *testing.T) {
 func TestStatusFlagDefaults(t *testing.T) {
 	c := newStatusCommand()
 	cases := map[string]string{
-		"pidfile":  "vortex.pid",
+		"pidfile":  "gubern.pid",
 		"api-port": "9090",
 		"json":     "false",
 	}

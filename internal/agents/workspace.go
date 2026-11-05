@@ -158,7 +158,7 @@ func autoModeSensitive(trustedRoot, resolved string) bool {
 		// names the .git directory itself.
 		part, _, _ = strings.Cut(part, ":")
 		part = strings.ToLower(strings.TrimRight(part, ". "))
-		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && part == "vortex.cue") {
+		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && (part == "gubern.cue" || part == "vortex.cue")) {
 			return true
 		}
 	}
