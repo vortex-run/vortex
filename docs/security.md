@@ -70,6 +70,14 @@ Agent actions that need approval are recorded in three steps:
 `agent.action.executed` (success or the error). The entry doesn't name the
 person who approved: any valid API key can approve today (N6).
 
+Each request carries an action id, a digest of the tool, its parameters and
+the preview, which is shown on the approval line and recorded in the audit
+entry. An approve call that sends `action_id` only applies to that exact
+action: if anything else is pending it gets `409` and nothing runs. The TUI
+always sends it; API clients should too. Pending approvals expire after 15
+minutes. In `/agent` runs the model can also be stopped by its budgets (20
+turns, 250k tokens, at most 16 tool calls per turn).
+
 Each entry's hash covers its sequence number, timestamp, actor, action,
 resource and (for entries marked `"v":2`) its `detail`: tool outcomes and
 errors, Studio SQL queries, issued key owners, config hashes. Entries written
@@ -157,6 +165,14 @@ commands.
   (approved shell is still not a full OS jail).
 - The **approval gate** is the primary control for machine-touching actions —
   keep it enabled for unattended runs.
+- **Skills** (`SKILL.md` files in the workspace) are read as instructions for
+  the model, never as permissions: loading one runs nothing, and actions a
+  skill suggests go through the same approval gate. A skill in a repository
+  you clone is third-party text, like any other file the model reads.
+- **Provider keys** are sent in request headers, never in URLs, so they can't
+  appear in transport errors or logs (Gemini's key used to be a `?key=`
+  parameter; fixed). The Telegram bot token is part of the API URL by
+  Telegram's design, so its errors are redacted instead.
 - **Forge** (app builds you request) is the exception: it compiles the
   generated project without a per-command prompt. `go build` doesn't run
   project code; `flutter build apk` runs the project's Gradle scripts, which
