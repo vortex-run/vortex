@@ -120,11 +120,20 @@ func TestInstallUnknownDryRunNoFiles(t *testing.T) {
 		DryRun:     true,
 		Out:        &buf,
 	}
-	if err := Install(cfg); err != nil {
+	err := Install(cfg)
+	if runtime.GOOS == "darwin" {
+		// macOS has no launchd support yet and says so instead of writing
+		// Linux unit files nobody can use.
+		if !errors.Is(err, errDarwinUnsupported) {
+			t.Fatalf("err = %v, want errDarwinUnsupported", err)
+		}
+	} else if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "vortex.service")); err == nil {
-		t.Error("unknown dry-run should not write vortex.service")
+	for _, f := range []string{"gubern.service", "vortex.service"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Errorf("unknown dry-run should not write %s", f)
+		}
 	}
 }
 
@@ -140,7 +149,7 @@ func TestInstallUnknown_DarwinRefuses(t *testing.T) {
 	if !errors.Is(err, errDarwinUnsupported) {
 		t.Fatalf("Install on darwin = %v, want errDarwinUnsupported", err)
 	}
-	for _, f := range []string{"vortex.service", "vortex-openrc"} {
+	for _, f := range []string{"gubern.service", "gubern-openrc", "vortex.service", "vortex-openrc"} {
 		if _, serr := os.Stat(filepath.Join(dir, f)); serr == nil {
 			t.Errorf("wrote %s on macOS", f)
 		}

@@ -17,6 +17,7 @@ import (
 func setConfigHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("APPDATA", dir)
 }
 

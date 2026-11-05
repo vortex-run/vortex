@@ -297,6 +297,7 @@ func TestClient_LoadAPIKeyFromCacheDir(t *testing.T) {
 	home := t.TempDir()
 	// Push both config and cache dirs into the temp home; only write the cache one.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("HOME", filepath.Join(home, "config")) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("APPDATA", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
@@ -345,6 +346,7 @@ func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 	// No env var; key only in the persisted setup file.
 	t.Setenv("GUBERN_API_KEY", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir (Linux)
+	t.Setenv("HOME", t.TempDir()) // redirect UserConfigDir (Linux) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())         // redirect on Windows
 
 	path := APIKeyFilePath()
@@ -362,7 +364,9 @@ func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 }
 
 func TestClient_LoadAPIKeyEnvBeatsFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 	path := APIKeyFilePath()
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)

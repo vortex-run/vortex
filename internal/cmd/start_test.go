@@ -95,6 +95,7 @@ func TestTelegramFromFile(t *testing.T) {
 	// with telegram fields.
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", dir)
 
 	cfg := AIProviderConfig{
@@ -112,6 +113,7 @@ func TestTelegramFromFile(t *testing.T) {
 func TestTelegramFromFile_AbsentWhenNoToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", dir)
 	if _, _, ok := telegramFromFile(); ok {
 		t.Error("telegramFromFile should be false when no config exists")
