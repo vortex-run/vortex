@@ -132,6 +132,11 @@ func NewRootCommand() *cobra.Command {
 
 // Execute runs the root command and exits the process with an appropriate code.
 func Execute() {
+	// A Windows self-update leaves the previous binary as <exe>.old while it
+	// is still running; remove it once nothing uses it. No-op elsewhere.
+	if self, err := os.Executable(); err == nil {
+		removeStaleOldBinary(self)
+	}
 	if err := NewRootCommand().Execute(); err != nil {
 		// Some subcommands (e.g. check) already print their own detailed,
 		// user-facing diagnostics and signal failure via a sentinel; in that

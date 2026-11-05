@@ -85,7 +85,11 @@ vortex verify
 ```
 
 `vortex self-update` performs the same signature check automatically before
-replacing the binary.
+replacing the binary, then runs the new binary's `version` command and puts
+the old one back if that fails. On Windows the running `vortex.exe` is moved
+aside to `vortex.exe.old` (Windows can rename a running program but not
+overwrite it) and removed on a later run; a server that is running keeps the
+old version until you restart it.
 
 ## Running as a service
 

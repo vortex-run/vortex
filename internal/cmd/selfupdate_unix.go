@@ -31,3 +31,6 @@ func swapBinary(newBin, self, newVersion string, out io.Writer) error {
 	fmt.Fprintf(out, "VORTEX updated to %s\n", newVersion)
 	return nil
 }
+
+// removeStaleOldBinary is Windows-only cleanup (see selfupdate_windows.go).
+func removeStaleOldBinary(string) {}

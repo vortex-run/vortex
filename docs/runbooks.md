@@ -84,6 +84,10 @@ vortex verify                # does this binary match its release?
 - **"checksums signature verification failed"**: the signature does not match
   the pinned key. Treat the release as suspect and report it. See
   [SECURITY.md](../SECURITY.md).
+- **Windows: "a previous update's vortex.exe.old is still in use"**: an older
+  VORTEX process from the last update is still running. Stop it
+  (`vortex stop`, or end it in Task Manager) and run `vortex self-update`
+  again.
 
 ## Rotating the release signing key
 
