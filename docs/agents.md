@@ -53,6 +53,20 @@ routing.
 
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 
+#### Skills
+
+`/agent` reads [Agent Skills](https://agentskills.io) — `SKILL.md` folders
+written for Claude Code, Codex, OpenCode and similar tools — from the
+workspace's `.agents/skills/`, `.claude/skills/` and `.opencode/skills/`
+directories. Only each skill's name and description go into the model's
+prompt; it reads the full `SKILL.md` with `read_file` when a task calls for
+it. Skills are instructions, not permissions: they can't run anything on
+load, `allowed-tools` is ignored for now, and every action a skill suggests
+still goes through the approval gate. Invalid skills (bad name, name not
+matching the folder, missing description, unsupported YAML such as `[a, b]`
+lists, symlinked files, files over 256 KiB) are skipped with a warning in the
+log. Skills are re-read on every run.
+
 ### VORTEX Forge — autonomous app builds
 
 Forge builds complete apps (and Android APKs) from a prompt, in a sandbox, and
