@@ -1,4 +1,4 @@
-// Package proxyquic implements VORTEX's QUIC / HTTP/3 transport (build plan
+// Package proxyquic implements Gubern's QUIC / HTTP/3 transport (build plan
 // M2.3) on top of github.com/quic-go/quic-go. It serves the same proxyhttp
 // Router over HTTP/3 and provides a dual-stack listener that runs QUIC (UDP)
 // alongside the TCP HTTP/1.1+HTTP/2 server, degrading to TCP-only when QUIC

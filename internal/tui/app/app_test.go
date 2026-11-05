@@ -185,7 +185,7 @@ func TestApp_NavigationWorksWhenNotInputFocused(t *testing.T) {
 func TestApp_TopBarShowsVortexBrand(t *testing.T) {
 	a := connectedApp(t)
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if !strings.Contains(a.View(), "▲ VORTEX") {
+	if !strings.Contains(a.View(), "▲ Gubern") {
 		t.Errorf("top bar should show the brand mark:\n%s", a.View())
 	}
 }

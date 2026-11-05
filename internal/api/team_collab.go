@@ -1,7 +1,7 @@
 // This file implements the agent-team collaboration API (build plan AG-UI File
 // 6): live visibility into agent-to-agent communication, direct chat with a
 // named specialist, and human checkpoint review. These back the three-panel
-// `vortex code` view and the dashboard.
+// `gubern code` view and the dashboard.
 //
 // The handlers depend only on small provider interfaces defined here, so the
 // api package stays decoupled from the a2a package (the adapters are wired in

@@ -1,4 +1,4 @@
-// Package plugins implements VORTEX's WebAssembly plugin system (build plan M6):
+// Package plugins implements Gubern's WebAssembly plugin system (build plan M6):
 // a sandboxed wazero runtime, a request/response hook chain, WASM-backed hooks,
 // and a plugin registry. Plugins run with no filesystem or network access and a
 // bounded memory and CPU-time budget, so untrusted modules cannot escape the

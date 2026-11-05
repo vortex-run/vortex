@@ -126,7 +126,7 @@ func TestResearch_NotifiesOnCompletion(t *testing.T) {
 	}
 	notif.mu.Lock()
 	defer notif.mu.Unlock()
-	if !notif.notified || notif.lastTitle != "VORTEX Research" {
+	if !notif.notified || notif.lastTitle != "Gubern Research" {
 		t.Errorf("expected a research notification, got %+v", notif)
 	}
 }

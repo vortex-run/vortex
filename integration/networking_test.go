@@ -54,7 +54,7 @@ func getNetBinary(t *testing.T) string {
 	return netBin
 }
 
-// netConfig builds a vortex.cue with the given routes block. observability uses
+// netConfig builds a gubern.cue with the given routes block. observability uses
 // stderr logging so the started process does not need a log directory.
 func netConfig(routes string) string {
 	return `cluster: { name: "net-test" }

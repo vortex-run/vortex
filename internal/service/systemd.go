@@ -1,5 +1,5 @@
 // Package service generates init-system integration (systemd units, OpenRC
-// scripts) and installs VORTEX as a managed system service (build plan M1.4).
+// scripts) and installs Gubern as a managed system service (build plan M1.4).
 // All generation uses text/template from the standard library — no external
 // dependencies (Non-Negotiable Rule #10).
 package service
@@ -12,7 +12,7 @@ import (
 // SystemdConfig holds the values rendered into a systemd unit file.
 type SystemdConfig struct {
 	ExecPath    string // absolute path to the vortex binary
-	ConfigPath  string // absolute path to vortex.cue
+	ConfigPath  string // absolute path to gubern.cue
 	User        string // system user the service runs as
 	Group       string // system group the service runs as
 	Description string // unit description
@@ -35,13 +35,13 @@ func DefaultSystemdConfig(execPath, configPath string) SystemdConfig {
 }
 
 // systemdTemplate is a production-grade unit. ExecReload sends SIGHUP for
-// VORTEX's config hot-reload; Restart=on-failure with RestartSec gives crash
+// Gubern's config hot-reload; Restart=on-failure with RestartSec gives crash
 // resilience; the LimitNOFILE/NPROC raise the file-descriptor and process
 // ceilings a network proxy needs.
 //
 // The service runs as an unprivileged user, so it is granted exactly one
 // capability, CAP_NET_BIND_SERVICE, to bind the edge's :80/:443. The
-// hardening directives below only remove things VORTEX never needs (kernel
+// hardening directives below only remove things Gubern never needs (kernel
 // tunables, modules, logs, cgroup writes, SUID/SGID, realtime, foreign
 // syscall ABIs). Deliberately absent, because they would break the product:
 // MemoryDenyWriteExecute (the WASM plugin runtime compiles to native code),

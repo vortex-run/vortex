@@ -385,7 +385,7 @@ func openaiStreamTarget(p AIProvider, model string) (url string, headers map[str
 		return base + "/v1/chat/completions", map[string]string{
 			"Authorization": "Bearer " + p.APIKey,
 			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
-			"X-Title":       "VORTEX",
+			"X-Title":       "Gubern",
 		}, "openrouter", true, nil
 	case ProviderAzureOpenAI:
 		if p.Endpoint == "" {

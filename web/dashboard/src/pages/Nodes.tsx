@@ -12,7 +12,7 @@ export function Nodes() {
     <div className="space-y-4">
       <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
         Single-node mode. Add a node:{" "}
-        <code className="font-mono">vortex cluster join &lt;addr&gt;</code>
+        <code className="font-mono">gubern cluster join &lt;addr&gt;</code>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

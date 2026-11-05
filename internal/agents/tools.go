@@ -622,7 +622,7 @@ var safeEnvVars = map[string]bool{
 // buildEnvVars are the extra variables toolchain builds need on top of
 // safeEnvVars: where Go, Gradle, the Android SDK, Java and Flutter keep their
 // caches and SDKs, and how to reach module proxies. None of them hold
-// VORTEX's own secrets.
+// Gubern's own secrets.
 var buildEnvVars = map[string]bool{
 	"GOPATH": true, "GOCACHE": true, "GOMODCACHE": true, "GOPROXY": true,
 	"GOPRIVATE": true, "GONOPROXY": true, "GONOSUMDB": true, "GOSUMDB": true,
@@ -703,7 +703,7 @@ var vortexAPIDeniedPaths = []string{
 	"/internal/reload",
 }
 
-// VortexAPITool calls the VORTEX management API. Only /api/* paths are allowed,
+// VortexAPITool calls the Gubern management API. Only /api/* paths are allowed,
 // excluding the agent and control-plane paths in vortexAPIDeniedPaths.
 type VortexAPITool struct {
 	BaseURL string // e.g. http://127.0.0.1:9090
@@ -714,7 +714,7 @@ type VortexAPITool struct {
 func (VortexAPITool) Name() string { return "vortex_api" }
 
 // Description returns a human-readable summary.
-func (VortexAPITool) Description() string { return "Call the VORTEX management API (/api/*)" }
+func (VortexAPITool) Description() string { return "Call the Gubern management API (/api/*)" }
 
 // Execute issues an API request with method/path/body params.
 func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any, error) {

@@ -9,7 +9,7 @@ import (
 // Alpine, Gentoo, and other OpenRC-based distributions).
 type OpenRCConfig struct {
 	ExecPath   string // absolute path to the vortex binary
-	ConfigPath string // absolute path to vortex.cue
+	ConfigPath string // absolute path to gubern.cue
 	User       string // user the service runs as
 	PidFile    string // pidfile path
 	LogFile    string // combined stdout/stderr log path
@@ -33,14 +33,14 @@ func DefaultOpenRCConfig(execPath, configPath string) OpenRCConfig {
 // network.
 const openrcTemplate = `#!/sbin/openrc-run
 
-description="VORTEX — autonomous infra platform"
+description="Gubern — autonomous infra platform"
 
 command={{.ExecPath}}
 command_args="start --config {{.ConfigPath}}"
 command_user={{.User}}
 command_background=true
 directory={{.Home}}
-# VORTEX keeps its keys under $HOME/.config and $HOME/.cache, and refuses to
+# Gubern keeps its keys under $HOME/.config and $HOME/.cache, and refuses to
 # start without a HOME; don't depend on start-stop-daemon setting it.
 export HOME={{.Home}}
 # Bind :80/:443 as the unprivileged user (OpenRC 0.45+; older ignore it).

@@ -1,6 +1,6 @@
-// Package dashboard serves the embedded VORTEX management dashboard (build plan
+// Package dashboard serves the embedded Gubern management dashboard (build plan
 // M7): a React single-page app, built by Vite and embedded into the binary, so
-// the management UI ships with VORTEX and needs no separate server. It is mounted
+// the management UI ships with Gubern and needs no separate server. It is mounted
 // at /dashboard/ by the management API.
 package dashboard
 

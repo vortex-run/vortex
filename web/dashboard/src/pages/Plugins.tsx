@@ -43,7 +43,7 @@ export function Plugins() {
           <div className="text-foreground">No plugins installed</div>
           <p className="mt-1 text-sm">
             Install a plugin:{" "}
-            <code className="font-mono">vortex plugin install &lt;path&gt;</code>
+            <code className="font-mono">gubern plugin install &lt;path&gt;</code>
           </p>
         </div>
       ) : (

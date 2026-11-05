@@ -128,7 +128,7 @@ func TestTaskResult_JSONRoundTrip(t *testing.T) {
 
 func TestAgentCard_JSONRoundTrip(t *testing.T) {
 	card := AgentCard{
-		ID: "code-agent", Name: "VORTEX Code Agent", Role: "coder",
+		ID: "code-agent", Name: "Gubern Code Agent", Role: "coder",
 		Description: "writes code", Version: "1.0.0",
 		Capabilities: []string{"write_code", "edit_file"},
 		Tools:        []string{"write_file"}, AIModel: "deepseek-chat",

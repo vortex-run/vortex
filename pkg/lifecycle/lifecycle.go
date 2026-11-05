@@ -1,12 +1,12 @@
-// Package lifecycle manages VORTEX's process lifecycle: ordered startup, signal
+// Package lifecycle manages Gubern's process lifecycle: ordered startup, signal
 // handling, and graceful shutdown (build plan M1.4).
 //
-// Two POSIX signals are meaningful to VORTEX:
+// Two POSIX signals are meaningful to Gubern:
 //
 //   - SIGTERM (and SIGINT): begin a graceful shutdown. Registered shutdown
 //     hooks run in reverse registration order — last-registered first — so
 //     dependencies are torn down before the things they depend on.
-//   - SIGHUP: request a configuration hot-reload (vortex.cue is re-validated and
+//   - SIGHUP: request a configuration hot-reload (gubern.cue is re-validated and
 //     re-applied without dropping connections). Registered reload hooks fire.
 //
 // On Windows, where SIGHUP and SIGTERM do not exist, only os.Interrupt
@@ -129,7 +129,7 @@ func (m *Manager) Run(ctx context.Context) {
 }
 
 // Reload triggers the reload hooks programmatically (used by tests and by the
-// CLI `vortex reload` path on platforms without SIGHUP).
+// CLI `gubern reload` path on platforms without SIGHUP).
 func (m *Manager) Reload() {
 	m.runReload()
 }

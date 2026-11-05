@@ -106,7 +106,7 @@ func TestAgents_RoleStyling(t *testing.T) {
 	if !strings.Contains(out, "┌─ You ") || !strings.Contains(out, "hi") {
 		t.Errorf("user bubble missing, got:\n%s", out)
 	}
-	if !strings.Contains(out, "┌─ VORTEX ") || !strings.Contains(out, "hello") {
+	if !strings.Contains(out, "┌─ Gubern ") || !strings.Contains(out, "hello") {
 		t.Errorf("agent bubble missing, got:\n%s", out)
 	}
 	// System greeting renders as a centered separator line.
@@ -638,7 +638,7 @@ func TestAgents_ApprovalRiskBadgeAndHeader(t *testing.T) {
 		wantBadge  string
 		wantHeader string
 	}{
-		{"[APPROVAL_REQUIRED|LOW RISK|write_file] write calc.py", "[LOW RISK]", "VORTEX wants to make a change"},
+		{"[APPROVAL_REQUIRED|LOW RISK|write_file] write calc.py", "[LOW RISK]", "Gubern wants to make a change"},
 		{"[APPROVAL_REQUIRED|HIGH RISK|run_terminal] run rm -rf old", "[HIGH RISK]", "Review carefully"},
 		{"[APPROVAL_REQUIRED|CRITICAL — review carefully|ssh_command] ssh deploy", "[CRITICAL", "cannot be undone"},
 	}

@@ -28,7 +28,7 @@ func TestInstallDryRunWritesNoFiles(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := InstallConfig{
 		ExecPath:   "/usr/local/bin/vortex",
-		ConfigPath: "/etc/vortex/vortex.cue",
+		ConfigPath: "/etc/vortex/gubern.cue",
 		InitSystem: InitSystemd,
 		DryRun:     true,
 		Out:        &buf,
@@ -58,7 +58,7 @@ func TestInstallDryRunPrintsSystemdActions(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := InstallConfig{
 		ExecPath:   "/usr/local/bin/vortex",
-		ConfigPath: "/etc/vortex/vortex.cue",
+		ConfigPath: "/etc/vortex/gubern.cue",
 		InitSystem: InitSystemd,
 		DryRun:     true,
 		Out:        &buf,
@@ -78,7 +78,7 @@ func TestInstallDryRunWindowsPrintsNSSM(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := InstallConfig{
 		ExecPath:   `C:\Program Files\vortex\vortex.exe`,
-		ConfigPath: `C:\ProgramData\vortex\vortex.cue`,
+		ConfigPath: `C:\ProgramData\vortex\gubern.cue`,
 		InitSystem: InitWindows,
 		DryRun:     true,
 		Out:        &buf,
@@ -115,7 +115,7 @@ func TestInstallUnknownDryRunNoFiles(t *testing.T) {
 	var buf bytes.Buffer
 	cfg := InstallConfig{
 		ExecPath:   "/usr/local/bin/vortex",
-		ConfigPath: "/etc/vortex/vortex.cue",
+		ConfigPath: "/etc/vortex/gubern.cue",
 		InitSystem: InitUnknown,
 		DryRun:     true,
 		Out:        &buf,
@@ -136,7 +136,7 @@ func TestInstallUnknown_DarwinRefuses(t *testing.T) {
 	}
 	dir := t.TempDir()
 	t.Chdir(dir)
-	err := Install(InstallConfig{ExecPath: "/usr/local/bin/vortex", ConfigPath: "/etc/vortex/vortex.cue", InitSystem: InitUnknown})
+	err := Install(InstallConfig{ExecPath: "/usr/local/bin/vortex", ConfigPath: "/etc/vortex/gubern.cue", InitSystem: InitUnknown})
 	if !errors.Is(err, errDarwinUnsupported) {
 		t.Fatalf("Install on darwin = %v, want errDarwinUnsupported", err)
 	}

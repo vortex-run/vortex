@@ -12,7 +12,7 @@ import (
 
 func testHolder(t *testing.T) *config.Holder {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "vortex.cue")
+	p := filepath.Join(t.TempDir(), "gubern.cue")
 	body := `
 cluster: {name: "t"}
 tls: {acme_email: "a@b.com"}

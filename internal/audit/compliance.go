@@ -107,7 +107,7 @@ func (r *ComplianceReport) WriteMarkdown(w io.Writer) error {
 		chain = "✗ BROKEN — the log has been tampered with"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# VORTEX Compliance Report\n\n")
+	fmt.Fprintf(&b, "# Gubern Compliance Report\n\n")
 	fmt.Fprintf(&b, "- **Period:** %s\n", r.Period)
 	fmt.Fprintf(&b, "- **Generated:** %s\n", r.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&b, "- **Total events:** %d\n", r.TotalEvents)

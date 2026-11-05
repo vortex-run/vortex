@@ -22,7 +22,7 @@ function titleFor(pathname: string): string {
   const match = Object.keys(map)
     .filter((p) => pathname === p || pathname.startsWith(p + "/"))
     .sort((a, b) => b.length - a.length)[0];
-  return match ? map[match] : "VORTEX";
+  return match ? map[match] : "Gubern";
 }
 
 // Layout is the persistent shell: sidebar, top bar, and the routed page content.

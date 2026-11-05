@@ -29,8 +29,8 @@ func masterKeyPath() string {
 
 // sharedKeyring loads (or creates on first run) the process master key once
 // and caches it, so the secret store, TLS/mTLS stores, and audit log all
-// derive their at-rest keys from the same root. Both `vortex start` and the
-// `vortex secret`/`vortex audit` CLIs call this, so they agree on every key.
+// derive their at-rest keys from the same root. Both `gubern start` and the
+// `gubern secret`/`gubern audit` CLIs call this, so they agree on every key.
 var (
 	keyringOnce sync.Once
 	keyringInst *keyring.Keyring

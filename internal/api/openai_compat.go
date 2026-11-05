@@ -11,7 +11,7 @@ import (
 
 // OpenAI-compatible endpoints (upgrade 3). Any tool that speaks the OpenAI
 // API — Claude Code, Aider, Cline, Cursor — can point OPENAI_BASE_URL at
-// VORTEX and get its provider routing, fallback, budget, and cost tracking:
+// Gubern and get its provider routing, fallback, budget, and cost tracking:
 //
 //	export OPENAI_BASE_URL=http://localhost:9090/v1
 //	export OPENAI_API_KEY=<your-vortex-key>

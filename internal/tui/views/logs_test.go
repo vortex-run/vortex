@@ -9,7 +9,7 @@ import (
 
 func sampleLines() []LogLine {
 	return []LogLine{
-		{Time: "19:11:49", Level: "INFO", Msg: "VORTEX started", Fields: map[string]string{"cluster": "c1"}},
+		{Time: "19:11:49", Level: "INFO", Msg: "Gubern started", Fields: map[string]string{"cluster": "c1"}},
 		{Time: "19:11:50", Level: "INFO", Msg: "route started", Fields: map[string]string{"name": "api"}},
 		{Time: "19:12:10", Level: "WARN", Msg: "gossip join failed"},
 		{Time: "19:14:29", Level: "ERROR", Msg: "boom"},
@@ -23,7 +23,7 @@ func TestLogs_SetAndRender(t *testing.T) {
 		t.Fatalf("LineCount = %d, want 4", m.LineCount())
 	}
 	out := m.renderLines()
-	if !strings.Contains(out, "VORTEX started") || !strings.Contains(out, "gossip join failed") {
+	if !strings.Contains(out, "Gubern started") || !strings.Contains(out, "gossip join failed") {
 		t.Errorf("rendered logs missing content:\n%s", out)
 	}
 }

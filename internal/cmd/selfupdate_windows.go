@@ -29,7 +29,7 @@ func swapBinary(newBin, self, newVersion string, out io.Writer) error {
 	// A leftover from an earlier update: it must go before the rename (rename
 	// onto an existing file fails on Windows). If it's still running, stop.
 	if err := os.Remove(old); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("a previous update's %s is still in use; stop running VORTEX processes and retry: %w", old, err)
+		return fmt.Errorf("a previous update's %s is still in use; stop running Gubern processes and retry: %w", old, err)
 	}
 	if err := os.Rename(self, old); err != nil {
 		return fmt.Errorf("moving the current binary aside: %w", err)
@@ -51,7 +51,7 @@ func swapBinary(newBin, self, newVersion string, out io.Writer) error {
 		return fmt.Errorf("new binary failed verification, kept the previous version: %w", err)
 	}
 	removeStaleOldBinary(self) // works only if nothing runs the old one
-	fmt.Fprintf(out, "VORTEX updated to %s. A running server keeps the old version until restarted (vortex stop, then vortex start).\n", newVersion)
+	fmt.Fprintf(out, "Gubern updated to %s. A running server keeps the old version until restarted (gubern stop, then gubern start).\n", newVersion)
 	return nil
 }
 

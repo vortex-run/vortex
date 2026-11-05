@@ -58,7 +58,7 @@ func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, sy
 		map[string]string{
 			"Authorization": "Bearer " + p.APIKey,
 			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
-			"X-Title":       "VORTEX",
+			"X-Title":       "Gubern",
 		},
 		map[string]any{
 			"model": model,

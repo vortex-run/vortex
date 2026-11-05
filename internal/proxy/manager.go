@@ -1,4 +1,4 @@
-// Package proxy wires VORTEX's config into running data-plane listeners (the
+// Package proxy wires Gubern's config into running data-plane listeners (the
 // end-of-M2 integration step): for each configured route it starts the matching
 // TCP tunnel, UDP tunnel, HTTP/HTTPS reverse proxy, or QUIC/HTTP3 dual-stack
 // listener, runs them under one lifecycle, and aggregates their stats.
@@ -35,7 +35,7 @@ const stopTimeout = 30 * time.Second
 
 // ManagerConfig configures a proxy Manager.
 type ManagerConfig struct {
-	// Config is the validated VORTEX configuration. Required.
+	// Config is the validated Gubern configuration. Required.
 	Config *config.Config
 	// TLS supplies certificates for https/h3 routes. May be nil when no route
 	// needs TLS.

@@ -1,7 +1,7 @@
-// Package config implements VORTEX's CUE-based configuration engine (build
+// Package config implements Gubern's CUE-based configuration engine (build
 // plan M1.2).
 //
-// The user edits a single vortex.cue file. At startup it is unified against the
+// The user edits a single gubern.cue file. At startup it is unified against the
 // embedded master schema (config/schema.cue). If it violates any type or
 // constraint, or declares an unknown field, loading fails with the offending
 // file, line, and field path and the process exits 1 — config is always valid

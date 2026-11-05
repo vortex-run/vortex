@@ -27,7 +27,7 @@ type statusHealth struct {
 // an extra generic log line.
 var errNotRunning = errors.New("vortex is not running")
 
-// newStatusCommand builds `vortex status`, which reports whether the server is
+// newStatusCommand builds `gubern status`, which reports whether the server is
 // running and, if so, fetches /health and prints a formatted table (or raw
 // JSON with --json).
 func newStatusCommand() *cobra.Command {
@@ -38,14 +38,14 @@ func newStatusCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show status of the running VORTEX server",
+		Short: "Show status of the running Gubern server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
 			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (err == nil && !alive) {
-				fmt.Fprintln(out, "VORTEX is not running")
+				fmt.Fprintln(out, "Gubern is not running")
 				return errNotRunning
 			}
 			if err != nil {

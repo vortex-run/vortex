@@ -74,7 +74,7 @@ func TestDefaultLogrotateConfig(t *testing.T) {
 	if !cfg.DateExt {
 		t.Error("DateExt default should be true")
 	}
-	if cfg.PostRotate != "rc-service vortex reload" {
+	if cfg.PostRotate != "rc-service gubern reload" {
 		t.Errorf("PostRotate = %q", cfg.PostRotate)
 	}
 }

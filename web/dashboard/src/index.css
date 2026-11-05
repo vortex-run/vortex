@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* VORTEX dashboard theme. Default is dark; variables are HSL triples consumed
+/* Gubern dashboard theme. Default is dark; variables are HSL triples consumed
    by tailwind.config.ts. */
 :root {
   --background: 222 47% 7%;

@@ -27,7 +27,7 @@ type ChatMessage struct {
 	Took      time.Duration // agent replies: time from submit to response
 }
 
-// AgentsModel is the interactive chat with the VORTEX coordinator.
+// AgentsModel is the interactive chat with the Gubern coordinator.
 type AgentsModel struct {
 	client         *tui.Client
 	messages       []ChatMessage
@@ -163,8 +163,8 @@ var approvalActionID = regexp.MustCompile(`\(action ([0-9a-f]{16})\)`)
 
 // riskHeaders maps a risk level to its approval-box header (escalating warnings).
 var riskHeaders = map[string]string{
-	brand.RiskLow:      "VORTEX wants to make a change",
-	brand.RiskMedium:   brand.IconWarn + " VORTEX wants to run a command",
+	brand.RiskLow:      "Gubern wants to make a change",
+	brand.RiskMedium:   brand.IconWarn + " Gubern wants to run a command",
 	brand.RiskHigh:     brand.IconWarn + brand.IconWarn + " Review carefully before approving",
 	brand.RiskCritical: brand.IconWarn + brand.IconWarn + brand.IconWarn + " This action cannot be undone",
 }
@@ -531,7 +531,7 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the chat screen.
 func (m AgentsModel) View() string {
-	header := tui.TitleStyle.Render("VORTEX Agent") + "  " +
+	header := tui.TitleStyle.Render("Gubern Agent") + "  " +
 		tui.StatusDot(m.client != nil) + " " +
 		tui.SubtitleStyle.Render("Session: "+m.sessionID)
 
@@ -553,7 +553,7 @@ func (m AgentsModel) View() string {
 }
 
 // renderMessages renders the full conversation as brand message bubbles:
-// user messages right-aligned, agent replies left-aligned with a VORTEX (or
+// user messages right-aligned, agent replies left-aligned with a Gubern (or
 // Approval Required) frame, system notices as centered separators.
 func (m AgentsModel) renderMessages() string {
 	w := m.width
@@ -567,7 +567,7 @@ func (m AgentsModel) renderMessages() string {
 			box := titledBox("You", msg.Content, brand.ColorPrimary, minInt(w-2, 70))
 			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Right, box) + "\n\n")
 		case "agent":
-			title, color := "VORTEX", brand.ColorBorder
+			title, color := "Gubern", brand.ColorBorder
 			if strings.Contains(msg.Content, "Agent wants approval") {
 				title, color = "Approval Required", brand.ColorWarning
 			}
@@ -587,7 +587,7 @@ func (m AgentsModel) renderMessages() string {
 		if m.streamText != "" {
 			body = m.streamText + " " + m.spinner.View()
 		}
-		b.WriteString(titledBox("VORTEX", body, brand.ColorBorder, minInt(w-2, 90)))
+		b.WriteString(titledBox("Gubern", body, brand.ColorBorder, minInt(w-2, 90)))
 	}
 	// Show the staged approval choice so the user sees it before confirming.
 	if m.awaiting && m.approvalChoice != "" {

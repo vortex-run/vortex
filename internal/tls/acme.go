@@ -41,7 +41,7 @@ type ACMEConfig struct {
 
 // ACMEManager obtains and renews certificates via the ACME protocol, backed by
 // golang.org/x/crypto/acme/autocert. Issued certificates are also mirrored into
-// the VORTEX encrypted Store so the rest of the system has a single source of
+// the Gubern encrypted Store so the rest of the system has a single source of
 // truth and can drive renewal scheduling.
 type ACMEManager struct {
 	cfg         ACMEConfig

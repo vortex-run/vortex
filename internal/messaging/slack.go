@@ -78,7 +78,7 @@ func (s *SlackBot) SendAlert(ctx context.Context, title, body, severity string) 
 			"title":  title,
 			"text":   body,
 			"ts":     s.now().Unix(),
-			"footer": "VORTEX",
+			"footer": "Gubern",
 		}},
 	})
 }
@@ -186,7 +186,7 @@ func (s *SlackBot) handleSub(ctx context.Context, runtime *agents.Runtime, sub, 
 			return "agent runtime not configured"
 		}
 		st := runtime.Stats()
-		return fmt.Sprintf("VORTEX: %d active agents, %d messages, queue %d",
+		return fmt.Sprintf("Gubern: %d active agents, %d messages, queue %d",
 			st.ActiveAgents, st.TotalMessages, st.QueueDepth)
 	case "reload":
 		return "reload requested"

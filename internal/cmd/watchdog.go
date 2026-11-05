@@ -12,12 +12,12 @@ import (
 	"github.com/vortex-run/vortex/internal/healing"
 )
 
-// newWatchdogCommand builds `vortex watchdog`, a separate supervisor process
+// newWatchdogCommand builds `gubern watchdog`, a separate supervisor process
 // that watches the main vortex and restarts it if it dies.
 func newWatchdogCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "watchdog",
-		Short: "Supervise the VORTEX process and restart it if it dies",
+		Short: "Supervise the Gubern process and restart it if it dies",
 	}
 	c.AddCommand(newWatchdogStartCommand())
 	c.AddCommand(newWatchdogStatusCommand())
@@ -31,7 +31,7 @@ func newWatchdogStartCommand() *cobra.Command {
 	var notify bool
 	c := &cobra.Command{
 		Use:   "start",
-		Short: "Start watching VORTEX (runs until Ctrl+C)",
+		Short: "Start watching Gubern (runs until Ctrl+C)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if binary == "" {
@@ -67,7 +67,7 @@ func newWatchdogStatusCommand() *cobra.Command {
 	var pidFile string
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show whether VORTEX is running",
+		Short: "Show whether Gubern is running",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			pidFile = resolvePidfile(pidFile)

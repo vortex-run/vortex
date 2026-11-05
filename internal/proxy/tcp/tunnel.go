@@ -1,4 +1,4 @@
-// Package tcp implements VORTEX's raw TCP tunnel engine (build plan M2.1): a
+// Package tcp implements Gubern's raw TCP tunnel engine (build plan M2.1): a
 // bidirectional byte pump between a client connection and a backend connection,
 // a per-backend connection pool, a weighted round-robin selector, and an accept
 // loop that wires them together. It is the data plane for `protocol: "tcp"`

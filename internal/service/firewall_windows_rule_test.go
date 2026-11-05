@@ -84,7 +84,7 @@ func TestInstallWindows_CreatesFirewallRule(t *testing.T) {
 	var buf bytes.Buffer
 	err := Install(InstallConfig{
 		ExecPath:   `C:\vortex\vortex.exe`,
-		ConfigPath: `C:\vortex\vortex.cue`,
+		ConfigPath: `C:\vortex\gubern.cue`,
 		InitSystem: InitWindows,
 		DryRun:     true,
 		Out:        &buf,
@@ -104,7 +104,7 @@ func TestInstallWindows_CreatesFirewallRule(t *testing.T) {
 func TestInstallWindows_SkipFirewallOptOut(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Install(InstallConfig{
-		ExecPath: `C:\vortex\vortex.exe`, ConfigPath: `C:\vortex\vortex.cue`,
+		ExecPath: `C:\vortex\vortex.exe`, ConfigPath: `C:\vortex\gubern.cue`,
 		InitSystem: InitWindows, DryRun: true, Out: &buf, SkipFirewall: true,
 	}); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestInstallLinux_TouchesNoFirewall(t *testing.T) {
 	for _, sys := range []InitSystem{InitSystemd, InitOpenRC} {
 		var buf bytes.Buffer
 		if err := Install(InstallConfig{
-			ExecPath: "/usr/bin/vortex", ConfigPath: "/etc/vortex/vortex.cue",
+			ExecPath: "/usr/bin/vortex", ConfigPath: "/etc/vortex/gubern.cue",
 			InitSystem: sys, DryRun: true, Out: &buf,
 		}); err != nil {
 			t.Fatal(err)

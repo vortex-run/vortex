@@ -64,7 +64,7 @@ func TestOpenAIModels_ListsProviders(t *testing.T) {
 }
 
 func TestChatCompletions_RoutesAndMatchesSpec(t *testing.T) {
-	c := &recordingCompleter{reply: "Hello from VORTEX", tokens: 100}
+	c := &recordingCompleter{reply: "Hello from Gubern", tokens: 100}
 	s := newOpenAITestServer(t, nil, c)
 
 	body := `{"model":"deepseek-chat","messages":[
@@ -109,7 +109,7 @@ func TestChatCompletions_RoutesAndMatchesSpec(t *testing.T) {
 		t.Errorf("envelope = %+v", got)
 	}
 	if len(got.Choices) != 1 || got.Choices[0].Message.Role != "assistant" ||
-		got.Choices[0].Message.Content != "Hello from VORTEX" ||
+		got.Choices[0].Message.Content != "Hello from Gubern" ||
 		got.Choices[0].FinishReason != "stop" {
 		t.Errorf("choices = %+v", got.Choices)
 	}

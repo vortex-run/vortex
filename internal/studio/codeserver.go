@@ -1,4 +1,4 @@
-// Package studio implements VORTEX Studio (build plan M12): a browser-based
+// Package studio implements Gubern Studio (build plan M12): a browser-based
 // IDE and operations console served from the binary. It manages an external
 // code-server (VS Code in the browser) process, a WebSocket terminal, a browser
 // database GUI, and a Git panel — all mounted under /studio/ by the management
@@ -35,8 +35,8 @@ type CodeServerConfig struct {
 	BinaryPath   string // path to code-server; auto-detected when empty
 	WorkspaceDir string // directory to open
 	Port         int    // Windows only: loopback port (default: a free one)
-	Auth         string // "none" — VORTEX handles auth at the edge
-	CertFile     string // optional; VORTEX serves TLS, code-server stays plaintext
+	Auth         string // "none" — Gubern handles auth at the edge
+	CertFile     string // optional; Gubern serves TLS, code-server stays plaintext
 	DataDir      string // code-server --user-data-dir
 	Logger       *slog.Logger
 }
@@ -50,11 +50,11 @@ var commonCodeServerPaths = []string{
 // CodeServer manages a code-server subprocess and proxies HTTP/WebSocket traffic
 // to it.
 //
-// code-server runs with --auth none (VORTEX authenticates /studio/), so
+// code-server runs with --auth none (Gubern authenticates /studio/), so
 // whoever can connect to it gets an IDE and a shell. On Linux and macOS it
 // therefore listens on a Unix socket in a fresh 0700 directory, which only
 // this user can reach. A loopback TCP port would be open to every local user
-// and to anything VORTEX itself forwards there: with the old fixed :8080, a
+// and to anything Gubern itself forwards there: with the old fixed :8080, a
 // route whose backend is 127.0.0.1:8080 (the README example) published the
 // IDE to the internet. On Windows, where Node can't listen on a socket path,
 // it falls back to a free loopback port.
@@ -260,7 +260,7 @@ func (c *CodeServer) ProxyHandler() http.Handler {
 		// code-server's WebSocket origin check compares against.
 		pr.Out.Host = pr.In.Host
 		pr.SetXForwarded()
-		// The caller's VORTEX key is not code-server's business (or its
+		// The caller's Gubern key is not code-server's business (or its
 		// extensions').
 		pr.Out.Header.Del("Authorization")
 		pr.Out.Header.Del("X-API-Key")

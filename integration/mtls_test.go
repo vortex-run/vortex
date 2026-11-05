@@ -33,7 +33,7 @@ func mtlsStoreKey(t *testing.T) []byte {
 	return kr.Subkey("mtls-store")
 }
 
-// mtlsConfig renders a vortex.cue with a single mtls:true tcp route.
+// mtlsConfig renders a gubern.cue with a single mtls:true tcp route.
 func mtlsConfig(listen, bePort int, cluster string) string {
 	return `cluster: { name: "` + cluster + `" }
 tls: { acme_email: "a@b.com", provider: "internal", min_version: "TLS1.2" }

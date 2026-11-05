@@ -127,10 +127,10 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 		t.Errorf("skip output missing message:\n%s", out.String())
 	}
 	// The wizard always prints the API key box + the complete screen.
-	if !strings.Contains(out.String(), "Your VORTEX API Key") {
+	if !strings.Contains(out.String(), "Your Gubern API Key") {
 		t.Error("wizard should print the API key box")
 	}
-	if !strings.Contains(out.String(), "VORTEX is configured and ready") {
+	if !strings.Contains(out.String(), "Gubern is configured and ready") {
 		t.Error("wizard should print the completion banner")
 	}
 }
@@ -179,7 +179,7 @@ func TestSetup_FullFlowBranded(t *testing.T) {
 	out := buf.String()
 
 	// Welcome banner names the product.
-	for _, want := range []string{"VORTEX", "One binary. Any server. Fully autonomous.", "Press Enter to start setup"} {
+	for _, want := range []string{"Gubern", "One binary. Any server. Fully autonomous.", "Press Enter to start setup"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("welcome missing %q", want)
 		}
@@ -218,17 +218,17 @@ func TestSetup_FullFlowBranded(t *testing.T) {
 		}
 	}
 	// API key box.
-	for _, want := range []string{"Your VORTEX API Key", "it will not be shown again"} {
+	for _, want := range []string{"Your Gubern API Key", "it will not be shown again"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("API key step missing %q", want)
 		}
 	}
 	// Complete screen lists everything configured.
 	for _, want := range []string{
-		"VORTEX is configured and ready",
+		"Gubern is configured and ready",
 		"AI: DeepSeek (primary) + Ollama (backup)",
 		"Telegram: connected",
-		"vortex start",
+		"gubern start",
 		"OPENAI_BASE_URL",
 	} {
 		if !strings.Contains(out, want) {

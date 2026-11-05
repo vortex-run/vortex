@@ -1,4 +1,4 @@
-// Package proxyudp implements VORTEX's UDP tunnel (build plan M2.5): a
+// Package proxyudp implements Gubern's UDP tunnel (build plan M2.5): a
 // session-tracking forwarder for connectionless UDP traffic with a per-source-IP
 // token-bucket rate limiter. UDP has no connection concept, so client→backend
 // "sessions" are tracked manually by client address and reaped after an idle

@@ -292,7 +292,7 @@ func TestClient_StreamCommsErrorWhenDown(t *testing.T) {
 
 func TestClient_LoadAPIKeyFromCacheDir(t *testing.T) {
 	// No env var, no config-dir file: LoadAPIKey must fall back to the cache-dir
-	// tui-key (where `vortex start` auto-creates it).
+	// tui-key (where `gubern start` auto-creates it).
 	t.Setenv("GUBERN_API_KEY", "")
 	home := t.TempDir()
 	// Push both config and cache dirs into the temp home; only write the cache one.

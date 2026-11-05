@@ -15,13 +15,13 @@ import (
 	"github.com/vortex-run/vortex/internal/update"
 )
 
-// githubRepo is the source repository for VORTEX releases.
+// githubRepo is the source repository for Gubern releases.
 const githubRepo = "vortex-run/vortex"
 
 // errSelfUpdate signals a self-update failure whose detail was already printed.
 var errSelfUpdate = errors.New("self-update failed")
 
-// newSelfUpdateCommand builds `vortex self-update`.
+// newSelfUpdateCommand builds `gubern self-update`.
 func newSelfUpdateCommand() *cobra.Command {
 	var (
 		checkOnly bool
@@ -29,7 +29,7 @@ func newSelfUpdateCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "self-update",
-		Short: "Update VORTEX to the latest release",
+		Short: "Update Gubern to the latest release",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSelfUpdate(cmd, checkOnly, assumeYes)
@@ -63,7 +63,7 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 
 	if checkOnly {
 		fmt.Fprintf(out, "Update available: %s → %s\n", version, rel.Tag)
-		fmt.Fprintf(out, "Run 'vortex self-update' to install it.\n")
+		fmt.Fprintf(out, "Run 'gubern self-update' to install it.\n")
 		return nil
 	}
 

@@ -1,4 +1,4 @@
-// Package userdir resolves the per-user directories VORTEX keeps its state
+// Package userdir resolves the per-user directories Gubern keeps its state
 // in: the config dir (master key, API keys, the TUI key) and the cache dir
 // (secret store, audit log, certificates, backups).
 //

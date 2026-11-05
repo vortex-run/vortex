@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package testutil provides helpers for VORTEX's integration tests: building
+// Package testutil provides helpers for Gubern's integration tests: building
 // the binary, starting and stopping a real vortex process, and talking to its
 // management API. It is compiled only under the `integration` build tag so it
 // never bloats normal builds.
@@ -208,7 +208,7 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	args := append([]string{"start", "--config", configPath, "--log-level", "debug"}, extraArgs...)
 	cmd := exec.Command(bin, args...)
 	// Isolate the user config dir: the developer's real ai-provider.json (from
-	// `vortex setup`) must not leak into the child, or gateway-dependent tests
+	// `gubern setup`) must not leak into the child, or gateway-dependent tests
 	// (e.g. forge-disabled-without-AI) behave differently per machine. ONE dir
 	// is shared by the server and Run-invoked CLI calls (see env()).
 	p := &VortexProcess{
@@ -239,11 +239,11 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	// the wrong server). The management API starts serving before the later
 	// subsystems (studio, agents, webhooks) are wired onto it, so waiting for
 	// "management API listening" alone races tests that hit those endpoints
-	// immediately. "VORTEX started" is logged only after all wiring completes.
+	// immediately. "Gubern started" is logged only after all wiring completes.
 	wait := startTimeout()
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
-		if strings.Contains(p.logBuf.String(), "VORTEX started") {
+		if strings.Contains(p.logBuf.String(), "Gubern started") {
 			resp, err := http.Get(apiBase + "/health")
 			if err == nil {
 				_ = resp.Body.Close()
@@ -368,14 +368,14 @@ func runBinary(t *testing.T, bin string, env []string, args ...string) (string, 
 func WriteTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "vortex.cue")
+	p := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatalf("writing test config: %v", err)
 	}
 	return p
 }
 
-// startTimeout is how long StartVortex waits for "VORTEX started". Startup
+// startTimeout is how long StartVortex waits for "Gubern started". Startup
 // takes ~3s on an idle machine; on a loaded one (e.g. a WSL VM sharing CPU
 // with host builds) it can exceed 15s. GUBERN_TEST_START_TIMEOUT (a Go
 // duration) raises it for such runs; the default is unchanged for CI.

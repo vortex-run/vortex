@@ -79,7 +79,7 @@ func (m CodeModel) checkpointActionCmd(id, action string, edits []tui.Checkpoint
 		case "approve":
 			err = c.ApproveCheckpoint(id)
 		case "reject":
-			err = c.RejectCheckpoint(id, "rejected via vortex code")
+			err = c.RejectCheckpoint(id, "rejected via gubern code")
 		case "edit":
 			err = c.EditCheckpoint(id, edits)
 		}

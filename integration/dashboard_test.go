@@ -38,8 +38,8 @@ func TestDashboard_Serves(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "VORTEX") {
-		t.Errorf("dashboard HTML should contain VORTEX title:\n%s", body)
+	if !strings.Contains(string(body), "Gubern") {
+		t.Errorf("dashboard HTML should contain Gubern title:\n%s", body)
 	}
 }
 

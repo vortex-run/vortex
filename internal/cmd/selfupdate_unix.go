@@ -28,7 +28,7 @@ func swapBinary(newBin, self, newVersion string, out io.Writer) error {
 	}
 
 	_ = os.Remove(self + ".bak")
-	fmt.Fprintf(out, "VORTEX updated to %s\n", newVersion)
+	fmt.Fprintf(out, "Gubern updated to %s\n", newVersion)
 	return nil
 }
 

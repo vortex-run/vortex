@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration holds VORTEX's end-to-end tests: they build the real
+// Package integration holds Gubern's end-to-end tests: they build the real
 // binary, start it as a child process, and exercise its CLI and HTTP API. They
 // run only under the `integration` build tag (see the CI integration job and
 // `task test:integration`).

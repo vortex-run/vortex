@@ -50,7 +50,7 @@ func TestEnsureAPIKey_ImportsExistingTuiKey(t *testing.T) {
 	home := t.TempDir()
 	setConfigHome(t, home)
 
-	// Pre-write a raw key (as `vortex setup` would) issued by a separate store,
+	// Pre-write a raw key (as `gubern setup` would) issued by a separate store,
 	// simulating an empty hash store on this boot.
 	issuer := auth.NewAPIKeyStore()
 	_, secret, _ := issuer.Issue("admin", "default", []auth.Role{auth.RoleAdmin}, "setup", 0)

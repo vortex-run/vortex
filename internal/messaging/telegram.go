@@ -1,4 +1,4 @@
-// Package messaging implements VORTEX's messaging integration layer (build plan
+// Package messaging implements Gubern's messaging integration layer (build plan
 // M11): two-way bots over Telegram, WhatsApp, and Slack, plus a unified
 // notification router and an AI provider gateway. All platform APIs are reached
 // over the standard library's net/http — no SDKs.
@@ -229,7 +229,7 @@ type botCommand struct {
 
 // botCommands is the menu shown in the Telegram client.
 var botCommands = []botCommand{
-	{"status", "Show VORTEX status"},
+	{"status", "Show Gubern status"},
 	{"routes", "List active routes"},
 	{"ls", "List files in the working directory"},
 	{"build", "Start a forge build"},
@@ -247,7 +247,7 @@ func (t *TelegramBot) SetCommands(ctx context.Context) error {
 // helpText is the /help reply.
 func helpText() string {
 	var b strings.Builder
-	b.WriteString("VORTEX commands:\n")
+	b.WriteString("Gubern commands:\n")
 	for _, c := range botCommands {
 		b.WriteString("/" + c.Command + " — " + c.Description + "\n")
 	}
@@ -661,7 +661,7 @@ func (e *redactedError) Unwrap() error { return e.cause }
 // That is a credential-disclosure bug rather than cosmetic noise: logs get
 // pasted into issue reports, shipped to aggregators, and captured in screen
 // recordings. A leaked bot token lets anyone send messages as the bot and read
-// everything the bot receives, which for VORTEX is the agent approval channel.
+// everything the bot receives, which for Gubern is the agent approval channel.
 func (t *TelegramBot) redact(err error) error {
 	if err == nil {
 		return nil

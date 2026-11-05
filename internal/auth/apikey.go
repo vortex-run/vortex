@@ -117,7 +117,7 @@ func (s *APIKeyStore) Issue(userID, orgID string, roles []Role, desc string, ttl
 // ImportRaw registers an already-issued raw secret (of the form "<id>.<random>")
 // as a valid key, hashing it the same way Issue does. It is used to re-admit a
 // key that exists outside the store (e.g. the tui-key file written by
-// `vortex setup`) when the persisted hash store is empty or out of sync. It
+// `gubern setup`) when the persisted hash store is empty or out of sync. It
 // returns an error when the raw key is malformed. When a persistence path is
 // set the new key is flushed to disk immediately.
 func (s *APIKeyStore) ImportRaw(rawKey, userID, orgID string, roles []Role, desc string) error {

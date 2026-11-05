@@ -36,7 +36,7 @@ func TestCode_InitializesAllPanels(t *testing.T) {
 	m := sizedCode(WithProject(`S:\myapp`), WithModel("deepseek-chat"))
 	out := m.View()
 	for _, want := range []string{
-		"VORTEX CODE", `S:\myapp`, "deepseek-chat",
+		"Gubern CODE", `S:\myapp`, "deepseek-chat",
 		"AGENTS", "Coordinator", "Code Agent", "Test Agent", "Review",
 		"AGENT COMMS", "CHAT", "MEMORY", "TASK PROGRESS",
 		"Chatting with:",
@@ -195,7 +195,7 @@ func TestCode_HelpOverlayToggles(t *testing.T) {
 		t.Fatal("? should open help")
 	}
 	out := m.View()
-	for _, want := range []string{"Help — VORTEX Code", "Pause/resume", "build a REST API with JWT auth"} {
+	for _, want := range []string{"Help — Gubern Code", "Pause/resume", "build a REST API with JWT auth"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay missing %q", want)
 		}

@@ -53,12 +53,12 @@ func nextSlotID(store *gateway.KeyStore) string {
 	return ""
 }
 
-// newKeysCommand builds `vortex keys` and its subcommands.
+// newKeysCommand builds `gubern keys` and its subcommands.
 func newKeysCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "keys",
 		Short: "Manage AI provider API-key slots (rotation, health, budgets)",
-		Long: "Manage VORTEX's API-key slots for autonomous rotation.\n\n" +
+		Long: "Manage Gubern's API-key slots for autonomous rotation.\n\n" +
 			"Up to 4 slots (same or different providers) are health-scored and\n" +
 			"switched automatically on rate limits or budget exhaustion, with\n" +
 			"conversation context preserved across provider switches.",
@@ -105,7 +105,7 @@ func newKeysAddCommand() *cobra.Command {
 
 			id := nextSlotID(store)
 			if id == "" {
-				fmt.Fprintf(out, "%s all 4 slots are in use — remove one first (vortex keys remove <slot-id>)\n", brand.IconError)
+				fmt.Fprintf(out, "%s all 4 slots are in use — remove one first (gubern keys remove <slot-id>)\n", brand.IconError)
 				return errKeys
 			}
 			if priority <= 0 {
@@ -163,7 +163,7 @@ func newKeysListCommand() *cobra.Command {
 			defer func() { _ = store.Close() }()
 			slots, _ := store.List()
 			if len(slots) == 0 {
-				fmt.Fprintln(out, "No key slots configured. Add one: vortex keys add --provider deepseek --key <key>")
+				fmt.Fprintln(out, "No key slots configured. Add one: gubern keys add --provider deepseek --key <key>")
 				return nil
 			}
 			fmt.Fprintf(out, "Mode: %s\n\n", loadKeysMode())

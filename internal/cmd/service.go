@@ -15,12 +15,12 @@ import (
 // Execute exits 1 without an extra generic log line.
 var errNeedRoot = errors.New("must run as root")
 
-// newServiceCommand builds `vortex service` and its install/uninstall/generate
-// subcommands for managing VORTEX as a system service.
+// newServiceCommand builds `gubern service` and its install/uninstall/generate
+// subcommands for managing Gubern as a system service.
 func newServiceCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "service",
-		Short: "Manage VORTEX as a system service",
+		Short: "Manage Gubern as a system service",
 		Args:  cobra.NoArgs,
 	}
 	c.AddCommand(newServiceInstallCommand())
@@ -62,13 +62,13 @@ func newServiceInstallCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "install",
-		Short: "Install VORTEX as a system service",
+		Short: "Install Gubern as a system service",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
 			if !dryRun && !isRoot() {
-				fmt.Fprintln(cmd.OutOrStderr(), "error: 'vortex service install' must run as root (or use --dry-run)")
+				fmt.Fprintln(cmd.OutOrStderr(), "error: 'gubern service install' must run as root (or use --dry-run)")
 				return errNeedRoot
 			}
 
@@ -92,13 +92,13 @@ func newServiceInstallCommand() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&execPath, "exec-path", "", "path to the vortex binary (default: this binary)")
-	c.Flags().StringVar(&configPath, "config-path", "", "path to vortex.cue (default: the --config value)")
+	c.Flags().StringVar(&configPath, "config-path", "", "path to gubern.cue (default: the --config value)")
 	c.Flags().StringVar(&initSystem, "init-system", "", "force init system: systemd|openrc|windows (default: auto-detect)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print actions without executing them")
 	c.Flags().BoolVar(&skipFirewall, "skip-firewall", false,
-		"do not create the Windows Firewall rule (Windows only; the rule is what lets VORTEX start unattended)")
+		"do not create the Windows Firewall rule (Windows only; the rule is what lets Gubern start unattended)")
 	c.Flags().StringVar(&firewallProfiles, "firewall-profiles", "",
-		"netsh profiles for the inbound rule (Windows only; default \"private,domain\" — add \"public\" to expose VORTEX on untrusted networks)")
+		"netsh profiles for the inbound rule (Windows only; default \"private,domain\" — add \"public\" to expose Gubern on untrusted networks)")
 	return c
 }
 
@@ -110,11 +110,11 @@ func newServiceUninstallCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove VORTEX system service",
+		Short: "Remove Gubern system service",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !dryRun && !isRoot() {
-				fmt.Fprintln(cmd.OutOrStderr(), "error: 'vortex service uninstall' must run as root (or use --dry-run)")
+				fmt.Fprintln(cmd.OutOrStderr(), "error: 'gubern service uninstall' must run as root (or use --dry-run)")
 				return errNeedRoot
 			}
 			return service.Uninstall(service.InstallConfig{
@@ -175,6 +175,6 @@ func newServiceGenerateCommand() *cobra.Command {
 	}
 	c.Flags().StringVar(&format, "format", "", "output format: systemd|openrc|logrotate (default: auto-detect init system)")
 	c.Flags().StringVar(&execPath, "exec-path", "", "path to the vortex binary (default: this binary)")
-	c.Flags().StringVar(&configPath, "config-path", "", "path to vortex.cue (default: the --config value)")
+	c.Flags().StringVar(&configPath, "config-path", "", "path to gubern.cue (default: the --config value)")
 	return c
 }

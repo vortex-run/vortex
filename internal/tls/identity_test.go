@@ -24,7 +24,7 @@ func testClusterCA(t *testing.T) *tls.Certificate {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "VORTEX Cluster CA"},
+		Subject:               pkix.Name{CommonName: "Gubern Cluster CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		IsCA:                  true,

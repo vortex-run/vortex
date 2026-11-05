@@ -4,7 +4,7 @@
 // PersistentPreRunE so every subcommand has a ready logger before it runs.
 //
 // Subcommands (start, stop, status, reload, version) are added one at a time in
-// their own files. With no subcommand, the root command boots VORTEX: it loads
+// their own files. With no subcommand, the root command boots Gubern: it loads
 // and validates the config, starts the management API, wires SIGHUP hot-reload,
 // and blocks until a shutdown signal.
 package cmd
@@ -46,7 +46,7 @@ var (
 	log   *slog.Logger
 )
 
-// keepsState reports whether cmd reads or writes VORTEX state (keys, secrets,
+// keepsState reports whether cmd reads or writes Gubern state (keys, secrets,
 // audit log...), which needs a private per-user directory; see userdir.Check.
 // Commands that only print or validate are exempt.
 func keepsState(cmd *cobra.Command) bool {
@@ -67,8 +67,8 @@ func keepsState(cmd *cobra.Command) bool {
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "gubern",
-		Short:         "VORTEX — one binary. any server. fully autonomous.",
-		Long:          "VORTEX is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
+		Short:         "Gubern — one binary. any server. fully autonomous.",
+		Long:          "Gubern is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// --version must work: self-update on Unix verifies the downloaded
@@ -94,8 +94,8 @@ func NewRootCommand() *cobra.Command {
 			}
 			return nil
 		},
-		// With no subcommand, boot VORTEX using the default pidfile — the same
-		// path as `vortex start`.
+		// With no subcommand, boot Gubern using the default pidfile — the same
+		// path as `gubern start`.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runStart(cmd.Context(), defaultPidfile)
 		},

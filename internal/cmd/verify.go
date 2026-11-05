@@ -20,7 +20,7 @@ import (
 // errVerify signals a verification failure whose detail was already printed.
 var errVerify = errors.New("verification failed")
 
-// newVerifyCommand builds `vortex verify` (build plan M19). It checks the
+// newVerifyCommand builds `gubern verify` (build plan M19). It checks the
 // running binary against the published release artifacts: checksums.txt only
 // hashes the release *archives*, so the command downloads the platform archive
 // (itself verified against checksums.txt), extracts the binary inside, and

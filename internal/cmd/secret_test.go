@@ -58,7 +58,7 @@ func TestSecret_SetGetRoundTrip(t *testing.T) {
 	// drive the commands manually here against one store).
 	storeDir := t.TempDir()
 	t.Setenv("GUBERN_SECRET_STORE", storeDir)
-	cfgPath := filepath.Join(t.TempDir(), "vortex.cue")
+	cfgPath := filepath.Join(t.TempDir(), "gubern.cue")
 	if err := os.WriteFile(cfgPath, []byte(secretTestConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestSecret_SetGetRoundTrip(t *testing.T) {
 func TestSecret_ListShowsDeclaredStatus(t *testing.T) {
 	storeDir := t.TempDir()
 	t.Setenv("GUBERN_SECRET_STORE", storeDir)
-	cfgPath := filepath.Join(t.TempDir(), "vortex.cue")
+	cfgPath := filepath.Join(t.TempDir(), "gubern.cue")
 	_ = os.WriteFile(cfgPath, []byte(secretTestConfig), 0o600)
 	old := flags.configPath
 	flags.configPath = cfgPath

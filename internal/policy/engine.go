@@ -1,4 +1,4 @@
-// Package policy provides VORTEX's authorization policy engine (build plan
+// Package policy provides Gubern's authorization policy engine (build plan
 // M3.4): it embeds the Open Policy Agent (OPA) Rego evaluator so operators can
 // express request-authorization rules as .rego policies, hot-reloaded without a
 // restart. When no policy is supplied the engine falls back to a built-in

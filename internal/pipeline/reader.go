@@ -1,4 +1,4 @@
-// Package pipeline implements VORTEX's data pipeline agent (build plan M17):
+// Package pipeline implements Gubern's data pipeline agent (build plan M17):
 // reading tabular data (CSV/JSON), transforming it (filter/aggregate/sort),
 // rendering charts (SVG), and running scheduled jobs. It is stdlib-only —
 // encoding/csv + encoding/json for I/O and hand-rolled SVG for charts.

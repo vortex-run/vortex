@@ -16,7 +16,7 @@ import (
 
 // hookWASM builds a minimal WASM module that ignores its input and always
 // returns the JSON `output` (a HookOutput). It exports memory, alloc, and handle
-// per the VORTEX plugin ABI. Hand-encoded so the test needs no WASM toolchain.
+// per the Gubern plugin ABI. Hand-encoded so the test needs no WASM toolchain.
 func hookWASM(output []byte) []byte {
 	leb := func(n uint32) []byte {
 		var out []byte

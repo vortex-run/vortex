@@ -123,7 +123,7 @@ func (s *BenchmarkSuite) RunUDPTunnel(b *testing.B) BenchmarkResult {
 }
 
 // QuickBench runs a fixed-iteration version of each benchmark without a
-// *testing.B, for the `vortex tune bench` command. It returns one result per
+// *testing.B, for the `gubern tune bench` command. It returns one result per
 // subject (tcp, http, udp).
 func (s *BenchmarkSuite) QuickBench() []BenchmarkResult {
 	return []BenchmarkResult{

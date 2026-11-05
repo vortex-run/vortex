@@ -77,9 +77,9 @@ const (
 // Two minutes covers a slow provider intent parse for a real build.
 const handleMessageTimeout = 120 * time.Second
 
-const intentSystemPrompt = `You are the VORTEX coordinator. Classify the user's request into exactly one of: BUILD_APP, RESEARCH, DEVOPS_CHECK, DATA_PIPELINE, GENERAL_QUESTION, UNKNOWN. Respond with only the classification keyword.`
+const intentSystemPrompt = `You are the Gubern coordinator. Classify the user's request into exactly one of: BUILD_APP, RESEARCH, DEVOPS_CHECK, DATA_PIPELINE, GENERAL_QUESTION, UNKNOWN. Respond with only the classification keyword.`
 
-const answerSystemPrompt = `You are VORTEX, an autonomous coding assistant like Claude Code. Answer the user's question concisely and helpfully.
+const answerSystemPrompt = `You are Gubern, an autonomous coding assistant like Claude Code. Answer the user's question concisely and helpfully.
 
 RESPONSE RULES — NEVER BREAK THESE:
 - NEVER mention skill names, tool names, or internal step lists.
@@ -106,7 +106,7 @@ For a bare number like "1", "2", "3": it is the user's selection from your previ
 type ApprovalFunc func(ctx context.Context, req ApprovalRequest) bool
 
 // BuildAppFunc handles a BUILD_APP request, returning a user-facing reply (e.g.
-// a job id). VORTEX Forge (M13) supplies the implementation via start.go; the
+// a job id). Gubern Forge (M13) supplies the implementation via start.go; the
 // coordinator stays decoupled from the forge package (which imports agents) to
 // avoid an import cycle. When nil, BUILD_APP returns a not-implemented stub.
 type BuildAppFunc func(ctx context.Context, userMsg, sessionID string) (string, error)
@@ -140,7 +140,7 @@ type CoordinatorConfig struct {
 	AIGateway   AIGateway
 	MaxAgents   int             // concurrent sub-agent limit (default 8)
 	Approval    ApprovalFunc    // human-in-the-loop approval; nil = deny gated actions
-	BuildApp    BuildAppFunc    // BUILD_APP handler (VORTEX Forge); nil = stub
+	BuildApp    BuildAppFunc    // BUILD_APP handler (Gubern Forge); nil = stub
 	Research    ResearchFunc    // RESEARCH handler (M15 research agent); nil = stub
 	DevOps      DevOpsFunc      // DEVOPS handler (M16 devops agent); nil = stub
 	Pipeline    PipelineFunc    // DATA_PIPELINE handler (M17 pipeline agent); nil = stub
@@ -1215,7 +1215,7 @@ func (c *Coordinator) handleMessageInner(userMsg, sessionID string, sf *streamFi
 		return c.continueClarification(ctx, sessionID, userMsg)
 	}
 
-	// Explicit team request (the `vortex code --team` TUI sends "/team <goal>"):
+	// Explicit team request (the `gubern code --team` TUI sends "/team <goal>"):
 	// FORCE the specialist pipeline regardless of keyword heuristics. This is the
 	// correct path for team mode — it runs coder → tester → reviewer and writes
 	// real files, instead of the orchestration engine that leaked internals.
@@ -2055,7 +2055,7 @@ func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task strin
 		return "No local tools are configured, so /agent isn't available.", nil
 	}
 	if c.cfg.AIGateway == nil {
-		return "No AI provider is configured, so /agent isn't available (run vortex setup).", nil
+		return "No AI provider is configured, so /agent isn't available (run gubern setup).", nil
 	}
 	var transcript []string
 	emit := func(line string) {

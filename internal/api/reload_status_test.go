@@ -9,7 +9,7 @@ import (
 )
 
 // TestStatus_LastReload: /api/status carries the latest reload outcome, which
-// `vortex reload` reads after a SIGHUP.
+// `gubern reload` reads after a SIGHUP.
 func TestStatus_LastReload(t *testing.T) {
 	s, secret := newAuthedServer(t)
 	get := func() *ReloadStatus {

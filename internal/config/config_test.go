@@ -31,7 +31,7 @@ observability: {log_level: "debug"}
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "vortex.cue")
+	p := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -366,10 +366,10 @@ func TestResolvePath_LegacyConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := ResolvePath(""); got != LegacyPath {
-		t.Errorf("only vortex.cue: %s", got)
+		t.Errorf("only gubern.cue: %s", got)
 	}
 	if got := ResolvePath(DefaultPath); got != LegacyPath {
-		t.Errorf("default flag value with only vortex.cue: %s", got)
+		t.Errorf("default flag value with only gubern.cue: %s", got)
 	}
 	if err := os.WriteFile(DefaultPath, []byte("cluster: {name: \"y\"}"), 0o600); err != nil {
 		t.Fatal(err)

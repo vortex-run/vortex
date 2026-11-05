@@ -80,7 +80,7 @@ func (ca *LocalCA) generate() error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "VORTEX Local CA", Organization: []string{"VORTEX Dev"}},
+		Subject:               pkix.Name{CommonName: "Gubern Local CA", Organization: []string{"Gubern Dev"}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(caValidity),
 		IsCA:                  true,

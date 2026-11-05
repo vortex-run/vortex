@@ -13,7 +13,7 @@ import (
 )
 
 // auditConfig renders a config with a fixed cluster name so the audit HMAC key
-// is stable between the server and the `vortex audit` CLI.
+// is stable between the server and the `gubern audit` CLI.
 func auditConfig() string {
 	return `cluster: { name: "audit-int" }
 tls: { acme_email: "a@b.com", provider: "internal", min_version: "TLS1.2" }

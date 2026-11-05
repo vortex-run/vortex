@@ -24,7 +24,7 @@ func loadRoutes(t *testing.T, backend int, ports ...int) *config.Config {
 		src += fmt.Sprintf("  { name: \"r%d\", protocol: \"tcp\", listen: %d, backends: [{ host: \"127.0.0.1\", port: %d }] },\n", i, p, backend)
 	}
 	src += "]\n"
-	path := filepath.Join(t.TempDir(), "vortex.cue")
+	path := filepath.Join(t.TempDir(), "gubern.cue")
 	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}

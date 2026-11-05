@@ -1,4 +1,4 @@
-// Typed API client for the VORTEX management API. All requests are relative so
+// Typed API client for the Gubern management API. All requests are relative so
 // they hit the same origin serving the dashboard (or the dev proxy on :9090).
 //
 // Agent/orchestration routes use requireAPIKey on the server. This client does

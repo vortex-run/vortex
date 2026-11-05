@@ -23,7 +23,7 @@ const fallbackTrustDomain = "vortex.local"
 // spiffeScheme is the URI scheme for SPIFFE identities.
 const spiffeScheme = "spiffe"
 
-// NodeIdentity is a VORTEX node's SPIFFE-style identity used for the mTLS
+// NodeIdentity is a Gubern node's SPIFFE-style identity used for the mTLS
 // identity mesh. The node ID is derived deterministically from the cluster name
 // and hostname so it is stable across restarts, and the trust domain is
 // cluster-scoped so a cert from one cluster cannot authenticate to another.
@@ -90,7 +90,7 @@ func (n *NodeIdentity) IssueNodeCert(ca *tls.Certificate, lifetime time.Duration
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: n.NodeID, Organization: []string{"VORTEX Cluster"}},
+		Subject:      pkix.Name{CommonName: n.NodeID, Organization: []string{"Gubern Cluster"}},
 		URIs:         n.URISANs(),
 		DNSNames:     []string{n.NodeID}, // convenience for debugging
 		NotBefore:    now.Add(-time.Minute),

@@ -151,7 +151,7 @@ var logsHelp = HelpContent{
 }
 
 var codeHelp = HelpContent{
-	Title: "VORTEX Code",
+	Title: "Gubern Code",
 	Sections: []HelpSection{
 		{Title: "Keyboard shortcuts", Items: []HelpItem{
 			{Key: "P", Action: "Pause/resume agents"},

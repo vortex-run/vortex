@@ -11,7 +11,7 @@ import (
 // localhostOnly reports whether the request originates from the loopback
 // interface. The /internal/* endpoints are control-plane operations and must
 // never be reachable from off-box; they are the Windows-safe equivalents of
-// SIGHUP/SIGTERM used by the vortex reload/stop commands.
+// SIGHUP/SIGTERM used by the gubern reload/stop commands.
 func localhostOnly(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 // handleInternalReload re-reads and re-validates config via the registered
-// reload callback. Localhost-only. Used by `vortex reload` on Windows.
+// reload callback. Localhost-only. Used by `gubern reload` on Windows.
 func (s *Server) handleInternalReload(w http.ResponseWriter, r *http.Request) {
 	if !localhostOnly(r) {
 		s.log.Warn("rejected non-local /internal/reload", "remote", r.RemoteAddr)
@@ -106,7 +106,7 @@ func (s *Server) handleInternalReload(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleInternalShutdown begins a graceful shutdown via the registered
-// callback. Localhost-only. Used by `vortex stop` on Windows. It responds 200
+// callback. Localhost-only. Used by `gubern stop` on Windows. It responds 200
 // before triggering shutdown so the caller receives confirmation.
 func (s *Server) handleInternalShutdown(w http.ResponseWriter, r *http.Request) {
 	if !localhostOnly(r) {

@@ -1,4 +1,4 @@
-// Package a2a implements VORTEX's agent-to-agent communication protocol: a
+// Package a2a implements Gubern's agent-to-agent communication protocol: a
 // JSON-RPC 2.0 surface (the core of Google's A2A protocol v1.0) over net/http,
 // with SSE streaming for live progress. Specialist agents register with an
 // AgentServer and call one another through an AgentClient — no new
@@ -14,7 +14,7 @@ import (
 // AgentCard identifies an agent and its capabilities (served at /a2a/.../card).
 type AgentCard struct {
 	ID           string   `json:"id"`           // "coordinator"|"code-agent" etc
-	Name         string   `json:"name"`         // "VORTEX Coordinator"
+	Name         string   `json:"name"`         // "Gubern Coordinator"
 	Role         string   `json:"role"`         // coordinator|coder|tester|reviewer|researcher|devops
 	Description  string   `json:"description"`  //
 	Version      string   `json:"version"`      // "1.0.0"

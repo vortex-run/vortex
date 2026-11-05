@@ -55,7 +55,7 @@ import (
 	"github.com/vortex-run/vortex/pkg/logger"
 )
 
-// newStartCommand builds `vortex start`, which loads and validates config,
+// newStartCommand builds `gubern start`, which loads and validates config,
 // writes a PID file, starts the management API, wires SIGHUP hot-reload, then
 // blocks until a shutdown signal — removing the PID file on the way out.
 func newStartCommand() *cobra.Command {
@@ -64,7 +64,7 @@ func newStartCommand() *cobra.Command {
 	var withUI bool
 	c := &cobra.Command{
 		Use:   "start",
-		Short: "Start the VORTEX server",
+		Short: "Start the Gubern server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Run the first-run wizard when --setup is given, or automatically on
@@ -114,8 +114,8 @@ func telegramFromFile() (token string, chatID int64, ok bool) {
 // resolveWorkingDir returns the base directory the agents use for relative
 // paths (where the Code Agent writes files). It honours GUBERN_WORK_DIR so the
 // server can be pointed at a project directory (e.g. the one the user opens with
-// `vortex code`), falling back to the process working directory. It is shown in
-// the TUI top bar. Optional agents.local_tools.trusted_root in vortex.cue may
+// `gubern code`), falling back to the process working directory. It is shown in
+// the TUI top bar. Optional agents.local_tools.trusted_root in gubern.cue may
 // confine local FS tools; otherwise the approval gate is the primary control.
 func resolveWorkingDir() string {
 	if dir := strings.TrimSpace(os.Getenv("GUBERN_WORK_DIR")); dir != "" {
@@ -143,7 +143,7 @@ func stdoutIsTerminal() bool { return isTerminal(os.Stdout) }
 // isTerminal reports whether f is a terminal: a character device other than
 // the null device. /dev/null is a character device too, and it is what
 // systemd connects a service's stdin to by default, so checking the mode
-// alone made `vortex start` under systemd (or with < /dev/null) run the
+// alone made `gubern start` under systemd (or with < /dev/null) run the
 // interactive setup wizard against nobody, adding minutes to every start.
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
@@ -262,7 +262,7 @@ func midnightReset(ctx context.Context, store *gateway.KeyStore, log *slog.Logge
 }
 
 // safeGo runs fn in a goroutine with panic recovery (a panicking background
-// monitor must never take down VORTEX).
+// monitor must never take down Gubern).
 func safeGo(_ context.Context, log *slog.Logger, name string, fn func()) {
 	go func() {
 		defer func() {
@@ -354,7 +354,7 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 		out := []api.TeamAgentInfo{}
 		// Coordinator first, then the specialists from the A2A server.
 		out = append(out, api.TeamAgentInfo{
-			ID: "coordinator", Name: "VORTEX Coordinator", Role: "coordinator", Status: "idle",
+			ID: "coordinator", Name: "Gubern Coordinator", Role: "coordinator", Status: "idle",
 		})
 		for _, c := range a2aServer.List() {
 			out = append(out, api.TeamAgentInfo{
@@ -573,7 +573,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	migrateLegacyKeys(cfg, log)
 
 	// Audit log: tamper-proof record of security-relevant events. Keyed by a
-	// master-key-derived subkey so the `vortex audit` CLI verifies the same
+	// master-key-derived subkey so the `gubern audit` CLI verifies the same
 	// chain (both derive "audit" from the shared master key).
 	auditLog, err := openRuntimeAuditLog(log)
 	if err != nil {
@@ -588,7 +588,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		// printed "tamper-proof chain" unconditionally, so an operator whose
 		// chain did not verify — from real tampering, a restored backup, or a
 		// re-key migration that could not run — was reassured at every boot and
-		// only found out by running `vortex audit verify` by hand.
+		// only found out by running `gubern audit verify` by hand.
 		if verr := auditLog.Verify(); verr != nil {
 			if errors.Is(verr, audit.ErrChainUnverified) {
 				display.Step("Audit log", "enabled — CHAIN UNVERIFIED (key mismatch or tampering)")
@@ -641,7 +641,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	// lifecycle so ALL reload hooks fire (config swap + proxy rebuild), not just
 	// the config swap.
 	// The hooks swallow errors (a bad file must not stop the process), so read
-	// the outcome back to tell `vortex reload` the truth. dp is set once the
+	// the outcome back to tell `gubern reload` the truth. dp is set once the
 	// data plane exists, below.
 	var dpRef atomic.Pointer[dataPlane]
 	reloadOutcome := func() error {
@@ -871,7 +871,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		return nil
 	})
 	// Registered last, so it sees every hook's outcome: published in
-	// /api/status for `vortex reload` after a SIGHUP, which has no reply.
+	// /api/status for `gubern reload` after a SIGHUP, which has no reply.
 	mgr.OnReload("reload-status", func(context.Context) error {
 		apiSrv.RecordReload(reloadOutcome())
 		return nil
@@ -897,7 +897,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	if msg.gateway != nil {
 		display.Step("AI gateway", "provider="+strings.Join(msg.gateway.ProviderNames(), ","))
 	} else {
-		display.Step("AI gateway", "not configured — run: vortex setup")
+		display.Step("AI gateway", "not configured — run: gubern setup")
 	}
 	if msg.telegram != nil {
 		display.Step("Messaging", "telegram")
@@ -933,7 +933,7 @@ func runStart(ctx context.Context, pidfile string) error {
 			}
 		})
 		// OpenAI-compatible /v1/* surface (upgrade 3): any OpenAI-speaking tool
-		// can use VORTEX as its AI backend with provider routing + cost tracking.
+		// can use Gubern as its AI backend with provider routing + cost tracking.
 		// CompleteStreamForModel serves stream:true with true token streaming.
 		// Both paths translate the api layer's client-requested generation cap
 		// onto the gateway's own context key (the packages stay decoupled: api
@@ -963,7 +963,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	if msg.gateway != nil {
 		gateway = msg.gateway
 	}
-	// --- VORTEX Forge (M13): autonomous app builder ------------------------
+	// --- Gubern Forge (M13): autonomous app builder ------------------------
 	// Built before the agent runtime so its BUILD_APP handler can be wired into
 	// the coordinator. forge imports agents, so the coordinator reaches forge
 	// only through a callback (no import cycle).
@@ -1047,7 +1047,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		}
 	}
 
-	// --- VORTEX Studio (M12): browser IDE/terminal/db/git -------------------
+	// --- Gubern Studio (M12): browser IDE/terminal/db/git -------------------
 	if h := buildStudio(ctx, cfg, auditLog, mgr, log); h != nil {
 		apiSrv.SetStudioHandler(h)
 	}
@@ -1061,7 +1061,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	buildHealing(ctx, cfg, apiSrv, mgr, msg, auditLog, metrics, log)
 	display.Step("Self-healing", "enabled")
 
-	log.Info("VORTEX started",
+	log.Info("Gubern started",
 		"version", version,
 		"cluster", cfg.Cluster.Name,
 		"api_addr", apiSrv.Addr(),
@@ -1083,7 +1083,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	})
 
 	mgr.Run(ctx)
-	log.Info("VORTEX stopped cleanly")
+	log.Info("Gubern stopped cleanly")
 	return nil
 }
 
@@ -1360,7 +1360,7 @@ func tuiKeyPath() string {
 func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
 	keyPath := tuiKeyPath()
 
-	// Step 1: import an existing tui-key (from `vortex setup`) so a raw key that
+	// Step 1: import an existing tui-key (from `gubern setup`) so a raw key that
 	// outlived an empty/rotated hash store still authenticates.
 	if data, err := os.ReadFile(keyPath); err == nil {
 		if raw := strings.TrimSpace(string(data)); raw != "" {
@@ -1399,7 +1399,7 @@ func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
 
 // openRuntimeAuditLog opens the audit log used by the running server. The path
 // (GUBERN_AUDIT_LOG or <cache>/vortex/audit.log) and the master-key-derived
-// HMAC key match the `vortex audit` CLI so the same chain is verifiable. A
+// HMAC key match the `gubern audit` CLI so the same chain is verifiable. A
 // failure to open is fatal — an unwritable audit log is a security
 // regression, not something to silently skip.
 func openRuntimeAuditLog(log *slog.Logger) (*audit.Log, error) {
@@ -1738,7 +1738,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 		wf := wf
 		_ = store.Fail(wf.ID, "interrupted by shutdown; resubmitted on startup")
 		if router != nil {
-			_ = router.Send(ctx, messaging.SeverityInfo, "VORTEX",
+			_ = router.Send(ctx, messaging.SeverityInfo, "Gubern",
 				fmt.Sprintf("🔄 Resuming interrupted task:\n%s (step %d of %d)",
 					wf.Goal, wf.CurrentStep+1, len(wf.Steps)+1))
 		}
@@ -2034,7 +2034,7 @@ func (a *routerNotify) NotifyFile(ctx context.Context, filename string, data []b
 }
 
 func (a *routerNotify) SendMessage(ctx context.Context, _ int64, text string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, "VORTEX Forge", text)
+	return a.router.Send(ctx, messaging.SeverityInfo, "Gubern Forge", text)
 }
 
 func (a *routerNotify) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
@@ -2134,7 +2134,7 @@ func buildOrchestration(ctx context.Context, gateway agents.AIGateway, msg messa
 			}
 		}
 		// general / build_app / unwired → a direct model completion.
-		return gateway.Complete(ctx, input, "You are a VORTEX agent. Complete the task concisely.")
+		return gateway.Complete(ctx, input, "You are a Gubern agent. Complete the task concisely.")
 	})
 
 	var notifier orchestration.Notifier
@@ -2433,7 +2433,7 @@ type messagingComponents struct {
 	tgChat     int64 // resolved Telegram default chat (env or setup config)
 }
 
-// providerFromFile builds an AIProvider from the saved `vortex setup` config
+// providerFromFile builds an AIProvider from the saved `gubern setup` config
 // (decrypting its API key), or nil when no usable config exists. Env vars take
 // precedence; this is only consulted when none are set.
 func providerFromFile(log *slog.Logger) *messaging.AIProvider {
@@ -2514,8 +2514,8 @@ func backupProvidersFromFile(log *slog.Logger) []messaging.AIProvider {
 // never from the config file. Returns a struct whose fields are nil when the
 // corresponding integration is not configured.
 // aiProviders assembles the AI providers from env keys, falling back to the
-// saved `vortex setup` config when no provider env var is set. Shared by
-// start and `vortex ai probe`, so both see the same providers.
+// saved `gubern setup` config when no provider env var is set. Shared by
+// start and `gubern ai probe`, so both see the same providers.
 func aiProviders(log *slog.Logger) []messaging.AIProvider {
 	var providers []messaging.AIProvider
 	if k := os.Getenv("GUBERN_ANTHROPIC_KEY"); k != "" {
@@ -2586,7 +2586,7 @@ func aiProviders(log *slog.Logger) []messaging.AIProvider {
 			Models: []string{model}, Priority: 4,
 		})
 	}
-	// Fall back to the saved `vortex setup` config only when NO provider env var
+	// Fall back to the saved `gubern setup` config only when NO provider env var
 	// was set — env vars always override the file.
 	if len(providers) == 0 {
 		if p := providerFromFile(log); p != nil {
@@ -2762,7 +2762,7 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 	bot.SetCommandHooks(messaging.CommandHooks{
 		Status: func() string {
 			cfg := apiSrv.StatusSnapshot()
-			return fmt.Sprintf("VORTEX %s ✅\nCluster: %s\nRoutes: %d active",
+			return fmt.Sprintf("Gubern %s ✅\nCluster: %s\nRoutes: %d active",
 				version, cfg.ClusterName, cfg.Routes)
 		},
 		Routes: func() string {
@@ -2804,7 +2804,7 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 
 // newTelegramBot builds the bot with a webhook secret. The webhook refuses
 // updates without the secret Telegram echoes back; with none configured
-// (GUBERN_TELEGRAM_SECRET), it uses a random one per start. VORTEX registers
+// (GUBERN_TELEGRAM_SECRET), it uses a random one per start. Gubern registers
 // its own webhook (GUBERN_PUBLIC_URL) with it, so delivery keeps working,
 // and a forged POST to /webhook/telegram can't match it.
 func newTelegramBot(token string, allowed []int64, log *slog.Logger) (*messaging.TelegramBot, error) {
@@ -2815,7 +2815,7 @@ func newTelegramBot(token string, allowed []int64, log *slog.Logger) (*messaging
 			return nil, fmt.Errorf("generating a webhook secret: %w", err)
 		}
 		if os.Getenv("GUBERN_PUBLIC_URL") == "" && os.Getenv("GUBERN_TELEGRAM_POLLING") != "true" {
-			log.Warn("Telegram webhook secret not set: a webhook registered outside VORTEX will be refused; " +
+			log.Warn("Telegram webhook secret not set: a webhook registered outside Gubern will be refused; " +
 				"set GUBERN_TELEGRAM_SECRET to its secret_token, or use GUBERN_PUBLIC_URL / GUBERN_TELEGRAM_POLLING=true")
 		}
 	}
@@ -2845,7 +2845,7 @@ func startTelegramDelivery(bot *messaging.TelegramBot, rt *agents.Runtime, log *
 	log.Info("Telegram webhook not registered — set GUBERN_PUBLIC_URL or GUBERN_TELEGRAM_POLLING=true")
 }
 
-// buildStudio constructs the VORTEX Studio handler tree (code-server proxy,
+// buildStudio constructs the Gubern Studio handler tree (code-server proxy,
 // terminal, DB studio, git panel) when GUBERN_STUDIO_WORKSPACE is set. code-
 // server degrades gracefully when its binary is absent. Returns nil when Studio
 // is not configured.
@@ -2965,7 +2965,7 @@ func atoi64Default(s string, def int64) int64 {
 // buildTenancy opens the namespace registry and builds the quota enforcer.
 // Both are always created so routes can declare a namespace_id; a route without
 // one incurs no tenancy cost. The registry path honours GUBERN_NAMESPACE_STORE
-// (shared with the `vortex namespace` CLI).
+// (shared with the `gubern namespace` CLI).
 func buildTenancy(log *slog.Logger) (*tenancy.Registry, *tenancy.Enforcer) {
 	reg := tenancy.NewRegistry()
 	path := namespaceStorePath()
@@ -3090,7 +3090,7 @@ func loadSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) (map
 		case errors.Is(gerr, os.ErrNotExist):
 			missing = append(missing, key)
 			log.Warn("declared secret not set", "name", key,
-				"hint", "run: vortex secret set "+key+" <value>")
+				"hint", "run: gubern secret set "+key+" <value>")
 		default:
 			return nil, fmt.Errorf("checking secret %s: %w", key, gerr)
 		}
@@ -3123,7 +3123,7 @@ func checkSecretRotation(cfg *config.Config, router *messaging.Router, log *slog
 		return
 	}
 	for _, a := range alerts {
-		hint := "vortex secret set " + a.Name + " <value>"
+		hint := "gubern secret set " + a.Name + " <value>"
 		if a.Expired {
 			days := int(time.Since(a.Deadline).Hours() / 24)
 			log.Warn("secret EXPIRED", "name", a.Name,
@@ -3202,9 +3202,9 @@ func startChallengeServer(mgr *lifecycle.Manager, h http.Handler, log *slog.Logg
 
 // writePIDFile claims path for this process. It refuses when the file names
 // a live process and replaces a stale one (a crashed run). It used to
-// overwrite the file unconditionally: a second `vortex start` replaced the
+// overwrite the file unconditionally: a second `gubern start` replaced the
 // running server's PID with its own, then failed on the busy ports and
-// exited, after which `vortex status` and `vortex stop` reported "not
+// exited, after which `gubern status` and `gubern stop` reported "not
 // running" for a server that was still serving.
 func writePIDFile(path string) error {
 	if err := pidfile.Write(path); err != nil {

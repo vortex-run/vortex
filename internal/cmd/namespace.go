@@ -41,7 +41,7 @@ func openNamespaceRegistry() (*tenancy.Registry, string, error) {
 	return reg, path, nil
 }
 
-// newNamespaceCommand builds `vortex namespace` and its subcommands.
+// newNamespaceCommand builds `gubern namespace` and its subcommands.
 func newNamespaceCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "namespace",

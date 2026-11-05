@@ -40,7 +40,7 @@ func FuzzContainInTrustedRoot(f *testing.F) {
 // Any path with a .git segment (however Windows spells it) must keep its
 // approval prompt under Auto Mode.
 func FuzzAutoModeSensitiveGitSegments(f *testing.F) {
-	for _, s := range []string{".git/config", ".GIT/hooks/x", "a/.git./x", "a/.git /x", ".git::$INDEX_ALLOCATION/x", "x/y", "vortex.cue", "src/git/x"} {
+	for _, s := range []string{".git/config", ".GIT/hooks/x", "a/.git./x", "a/.git /x", ".git::$INDEX_ALLOCATION/x", "x/y", "gubern.cue", "src/git/x"} {
 		f.Add(s)
 	}
 	root := f.TempDir()

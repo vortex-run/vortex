@@ -14,9 +14,9 @@ type DBAuditLogger interface {
 	Append(ctx context.Context, actor, action, resource string, detail map[string]any) error
 }
 
-// DBRoute describes a database exposed via a VORTEX mTLS TCP route.
+// DBRoute describes a database exposed via a Gubern mTLS TCP route.
 type DBRoute struct {
-	Name       string // route name from vortex.cue
+	Name       string // route name from gubern.cue
 	Kind       string // "postgres" | "mysql" | "redis" | "mongodb"
 	ListenAddr string // address of the mTLS TCP listener to connect through
 }

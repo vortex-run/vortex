@@ -53,7 +53,7 @@ func (s stubRuntime) SessionHistory(string) []SessionMessage {
 func newAgentTestServer(t *testing.T, rt AgentRuntime) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "vortex.cue")
+	path := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}

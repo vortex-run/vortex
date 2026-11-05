@@ -1,4 +1,4 @@
-// Package keyring manages VORTEX's root key material. Every at-rest
+// Package keyring manages Gubern's root key material. Every at-rest
 // encryption key (secret store, TLS cert store, mTLS cluster CA) and the
 // audit-log HMAC key is derived from a single random 32-byte master key via
 // HKDF-SHA256 with a per-purpose label — never from the (public, /health-

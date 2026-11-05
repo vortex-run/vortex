@@ -30,7 +30,7 @@ type RaftConfig struct {
 }
 
 // RaftNode wraps a hashicorp/raft instance plus its transport and FSM, providing
-// the cluster-config replication primitives VORTEX needs.
+// the cluster-config replication primitives Gubern needs.
 type RaftNode struct {
 	cfg   RaftConfig
 	raft  *raft.Raft

@@ -59,8 +59,8 @@ func TestOpenRouter_SendsAttributionHeaders(t *testing.T) {
 	if !strings.Contains(referer, "vortex") {
 		t.Errorf("HTTP-Referer = %q, want a vortex URL", referer)
 	}
-	if title != "VORTEX" {
-		t.Errorf("X-Title = %q, want VORTEX", title)
+	if title != "Gubern" {
+		t.Errorf("X-Title = %q, want Gubern", title)
 	}
 	if auth != "Bearer sk-or-1" {
 		t.Errorf("Authorization = %q", auth)

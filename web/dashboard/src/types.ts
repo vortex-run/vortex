@@ -1,4 +1,4 @@
-// TypeScript types mirroring VORTEX's Go management API responses.
+// TypeScript types mirroring Gubern's Go management API responses.
 
 // RouteHealth mirrors api.RouteHealth (GET /health routes[]).
 export interface RouteHealth {

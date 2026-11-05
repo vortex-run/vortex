@@ -23,7 +23,7 @@ const Agents = lazy(() => import("./pages/Agents").then((m) => ({ default: m.Age
 
 const queryClient = new QueryClient();
 
-// Served under /dashboard/ by the VORTEX management API (embedded dist).
+// Served under /dashboard/ by the Gubern management API (embedded dist).
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>

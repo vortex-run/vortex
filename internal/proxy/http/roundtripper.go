@@ -1,4 +1,4 @@
-// Package proxyhttp implements VORTEX's L7 (HTTP/1.1 + HTTP/2) reverse proxy
+// Package proxyhttp implements Gubern's L7 (HTTP/1.1 + HTTP/2) reverse proxy
 // (build plan M2.2): a pooled RoundTripper, request router, load balancers, the
 // proxy handler, and the internet-facing server. It is named proxyhttp to avoid
 // clashing with the standard library's net/http. Standard library plus

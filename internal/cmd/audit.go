@@ -50,7 +50,7 @@ func auditCLI(cmd *cobra.Command, action, resource string) {
 	_ = log.Append(cmd.Context(), "cli", action, resource, nil)
 }
 
-// newAuditCommand builds `vortex audit` with verify and export subcommands.
+// newAuditCommand builds `gubern audit` with verify and export subcommands.
 func newAuditCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "audit",
@@ -64,7 +64,7 @@ func newAuditCommand() *cobra.Command {
 	return c
 }
 
-// newAuditReportCommand builds `vortex audit report` (M19): a compliance
+// newAuditReportCommand builds `gubern audit report` (M19): a compliance
 // summary of the audit log over a period, in markdown, JSON, or CSV.
 func newAuditReportCommand() *cobra.Command {
 	var (
@@ -144,7 +144,7 @@ func newAuditReportCommand() *cobra.Command {
 	return c
 }
 
-// newAuditArchiveCommand builds `vortex audit archive` (M19): manually rotate
+// newAuditArchiveCommand builds `gubern audit archive` (M19): manually rotate
 // the live audit log into a gzipped monthly archive.
 func newAuditArchiveCommand() *cobra.Command {
 	return &cobra.Command{

@@ -11,7 +11,7 @@ import (
 // TestManager_LastReloadError: the outcome of the latest Reload is readable
 // (the lifecycle hook swallows it).
 func TestManager_LastReloadError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vortex.cue")
+	path := filepath.Join(t.TempDir(), "gubern.cue")
 	good := "cluster: { name: \"m\" }\ntls: { provider: \"internal\", acme_email: \"m@example.com\" }\n"
 	if err := os.WriteFile(path, []byte(good), 0o600); err != nil {
 		t.Fatal(err)

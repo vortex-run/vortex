@@ -69,7 +69,7 @@ func (g *AIGateway) ChatWithTools(ctx context.Context, system string, msgs []Cha
 }
 
 // ProviderTools is one configured provider as a tool-calling model, with no
-// fallback to the others: what `vortex ai probe` tests one by one.
+// fallback to the others: what `gubern ai probe` tests one by one.
 type ProviderTools struct {
 	g *AIGateway
 	p AIProvider

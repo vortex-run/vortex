@@ -35,7 +35,7 @@ func TestForge_EndpointsRequireAuth(t *testing.T) {
 
 // TestForge_DisabledWithoutAIGateway confirms graceful degradation: with no AI
 // provider configured, Forge is disabled and the endpoint returns 503 (not a
-// crash, not 404). VORTEX Forge requires an AI gateway for code generation, so
+// crash, not 404). Gubern Forge requires an AI gateway for code generation, so
 // CI (which has no provider keys) exercises this degraded path.
 func TestForge_DisabledWithoutAIGateway(t *testing.T) {
 	secret := seedAdminKey(t)

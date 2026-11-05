@@ -146,7 +146,7 @@ func providerConfigured() bool {
 	return ok
 }
 
-// newSetupCommand builds `vortex setup`.
+// newSetupCommand builds `gubern setup`.
 func newSetupCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
@@ -275,7 +275,7 @@ func runSetup(out io.Writer, in io.Reader) error {
 	}
 	setupTelegramStep(out, r, &cfg) // step 3 — telegram
 	setupEditorMode(out, r, &cfg)   // editor preference (kept from M20)
-	printAPIKeyStep(out, r)         // step 4 — VORTEX API key
+	printAPIKeyStep(out, r)         // step 4 — Gubern API key
 	setupComplete(out, &cfg)        // step 5 — summary + next steps
 	return nil
 }
@@ -299,7 +299,7 @@ func setupWelcome(out io.Writer, r *bufio.Reader) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Welcome! Let's get you set up in about 2 minutes.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "VORTEX is an AI agent that lives on your server.")
+	fmt.Fprintln(out, "Gubern is an AI agent that lives on your server.")
 	fmt.Fprintln(out, "It builds apps, manages infrastructure, researches")
 	fmt.Fprintln(out, "topics, and responds on Telegram — autonomously.")
 	fmt.Fprintln(out)
@@ -339,7 +339,7 @@ func setupProviderStep(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	for i, p := range providerCatalog {
 		fmt.Fprintf(out, "  %-2d %-13s %-8s %-11s %s\n", i+1, p.Name, p.Speed, p.Cost, p.BestFor)
 	}
-	fmt.Fprintf(out, "  %-2d %-13s %-8s %-11s %s\n", 10, "Skip for now", "", "", "Configure later: vortex setup")
+	fmt.Fprintf(out, "  %-2d %-13s %-8s %-11s %s\n", 10, "Skip for now", "", "", "Configure later: gubern setup")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  * Groq free tier: 10,000 tokens/day")
 	fmt.Fprintln(out)
@@ -358,7 +358,7 @@ func setupProviderStep(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 		setupOllama(out, r, cfg)
 	case "10", "":
 		fmt.Fprintln(out, "\nSkipping AI setup. You can configure later:")
-		fmt.Fprintln(out, "  vortex setup")
+		fmt.Fprintln(out, "  gubern setup")
 		fmt.Fprintln(out, "  or set GUBERN_ANTHROPIC_KEY=... env var")
 	default:
 		fmt.Fprintln(out, "Unrecognised choice; skipping AI setup.")
@@ -411,7 +411,7 @@ func setupKeyProvider(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig, p p
 func setupBackupKeys(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	stepHeader(out, 2, "Add backup API keys (optional)")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "VORTEX can automatically switch between multiple")
+	fmt.Fprintln(out, "Gubern can automatically switch between multiple")
 	fmt.Fprintln(out, "API keys when one hits rate limits or runs out")
 	fmt.Fprintln(out, "of budget. This keeps your tasks running 24/7.")
 	fmt.Fprintln(out)
@@ -462,7 +462,7 @@ done:
 			fmt.Fprintf(out, "  Slot %d: %s (%s)\n", i+2, catalogByID(b.Provider).Name, role)
 		}
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "VORTEX will automatically switch if a key fails.")
+		fmt.Fprintln(out, "Gubern will automatically switch if a key fails.")
 	}
 }
 
@@ -499,7 +499,7 @@ func setupTelegramStep(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	stepHeader(out, 3, "Connect Telegram (optional)")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "With Telegram you can:")
-	fmt.Fprintln(out, "• Control VORTEX from your phone")
+	fmt.Fprintln(out, "• Control Gubern from your phone")
 	fmt.Fprintln(out, "• Get task updates and alerts")
 	fmt.Fprintln(out, "• Approve agent actions remotely")
 	fmt.Fprintln(out, "• Send voice messages as commands")
@@ -507,7 +507,7 @@ func setupTelegramStep(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	fmt.Fprintln(out, "Connect Telegram now?")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  1  Yes — set it up now (recommended)")
-	fmt.Fprintln(out, "  2  Skip — set up later with: vortex setup")
+	fmt.Fprintln(out, "  2  Skip — set up later with: gubern setup")
 	fmt.Fprintln(out)
 	fmt.Fprint(out, "Type a number: ")
 	if readLine(r) != "1" {
@@ -606,10 +606,10 @@ func setupEditorMode(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	fmt.Fprintf(out, "%s Editor mode: %s\n", brand.IconSuccess, cfg.EditorMode)
 }
 
-// printAPIKeyStep creates and prints a VORTEX API key (step 4), waiting for
+// printAPIKeyStep creates and prints a Gubern API key (step 4), waiting for
 // the user to confirm they saved it.
 func printAPIKeyStep(out io.Writer, r *bufio.Reader) {
-	stepHeader(out, 4, "Your VORTEX API key")
+	stepHeader(out, 4, "Your Gubern API key")
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "%s Creating your API key...\n\n", brand.IconSpinner)
 
@@ -633,7 +633,7 @@ func printAPIKeyStep(out io.Writer, r *bufio.Reader) {
 
 	printBox(out,
 		"",
-		"Your VORTEX API Key:",
+		"Your Gubern API Key:",
 		"",
 		secret,
 		"",
@@ -642,7 +642,7 @@ func printAPIKeyStep(out io.Writer, r *bufio.Reader) {
 		"Use it for:",
 		"• Dashboard login",
 		"• API access",
-		"• vortex ui authentication",
+		"• gubern ui authentication",
 		"",
 	)
 	fmt.Fprintln(out)
@@ -656,7 +656,7 @@ func setupComplete(out io.Writer, cfg *AIProviderConfig) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "╔═══════════════════════════════════════════════════╗")
 	fmt.Fprintln(out, "║                                                   ║")
-	fmt.Fprintf(out, "║   %s VORTEX is configured and ready                ║\n", brand.IconSuccess)
+	fmt.Fprintf(out, "║   %s Gubern is configured and ready                ║\n", brand.IconSuccess)
 	fmt.Fprintln(out, "║                                                   ║")
 	fmt.Fprintln(out, "╚═══════════════════════════════════════════════════╝")
 	fmt.Fprintln(out)
@@ -668,7 +668,7 @@ func setupComplete(out io.Writer, cfg *AIProviderConfig) {
 		}
 		fmt.Fprintf(out, "  %s AI: %s\n", brand.IconSuccess, ai)
 	} else {
-		fmt.Fprintf(out, "  %s AI: skipped — configure later with: vortex setup\n", brand.IconIdle)
+		fmt.Fprintf(out, "  %s AI: skipped — configure later with: gubern setup\n", brand.IconIdle)
 	}
 	if cfg.TelegramToken != "" {
 		fmt.Fprintf(out, "  %s Telegram: connected\n", brand.IconSuccess)
@@ -680,20 +680,20 @@ func setupComplete(out io.Writer, cfg *AIProviderConfig) {
 	fmt.Fprintln(out, "Next steps:")
 	printBox(out,
 		"",
-		"Start VORTEX:",
-		"  vortex start",
+		"Start Gubern:",
+		"  gubern start",
 		"",
 		"Open the dashboard:",
 		"  http://localhost:9090/dashboard",
 		"",
 		"Open the terminal UI:",
-		"  vortex ui",
+		"  gubern ui",
 		"",
 		"Try your first task:",
-		"  vortex ui -> Agents ->",
+		"  gubern ui -> Agents ->",
 		"  \"create a hello world Python script\"",
 		"",
-		"Use VORTEX as an OpenAI-compatible backend:",
+		"Use Gubern as an OpenAI-compatible backend:",
 		"  export OPENAI_BASE_URL=http://localhost:9090/v1",
 		"  export OPENAI_API_KEY=<your-vortex-key>",
 		"",
@@ -812,7 +812,7 @@ func verifyOpenRouter(key string) string {
 		map[string]string{
 			"Authorization": "Bearer " + key,
 			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
-			"X-Title":       "VORTEX",
+			"X-Title":       "Gubern",
 		},
 		map[string]any{"model": "openai/gpt-4o", "max_tokens": 5,
 			"messages": []map[string]any{{"role": "user", "content": "hi"}}})
@@ -824,7 +824,7 @@ func verifyOpenRouter(key string) string {
 func setupBedrock(out io.Writer, r *bufio.Reader, cfg *AIProviderConfig) {
 	fmt.Fprintf(out, "\n%s Selected: AWS Bedrock\n\n", brand.IconSuccess)
 	fmt.Fprintln(out, "AWS Bedrock uses your AWS credentials (SigV4-signed requests).")
-	fmt.Fprintln(out, "Set these environment variables before starting VORTEX:")
+	fmt.Fprintln(out, "Set these environment variables before starting Gubern:")
 	fmt.Fprintln(out, "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, GUBERN_BEDROCK_REGION")
 	fmt.Fprint(out, "AWS region (default: us-east-1): ")
 	region := readLine(r)

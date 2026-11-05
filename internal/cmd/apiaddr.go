@@ -10,7 +10,7 @@ import (
 // The CLI commands that talk to a running server (stop, status, reload, ui,
 // code) must reach it where `vortex start` put it: GUBERN_API_LISTEN when set.
 // They used to assume 127.0.0.1:9090, so after moving the API (say to
-// 127.0.0.1:9191) `vortex stop` on Windows, which shuts down through the API,
+// 127.0.0.1:9191) `gubern stop` on Windows, which shuts down through the API,
 // could no longer stop the server, and status/reload looked at the wrong port.
 
 // defaultAPIPort is the management API port from GUBERN_API_LISTEN, or 9090.

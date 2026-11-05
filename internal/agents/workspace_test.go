@@ -178,10 +178,10 @@ func TestWriteLocalFile_AutoModeWaivesInScopeApproval(t *testing.T) {
 func TestWriteLocalFile_AutoModeKeepsApprovalForSensitivePaths(t *testing.T) {
 	gated := []string{
 		".git/hooks/pre-commit", ".git/config", ".GIT/hooks/pre-push", "sub/.git/config",
-		".githooks/pre-commit", ".husky/pre-commit", "vortex.cue", "conf/VORTEX.CUE",
+		".githooks/pre-commit", ".husky/pre-commit", "gubern.cue", "conf/Gubern.CUE",
 		".git./config", ".git /config", "git~1/config",
 	}
-	waived := []string{"src/hook.go", ".gitignore", ".github/notes.md", "git/config", "vortex.cue.bak"}
+	waived := []string{"src/hook.go", ".gitignore", ".github/notes.md", "git/config", "gubern.cue.bak"}
 	root := t.TempDir()
 	cfg := LocalFSConfig{Root: root, TrustedRoot: root, AutoMode: true}
 	tool := WriteLocalFileTool{cfg: cfg, RequireApproval: true}

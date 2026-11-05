@@ -22,12 +22,12 @@ import (
 // response means the code view renders it inline like an agent message instead
 // of failing silently. ConnectionErrorPrefix lets callers detect it.
 const (
-	ConnectionErrorPrefix  = "✗ Cannot reach VORTEX server"
+	ConnectionErrorPrefix  = "✗ Cannot reach Gubern server"
 	ConnectionErrorMessage = ConnectionErrorPrefix + "\n\n" +
 		"Start the server first:\n" +
 		"  task start:team    (with agent team)\n" +
 		"  task start         (single agent mode)\n\n" +
-		"Then run: vortex code"
+		"Then run: gubern code"
 )
 
 // ClientConfig configures the TUI's API client.
@@ -37,7 +37,7 @@ type ClientConfig struct {
 	Timeout time.Duration // default 5s
 }
 
-// Client talks to a running VORTEX management server, returning typed data.
+// Client talks to a running Gubern management server, returning typed data.
 type Client struct {
 	cfg  ClientConfig
 	http *http.Client
@@ -780,7 +780,7 @@ func (c *Client) IsConnected() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// APIKeyFilePath returns the path where `vortex setup` persists the plaintext
+// APIKeyFilePath returns the path where `gubern setup` persists the plaintext
 // API key for the TUI to read back: <user-config>/vortex/tui-key. The apikeys
 // store only holds bcrypt hashes (the raw secret is unrecoverable from it), so
 // the setup wizard writes the secret here once for the local dashboard/TUI.

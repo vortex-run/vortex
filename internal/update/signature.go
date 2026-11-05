@@ -103,7 +103,7 @@ func decodeSignature(b []byte) ([]byte, error) {
 	return sig, nil
 }
 
-// fetchBytes GETs a URL with the VORTEX User-Agent and returns its body.
+// fetchBytes GETs a URL with the Gubern User-Agent and returns its body.
 func fetchBytes(ctx context.Context, url string) ([]byte, error) {
 	resp, err := httpGet(ctx, url)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Package api hosts VORTEX's management HTTP server. In M1.2 this is just a
+// Package api hosts Gubern's management HTTP server. In M1.2 this is just a
 // health endpoint that reports liveness and the active config hash, so a reload
 // can be verified externally (e.g. curl localhost:9090/health). It is built on
 // net/http from the standard library (Non-Negotiable Rule #10).
@@ -97,7 +97,7 @@ type Server struct {
 	// webhooks maps /webhook/<platform> paths to rate-limited, signature-self-
 	// verifying handlers (Telegram/WhatsApp/Slack). Set via SetWebhooks.
 	webhooks map[string]http.Handler
-	// studioHandler serves the VORTEX Studio tree under /studio/ (auth-gated).
+	// studioHandler serves the Gubern Studio tree under /studio/ (auth-gated).
 	studioHandler http.Handler
 
 	reloadMu   sync.Mutex
@@ -147,7 +147,7 @@ type Server struct {
 	checkpoints CheckpointProvider
 
 	// trustLoopback controls whether loopback callers bypass auth on the
-	// control plane. Default true (on-box `vortex reload`/`stop` work without a
+	// control plane. Default true (on-box `gubern reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
 	// every request presents a loopback RemoteAddr and the bypass would expose
 	// the control plane (production audit M1). The destructive
@@ -397,7 +397,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// (if one has been wired via SetAuth) so a missing/invalid credential is
 	// rejected before the handler runs.
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
-	// /internal/shutdown is the SIGTERM equivalent used by `vortex stop` from
+	// /internal/shutdown is the SIGTERM equivalent used by `gubern stop` from
 	// the same host, so it honours loopback trust like reload. Operators behind
 	// a same-host reverse proxy set GUBERN_TRUST_LOOPBACK=false to require a
 	// credential here too (production audit M1) — see protected().
@@ -441,7 +441,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/agents/history", s.requireAPIKey(http.HandlerFunc(s.handleAgentHistory)))
 	mux.Handle("GET /api/agents/history/{id}", s.requireAPIKey(http.HandlerFunc(s.handleAgentSessionHistory)))
 
-	// VORTEX Forge (M13) — autonomous app builder. Data-plane: requires a key.
+	// Gubern Forge (M13) — autonomous app builder. Data-plane: requires a key.
 	mux.Handle("POST /api/forge/build", s.requireAPIKey(http.HandlerFunc(s.handleForgeBuild)))
 	mux.Handle("GET /api/forge/status/{id}", s.requireAPIKey(http.HandlerFunc(s.handleForgeStatus)))
 	mux.Handle("GET /api/forge/jobs", s.requireAPIKey(http.HandlerFunc(s.handleForgeJobs)))
@@ -453,7 +453,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/notify", s.requireAPIKey(http.HandlerFunc(s.handleNotify)))
 
 	// OpenAI-compatible surface (upgrade 3): lets any OpenAI-speaking tool
-	// (Claude Code, Aider, Cline, Cursor) use VORTEX as its AI backend. Data
+	// (Claude Code, Aider, Cline, Cursor) use Gubern as its AI backend. Data
 	// plane — requires a key (Bearer or X-API-Key) even from localhost.
 	mux.Handle("GET /v1/models", s.requireAPIKey(http.HandlerFunc(s.handleOpenAIModels)))
 	mux.Handle("POST /v1/chat/completions", s.requireAPIKey(http.HandlerFunc(s.handleChatCompletions)))
@@ -464,7 +464,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// route through the same dispatcher.
 	mux.HandleFunc("/webhook/", s.handleWebhook)
 
-	// VORTEX Studio (M12): browser IDE/terminal/db/git, auth-gated.
+	// Gubern Studio (M12): browser IDE/terminal/db/git, auth-gated.
 	mux.HandleFunc("/studio/", s.handleStudio)
 
 	// A2A protocol tree (agent teams). Not behind API-key auth: the handler set
@@ -622,7 +622,7 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 // protected wraps h with the auth middleware (if wired) — except for loopback
 // requests, which are allowed through without a credential WHEN loopback trust
 // is enabled (the default). The /internal/* control-plane endpoints stand in
-// for SIGHUP/SIGTERM used by `vortex reload`/`stop`, so an on-box call is
+// for SIGHUP/SIGTERM used by `gubern reload`/`stop`, so an on-box call is
 // implicitly trusted. Operators behind a same-host reverse proxy disable the
 // bypass with GUBERN_TRUST_LOOPBACK=false (production audit M1). With no auth
 // wired the handler runs unchanged.
@@ -765,7 +765,7 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 // Listen binds the management address now, so a busy port is a startup
 // error instead of a log line from a goroutine. Without it the process kept
 // running with no management API: no /health, no auth'd API, and on Windows
-// no way for `vortex stop` (which goes through /internal/shutdown) to reach it.
+// no way for `gubern stop` (which goes through /internal/shutdown) to reach it.
 func (s *Server) Listen() error {
 	ln, err := net.Listen("tcp", s.srv.Addr)
 	if err != nil {

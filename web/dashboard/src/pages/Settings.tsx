@@ -74,7 +74,7 @@ export function Settings() {
       {confirmShutdown && (
         <div className="fixed inset-0 z-40 grid place-items-center bg-black/50">
           <div className="w-96 rounded-lg border border-border bg-card p-5">
-            <div className="font-semibold">Shut down VORTEX?</div>
+            <div className="font-semibold">Shut down Gubern?</div>
             <p className="mt-1 text-sm text-muted-foreground">
               This stops the server. You'll need shell access to restart it.
             </p>

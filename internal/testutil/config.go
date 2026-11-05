@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// MinimalConfig is a valid vortex.cue using only localhost backends and ports
+// MinimalConfig is a valid gubern.cue using only localhost backends and ports
 // unlikely to collide. It is the baseline config for integration tests.
 const MinimalConfig = `cluster: {
 	name: "test-cluster"

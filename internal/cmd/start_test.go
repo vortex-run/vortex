@@ -27,7 +27,7 @@ func TestStartPidfileFlagDefault(t *testing.T) {
 
 func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "vortex.cue")
+	cfgPath := filepath.Join(dir, "gubern.cue")
 	// A local-only config: the internal CA (Let's Encrypt would start the ACME
 	// challenge server on :80, all interfaces), no routes (no public edge
 	// listeners), and a single node (no gossip toward peer IPs). Anything that
@@ -41,7 +41,7 @@ tls: {provider: "internal", acme_email: "test@example.com"}
 	if err := os.WriteFile(cfgPath, []byte(localOnlyConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pidPath := filepath.Join(dir, "vortex.pid")
+	pidPath := filepath.Join(dir, "gubern.pid")
 
 	// Point the global config flag at our temp config and initialise the logger
 	// (normally done by PersistentPreRunE).

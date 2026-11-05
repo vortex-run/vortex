@@ -13,26 +13,26 @@ import (
 	tuiapp "github.com/vortex-run/vortex/internal/tui/app"
 )
 
-// errUINotRunning signals that `vortex ui` found no running server (and was not
+// errUINotRunning signals that `gubern ui` found no running server (and was not
 // asked to start one); the message was already printed, so Execute exits 1
 // without an extra generic log line.
 var errUINotRunning = errors.New("ui: vortex is not running")
 
-// newUICommand builds `vortex ui`.
+// newUICommand builds `gubern ui`.
 func newUICommand() *cobra.Command {
 	var addr, key string
 	var start bool
 	c := &cobra.Command{
 		Use:   "ui",
-		Short: "Open the VORTEX terminal dashboard",
+		Short: "Open the Gubern terminal dashboard",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runUI(cmd.Context(), addr, key, start)
 		},
 	}
-	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "VORTEX API address (default from GUBERN_API_LISTEN)")
+	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "Gubern API address (default from GUBERN_API_LISTEN)")
 	c.Flags().StringVar(&key, "key", "", "API key (reads GUBERN_API_KEY if empty)")
-	c.Flags().BoolVar(&start, "start", false, "start an embedded server if VORTEX is not running")
+	c.Flags().BoolVar(&start, "start", false, "start an embedded server if Gubern is not running")
 	return c
 }
 
@@ -45,9 +45,9 @@ func runUI(ctx context.Context, addr, key string, start bool) error {
 
 	if !client.IsConnected() {
 		if !start {
-			fmt.Println("VORTEX is not running.")
-			fmt.Println("Start it with: vortex start")
-			fmt.Println("Or run:        vortex ui --start")
+			fmt.Println("Gubern is not running.")
+			fmt.Println("Start it with: gubern start")
+			fmt.Println("Or run:        gubern ui --start")
 			return errUINotRunning
 		}
 		if err := startEmbeddedServer(ctx, client); err != nil {

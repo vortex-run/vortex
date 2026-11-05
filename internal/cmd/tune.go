@@ -23,7 +23,7 @@ func benchBaselinePath() string {
 	return filepath.Join(userdir.App(cacheDir), "bench-baseline.json")
 }
 
-// newTuneCommand builds `vortex tune` with show/apply/bench subcommands.
+// newTuneCommand builds `gubern tune` with show/apply/bench subcommands.
 func newTuneCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "tune",

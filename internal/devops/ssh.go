@@ -1,4 +1,4 @@
-// Package devops implements VORTEX's DevOps agent (build plan M16): SSH-based
+// Package devops implements Gubern's DevOps agent (build plan M16): SSH-based
 // VPS management — running commands, transferring files, and driving Docker and
 // Nginx on remote servers. It uses golang.org/x/crypto/ssh (already a
 // dependency); file transfer is done over an SSH exec session (base64 stream)

@@ -28,7 +28,7 @@ func TestNewFriendly_RateLimit(t *testing.T) {
 		if fe.Code != "AI_RATE_LIMIT" {
 			t.Errorf("%q → code %q, want AI_RATE_LIMIT", in, fe.Code)
 		}
-		if !strings.Contains(fe.Fix, "vortex keys add") {
+		if !strings.Contains(fe.Fix, "gubern keys add") {
 			t.Errorf("%q fix should suggest backup keys: %q", in, fe.Fix)
 		}
 	}
@@ -48,7 +48,7 @@ func TestNewFriendly_InvalidKey(t *testing.T) {
 		if fe.Code != "AI_AUTH" {
 			t.Errorf("%q → code %q, want AI_AUTH", in, fe.Code)
 		}
-		if !strings.Contains(fe.Fix, "vortex setup") {
+		if !strings.Contains(fe.Fix, "gubern setup") {
 			t.Errorf("%q fix should suggest setup: %q", in, fe.Fix)
 		}
 	}
@@ -59,7 +59,7 @@ func TestNewFriendly_MissingSecret(t *testing.T) {
 	if fe.Code != "SECRET_MISSING" {
 		t.Fatalf("code = %q, want SECRET_MISSING", fe.Code)
 	}
-	if !strings.Contains(fe.Fix, "vortex secret set db_password") {
+	if !strings.Contains(fe.Fix, "gubern secret set db_password") {
 		t.Errorf("fix should name the exact command: %q", fe.Fix)
 	}
 }
@@ -85,7 +85,7 @@ func TestNewFriendly_ConnectionRefused(t *testing.T) {
 }
 
 func TestNewFriendly_PermissionDenied(t *testing.T) {
-	fe := NewFriendly(errors.New("open /etc/vortex/vortex.cue: permission denied"))
+	fe := NewFriendly(errors.New("open /etc/vortex/gubern.cue: permission denied"))
 	if fe.Code != "PERM_DENIED" {
 		t.Errorf("code = %q, want PERM_DENIED", fe.Code)
 	}

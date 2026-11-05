@@ -46,7 +46,7 @@ func authedServer(t *testing.T) (*Server, string) {
 }
 
 func TestInternalShutdown_LoopbackTrustedByDefault(t *testing.T) {
-	// Default loopback trust: `vortex stop` posts keyless from the same host
+	// Default loopback trust: `gubern stop` posts keyless from the same host
 	// and must succeed (the SIGTERM equivalent).
 	t.Setenv("GUBERN_TRUST_LOOPBACK", "")
 	s, _ := authedServer(t)
@@ -55,7 +55,7 @@ func TestInternalShutdown_LoopbackTrustedByDefault(t *testing.T) {
 	called := make(chan struct{}, 1)
 	s.SetShutdownFunc(func() { called <- struct{}{} })
 
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/internal/shutdown", nil) // as `vortex stop` sends it
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/internal/shutdown", nil) // as `gubern stop` sends it
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec := serve(s, req)
 	if rec.Code == http.StatusUnauthorized {

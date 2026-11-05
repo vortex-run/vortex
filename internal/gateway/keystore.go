@@ -1,4 +1,4 @@
-// Package gateway implements VORTEX's autonomous API-key rotation: persistent
+// Package gateway implements Gubern's autonomous API-key rotation: persistent
 // key slots with health scoring, intelligent routing across slots, and context
 // preservation when switching providers mid-session. A degraded or rate-limited
 // key is automatically replaced by the next healthy slot without losing the

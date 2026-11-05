@@ -1,4 +1,4 @@
-// Package views implements the individual screens of the VORTEX terminal UI.
+// Package views implements the individual screens of the Gubern terminal UI.
 // Each screen is a Bubble Tea model (Init/Update/View). This file is the
 // Overview (home) screen.
 package views

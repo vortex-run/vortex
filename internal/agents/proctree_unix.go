@@ -33,7 +33,7 @@ func setProcessGroup(cmd *exec.Cmd) {
 //
 // Signalling the negative PID addresses the process GROUP, which is why
 // setProcessGroup must have run first — otherwise the negative PID would
-// address this server's own group and kill VORTEX along with the command.
+// address this server's own group and kill Gubern along with the command.
 // That is also why it refuses to act when the group was never set up, rather
 // than falling back to something that could take the server down.
 func killProcessTree(cmd *exec.Cmd) {

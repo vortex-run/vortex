@@ -1,4 +1,4 @@
-// Package healing implements VORTEX's self-healing infrastructure (build plan
+// Package healing implements Gubern's self-healing infrastructure (build plan
 // M14): health monitoring of routes and subsystems, automatic recovery actions,
 // a process watchdog, and SLO-breach alerting. Everything is stdlib-only.
 //

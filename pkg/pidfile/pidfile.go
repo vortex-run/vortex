@@ -1,4 +1,4 @@
-// Package pidfile manages VORTEX's PID file: a small text file holding the
+// Package pidfile manages Gubern's PID file: a small text file holding the
 // running server's process ID. It is used to coordinate the start/stop/status/
 // reload CLI commands and to prevent two servers from running against the same
 // pidfile.
@@ -159,7 +159,7 @@ func IsRunning(path string) (bool, int, error) {
 }
 
 // FileLock is an advisory exclusive lock held on a lock file adjacent to the
-// pidfile. It prevents two `vortex start` processes from racing to claim the
+// pidfile. It prevents two `gubern start` processes from racing to claim the
 // same pidfile. Release it with Unlock. (Named FileLock rather than Lock so the
 // Lock acquisition function can keep that name.)
 type FileLock struct {

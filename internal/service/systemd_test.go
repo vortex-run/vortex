@@ -6,7 +6,7 @@ import (
 )
 
 func TestGenerateSystemdHasSections(t *testing.T) {
-	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue"))
+	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue"))
 	for _, section := range []string{"[Unit]", "[Service]", "[Install]"} {
 		if !strings.Contains(out, section) {
 			t.Errorf("unit file missing section %q\n%s", section, out)
@@ -15,28 +15,28 @@ func TestGenerateSystemdHasSections(t *testing.T) {
 }
 
 func TestGenerateSystemdExecStart(t *testing.T) {
-	out := GenerateSystemd(DefaultSystemdConfig("/opt/vortex/vortex", "/etc/vortex/vortex.cue"))
-	if !strings.Contains(out, "ExecStart=/opt/vortex/vortex start --config /etc/vortex/vortex.cue") {
+	out := GenerateSystemd(DefaultSystemdConfig("/opt/vortex/vortex", "/etc/vortex/gubern.cue"))
+	if !strings.Contains(out, "ExecStart=/opt/vortex/vortex start --config /etc/vortex/gubern.cue") {
 		t.Errorf("ExecStart line incorrect:\n%s", out)
 	}
 }
 
 func TestGenerateSystemdExecReloadHUP(t *testing.T) {
-	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue"))
+	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue"))
 	if !strings.Contains(out, "ExecReload=/bin/kill -HUP $MAINPID") {
 		t.Errorf("ExecReload should send -HUP:\n%s", out)
 	}
 }
 
 func TestGenerateSystemdLimitNOFILE(t *testing.T) {
-	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue"))
+	out := GenerateSystemd(DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue"))
 	if !strings.Contains(out, "LimitNOFILE=65536") {
 		t.Errorf("LimitNOFILE=65536 missing:\n%s", out)
 	}
 }
 
 func TestGenerateSystemdUserGroup(t *testing.T) {
-	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue")
+	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue")
 	cfg.User = "svc-user"
 	cfg.Group = "svc-group"
 	out := GenerateSystemd(cfg)
@@ -49,20 +49,20 @@ func TestGenerateSystemdUserGroup(t *testing.T) {
 }
 
 func TestGenerateSystemdCustomDescription(t *testing.T) {
-	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue")
-	cfg.Description = "My Custom VORTEX"
+	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue")
+	cfg.Description = "My Custom Gubern"
 	out := GenerateSystemd(cfg)
-	if !strings.Contains(out, "Description=My Custom VORTEX") {
+	if !strings.Contains(out, "Description=My Custom Gubern") {
 		t.Errorf("custom description not reflected:\n%s", out)
 	}
 }
 
 func TestDefaultSystemdConfig(t *testing.T) {
-	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/vortex.cue")
+	cfg := DefaultSystemdConfig("/usr/local/bin/vortex", "/etc/vortex/gubern.cue")
 	if cfg.ExecPath != "/usr/local/bin/vortex" {
 		t.Errorf("ExecPath = %q", cfg.ExecPath)
 	}
-	if cfg.ConfigPath != "/etc/vortex/vortex.cue" {
+	if cfg.ConfigPath != "/etc/vortex/gubern.cue" {
 		t.Errorf("ConfigPath = %q", cfg.ConfigPath)
 	}
 	if cfg.User != "gubern" {

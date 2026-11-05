@@ -10,14 +10,14 @@ import (
 	"github.com/vortex-run/vortex/internal/config"
 )
 
-// newCheckCommand builds `vortex check`, which validates the config file named
+// newCheckCommand builds `gubern check`, which validates the config file named
 // by the global --config flag without starting any server. On success it prints
 // a per-section checklist and exits 0; on failure it prints each problem with
 // field path and file:line:col to stderr and exits 1 (via a returned error).
 func newCheckCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
-		Short: "Validate vortex.cue without starting the server",
+		Short: "Validate gubern.cue without starting the server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(flags.configPath)

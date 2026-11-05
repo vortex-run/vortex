@@ -179,7 +179,7 @@ func TestEnvOverrideAgentsLocalTools(t *testing.T) {
 		"GUBERN_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT": trusted,
 		"GUBERN_AGENTS_LOCAL_TOOLS_AUTO_MODE":    "true",
 	}
-	cfg, err := loadFromBytes(filepath.Join(work, "vortex.cue"), []byte(validConfig), schemaBytes(), env)
+	cfg, err := loadFromBytes(filepath.Join(work, "gubern.cue"), []byte(validConfig), schemaBytes(), env)
 	if err != nil {
 		t.Fatalf("loadFromBytes: %v", err)
 	}

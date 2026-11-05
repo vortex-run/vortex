@@ -16,7 +16,7 @@ import (
 // errSkills signals that some skills failed to load; the detail was printed.
 var errSkills = errors.New("some skills could not be loaded")
 
-// newSkillsCommand builds `vortex skills`, for inspecting the Agent Skills
+// newSkillsCommand builds `gubern skills`, for inspecting the Agent Skills
 // (SKILL.md folders) that /agent offers to the model.
 func newSkillsCommand() *cobra.Command {
 	c := &cobra.Command{

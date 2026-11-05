@@ -1,4 +1,4 @@
-// Package secrets implements VORTEX's encrypted secret store (build plan M3.2):
+// Package secrets implements Gubern's encrypted secret store (build plan M3.2):
 // a key-value store for arbitrary secret strings (database passwords, API keys,
 // JWT secrets) encrypted at rest with XChaCha20-Poly1305. It is distinct from
 // the vtls cert store — that holds TLS certificates; this holds secret values

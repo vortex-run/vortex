@@ -19,7 +19,7 @@ import (
 // errProbe signals that a probe check failed; the detail was already printed.
 var errProbe = errors.New("one or more providers failed the tool-use probe")
 
-// newAICommand builds `vortex ai`, for checking the configured AI providers.
+// newAICommand builds `gubern ai`, for checking the configured AI providers.
 func newAICommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "ai",
@@ -29,7 +29,7 @@ func newAICommand() *cobra.Command {
 	return c
 }
 
-// newAIProbeCommand builds `vortex ai probe`: run the tool-use checks /agent
+// newAIProbeCommand builds `gubern ai probe`: run the tool-use checks /agent
 // depends on against each configured provider, so a model that can't drive
 // the agent loop is found before a task relies on it.
 func newAIProbeCommand() *cobra.Command {
@@ -38,7 +38,7 @@ func newAIProbeCommand() *cobra.Command {
 		Use:   "probe",
 		Short: "Check that each AI provider can drive /agent (tool calling)",
 		Long: "Sends a few small requests to each configured provider (the same env vars\n" +
-			"and setup file `vortex start` uses) and checks: it calls a tool, uses\n" +
+			"and setup file `gubern start` uses) and checks: it calls a tool, uses\n" +
 			"schema-typed arguments, reads a tool result back, and ignores an\n" +
 			"instruction planted in a tool result. Nothing is executed. Each provider\n" +
 			"costs a few short model calls.",

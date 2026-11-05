@@ -1,10 +1,10 @@
 //go:build demo
 
-// Command backends runs the throwaway upstream services that the VORTEX demo
+// Command backends runs the throwaway upstream services that the Gubern demo
 // environment proxies to (scripts/demo/README.md).
 //
 // It exists so a recorded demo shows a working system. The checked-in
-// vortex.cue points at 10.0.0.2 and myapp.com, which resolve to nothing, so
+// gubern.cue points at 10.0.0.2 and myapp.com, which resolve to nothing, so
 // every health check renders red and the Routes view is a wall of failures —
 // accurate for a config template, useless for a screen recording.
 //

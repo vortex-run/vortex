@@ -275,7 +275,7 @@ func agentLabel(id string) string {
 	case "user":
 		return "You"
 	case "":
-		return "VORTEX"
+		return "Gubern"
 	default:
 		return id
 	}

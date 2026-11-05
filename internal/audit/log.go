@@ -1,4 +1,4 @@
-// Package audit implements VORTEX's tamper-proof audit log (build plan M3.6): an
+// Package audit implements Gubern's tamper-proof audit log (build plan M3.6): an
 // append-only, HMAC-SHA256 hash-chained record of security-relevant events. Each
 // entry's hash covers the previous entry's hash, so removing, reordering, or
 // modifying any entry breaks the chain and is detected by Verify. It uses only

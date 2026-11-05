@@ -1,4 +1,4 @@
-// Package security implements VORTEX's edge protection (build plan M3.7): an
+// Package security implements Gubern's edge protection (build plan M3.7): an
 // HTTP-layer token-bucket rate limiter keyed per client IP, an IP
 // allowlist/blocklist with Tor-exit and auto-ban support, and an edge
 // middleware that composes them. It is distinct from the M2.5 UDP rate limiter,
@@ -540,7 +540,7 @@ func (b *BurstProtection) Allow(ip string) bool {
 		"ip", ip, "threshold", b.cfg.Threshold,
 		"window", b.cfg.Window.String(), "ban", b.cfg.BanFor.String())
 	if notify != nil {
-		go notify("🚨 VORTEX burst protection",
+		go notify("🚨 Gubern burst protection",
 			"IP "+ip+" exceeded "+strconv.Itoa(b.cfg.Threshold)+
 				" requests in "+b.cfg.Window.String()+
 				" — banned for "+b.cfg.BanFor.String())

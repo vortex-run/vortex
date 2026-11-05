@@ -47,7 +47,7 @@ func ExportSplunk(log *Log, filter QueryFilter, w io.Writer) error {
 }
 
 // ExportSyslog writes the filtered entries in RFC 5424 syslog format, one line
-// per entry. VORTEX audit events use facility 13 (log audit) and severity 6
+// per entry. Gubern audit events use facility 13 (log audit) and severity 6
 // (informational), giving PRI = 13*8 + 6 = 110.
 func ExportSyslog(log *Log, filter QueryFilter, w io.Writer) error {
 	entries, err := log.Query(filter)

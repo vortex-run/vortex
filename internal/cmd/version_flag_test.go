@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestRoot_VersionFlag: `vortex --version` must exit 0. Self-update in
+// TestRoot_VersionFlag: `gubern --version` must exit 0. Self-update in
 // released binaries (v0.3.0 and earlier) verifies a downloaded binary by
 // running it with --version; if the new binary rejects the flag, every
 // update from those versions rolls back.

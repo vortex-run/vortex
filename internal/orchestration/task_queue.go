@@ -1,4 +1,4 @@
-// Package orchestration implements VORTEX's multi-agent orchestration (build
+// Package orchestration implements Gubern's multi-agent orchestration (build
 // plan M18): decomposing a goal into tasks (planner), running them with
 // dependency + concurrency control (orchestrator), a shared key/value memory,
 // a dependency-aware task queue, and a SQLite-backed run store for crash

@@ -23,7 +23,7 @@ import (
 // The backups used to live in os.TempDir()/vortex-backups, a fixed path in a
 // directory every local user can write on Linux and macOS: another user could
 // create it first and plant a backup whose metadata names any file the
-// VORTEX user can write (an undo then overwrites it), or symlink it elsewhere.
+// Gubern user can write (an undo then overwrites it), or symlink it elsewhere.
 // The session ID was also used as a path element unchecked ("../.." escaped).
 
 // maxBackupsPerSession bounds retained backups per session.

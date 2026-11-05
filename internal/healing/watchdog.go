@@ -13,12 +13,12 @@ import (
 )
 
 // WatchdogConfig configures the process watchdog. The watchdog runs as a
-// SEPARATE process (vortex watchdog) watching the main vortex via its pidfile;
+// SEPARATE process (gubern watchdog) watching the main vortex via its pidfile;
 // it restarts vortex if the process disappears.
 type WatchdogConfig struct {
 	PIDFile         string        // vortex pidfile path
 	BinaryPath      string        // path to the vortex binary
-	ConfigPath      string        // vortex.cue path
+	ConfigPath      string        // gubern.cue path
 	HealthURL       string        // readiness probe (default http://localhost:9090/health)
 	RestartDelay    time.Duration // wait before restart (default 5s)
 	MaxRestarts     int           // max restarts per hour (default 10)
@@ -90,7 +90,7 @@ func (w *Watchdog) Watch(ctx context.Context) error {
 			w.cfg.log.Warn("watchdog: vortex process not running", "pidfile", w.cfg.PIDFile)
 			if !w.allowRestart() {
 				w.cfg.log.Error("watchdog: max restarts exceeded, giving up", "max", w.cfg.MaxRestarts)
-				w.notify(ctx, "critical", "VORTEX Watchdog",
+				w.notify(ctx, "critical", "Gubern Watchdog",
 					fmt.Sprintf("⛔ vortex down and max restarts (%d/hr) exceeded — not restarting.", w.cfg.MaxRestarts))
 				continue
 			}
@@ -132,19 +132,19 @@ func (w *Watchdog) restart(ctx context.Context) {
 
 	if err := w.cfg.spawn(ctx); err != nil {
 		w.cfg.log.Error("watchdog: restart failed to launch", "err", err)
-		w.notify(ctx, "critical", "VORTEX Watchdog", "❌ vortex restart failed to launch: "+err.Error())
+		w.notify(ctx, "critical", "Gubern Watchdog", "❌ vortex restart failed to launch: "+err.Error())
 		return
 	}
 	if w.cfg.waitUp(ctx, w.cfg.HealthURL) {
 		w.cfg.log.Info("watchdog: vortex restarted and healthy")
-		w.notify(ctx, "info", "VORTEX Watchdog", "🔄 vortex was down and has been restarted (now healthy).")
+		w.notify(ctx, "info", "Gubern Watchdog", "🔄 vortex was down and has been restarted (now healthy).")
 	} else {
 		w.cfg.log.Error("watchdog: vortex restarted but did not become healthy")
-		w.notify(ctx, "critical", "VORTEX Watchdog", "⚠️ vortex restarted but /health did not return 200 within 30s.")
+		w.notify(ctx, "critical", "Gubern Watchdog", "⚠️ vortex restarted but /health did not return 200 within 30s.")
 	}
 }
 
-// launchVortex starts `vortex start --config <cfg>` detached.
+// launchVortex starts `gubern start --config <cfg>` detached.
 func (w *Watchdog) launchVortex(_ context.Context) error {
 	cmd := exec.Command(w.cfg.BinaryPath, "start", "--config", w.cfg.ConfigPath) //nolint:gosec // configured paths
 	cmd.Stdout = os.Stdout

@@ -7,7 +7,7 @@ import (
 
 // Adapter is a pluggable secret backend. The local store and the external
 // providers (Vault, AWS SSM, GCP Secret Manager) all satisfy it, so the rest of
-// VORTEX resolves secrets through one interface regardless of where they live.
+// Gubern resolves secrets through one interface regardless of where they live.
 type Adapter interface {
 	Get(ctx context.Context, name string) (string, error)
 	Set(ctx context.Context, name, value string) error

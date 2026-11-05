@@ -15,7 +15,7 @@ func envMap(env []string) map[string]string {
 }
 
 // Forge builds run generated code (Gradle scripts, cgo). They need toolchain
-// settings but must never see VORTEX's secrets.
+// settings but must never see Gubern's secrets.
 func TestBuildEnv_KeepsToolchainDropsSecrets(t *testing.T) {
 	t.Setenv("GUBERN_ANTHROPIC_KEY", "sk-secret")
 	t.Setenv("GUBERN_TELEGRAM_TOKEN", "123:abc")

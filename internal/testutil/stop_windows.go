@@ -12,7 +12,7 @@ import (
 // stopProcess triggers shutdown via the localhost-only /internal/shutdown
 // endpoint (Windows has no SIGTERM), then waits for the child process to exit.
 //
-// It posts directly rather than shelling out to `vortex stop`: that subcommand
+// It posts directly rather than shelling out to `gubern stop`: that subcommand
 // runs its own liveness poll against the pidfile, which races the test's
 // not-yet-reaped child process on Windows and can spuriously time out. Posting
 // here and waiting on p.Cmd.Wait observes the real exit.

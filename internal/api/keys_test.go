@@ -158,7 +158,7 @@ func TestAPI_InternalReloadLocalhostNoAuth(t *testing.T) {
 	s.SetReloadFunc(func() error { return nil })
 	// A loopback reload needs no key (control plane); the handler's own
 	// localhost check governs access.
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/internal/reload", nil) // as `vortex reload` sends it
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/internal/reload", nil) // as `gubern reload` sends it
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec := serve(s, req)
 	if rec.Code != http.StatusOK {

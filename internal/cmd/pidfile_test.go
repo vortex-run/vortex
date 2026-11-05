@@ -10,7 +10,7 @@ import (
 // TestRemoveOwnPIDFile: shutdown removes the pidfile only while it still
 // names this process, never another instance's.
 func TestRemoveOwnPIDFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "vortex.pid")
+	p := filepath.Join(t.TempDir(), "gubern.pid")
 
 	if err := os.WriteFile(p, []byte("1\n"), 0o644); err != nil { // someone else's
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestRemoveOwnPIDFile(t *testing.T) {
 // TestWritePIDFile_RefusesLiveOwner: a second start must not overwrite a
 // running instance's pidfile.
 func TestWritePIDFile_RefusesLiveOwner(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "vortex.pid")
+	p := filepath.Join(t.TempDir(), "gubern.pid")
 	if err := os.WriteFile(p, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -144,7 +144,7 @@ var autoModeSensitiveDirs = map[string]bool{
 }
 
 // autoModeSensitive reports whether a path inside trustedRoot must keep its
-// approval prompt under Auto Mode: hook directories, and vortex.cue, which
+// approval prompt under Auto Mode: hook directories, and gubern.cue, which
 // could widen trusted_root or auto_mode on the next restart. Paths it cannot
 // relate to the root count as sensitive.
 func autoModeSensitive(trustedRoot, resolved string) bool {

@@ -28,6 +28,6 @@ func TestRoot_RefusesStatefulCommandsWithoutUserDirs(t *testing.T) {
 		}
 	}
 	if err := run("version"); err != nil {
-		t.Errorf("vortex version: %v, want it to work without user dirs", err)
+		t.Errorf("gubern version: %v, want it to work without user dirs", err)
 	}
 }

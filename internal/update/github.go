@@ -1,4 +1,4 @@
-// Package update implements VORTEX's self-update machinery: querying the GitHub
+// Package update implements Gubern's self-update machinery: querying the GitHub
 // releases API, downloading and verifying release archives, and atomically
 // hot-swapping the running binary. It is split from the CLI command so the
 // logic is testable without a terminal and reusable by future agents (e.g. the
@@ -63,7 +63,7 @@ type ghAsset struct {
 	Size        int64  `json:"size"`
 }
 
-// httpGet issues a GET with the VORTEX User-Agent under ctx.
+// httpGet issues a GET with the Gubern User-Agent under ctx.
 func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

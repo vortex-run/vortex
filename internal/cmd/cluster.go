@@ -14,7 +14,7 @@ import (
 // errCluster signals a cluster-command failure whose detail was already printed.
 var errCluster = errors.New("cluster command failed")
 
-// newClusterCommand builds `vortex cluster` with status/join/leave subcommands.
+// newClusterCommand builds `gubern cluster` with status/join/leave subcommands.
 func newClusterCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "cluster",
@@ -92,7 +92,7 @@ func newClusterLeaveCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"To leave the cluster, stop this node with `vortex stop`; it broadcasts a graceful gossip leave on shutdown.\n")
+				"To leave the cluster, stop this node with `gubern stop`; it broadcasts a graceful gossip leave on shutdown.\n")
 			return nil
 		},
 	}

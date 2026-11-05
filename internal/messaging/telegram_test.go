@@ -313,7 +313,7 @@ func TestTelegram_HandleCommandHooks(t *testing.T) {
 	f := newFakeTelegram(t)
 	bot := newTestBot(t, f, TelegramConfig{AllowedIDs: []int64{7}})
 	bot.SetCommandHooks(CommandHooks{
-		Status: func() string { return "VORTEX ok" },
+		Status: func() string { return "Gubern ok" },
 		Cost:   func() string { return "free" },
 		List:   func(string) string { return "files: a b" },
 		Approve: func(_ string, ok bool) (string, bool) {
@@ -324,10 +324,10 @@ func TestTelegram_HandleCommandHooks(t *testing.T) {
 		},
 	})
 	cases := map[string]string{
-		"/status":  "VORTEX ok",
+		"/status":  "Gubern ok",
 		"/cost":    "free",
 		"/ls .":    "files: a b",
-		"/help":    "VORTEX commands",
+		"/help":    "Gubern commands",
 		"/approve": "Approved",
 	}
 	for cmd, want := range cases {

@@ -8,7 +8,7 @@ import (
 	"github.com/vortex-run/vortex/internal/legacyenv"
 )
 
-// envPrefix is prepended to every VORTEX environment override.
+// envPrefix is prepended to every Gubern environment override.
 const envPrefix = "GUBERN_"
 
 // osEnv snapshots the current process environment into a map for override
@@ -31,7 +31,7 @@ func osEnv() map[string]string {
 //
 // Only scalar top-level fields of each section are overridable — this is the
 // operational escape hatch for tuning a single node without editing the
-// committed vortex.cue, not a full config language. List/struct fields (routes,
+// committed gubern.cue, not a full config language. List/struct fields (routes,
 // backends) are intentionally not overridable via env.
 func applyEnvOverrides(cfg *Config, env map[string]string) {
 	str := func(key string, dst *string) {

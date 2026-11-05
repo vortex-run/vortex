@@ -32,7 +32,7 @@ func openRegistry() (*plugins.Registry, error) {
 	return plugins.NewRegistry(pluginStorePath())
 }
 
-// newPluginCommand builds `vortex plugin` with list/install/remove/info.
+// newPluginCommand builds `gubern plugin` with list/install/remove/info.
 func newPluginCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "plugin",
@@ -107,7 +107,7 @@ func newPluginInstallCommand() *cobra.Command {
 			}
 			manifest := plugins.PluginManifest{
 				Name: name, Version: version, Checksum: reg.Checksum(wasm),
-				Description: "installed via vortex plugin install",
+				Description: "installed via gubern plugin install",
 			}
 			if err := reg.Install(manifest, wasm); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)

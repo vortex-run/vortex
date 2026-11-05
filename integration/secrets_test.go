@@ -9,7 +9,7 @@ import (
 	"github.com/vortex-run/vortex/internal/testutil"
 )
 
-// secretsConfig renders a vortex.cue declaring the given secret keys and no
+// secretsConfig renders a gubern.cue declaring the given secret keys and no
 // routes (secrets are independent of the data plane).
 func secretsConfig(cluster string, keys string) string {
 	return `cluster: { name: "` + cluster + `" }

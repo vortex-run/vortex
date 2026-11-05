@@ -85,7 +85,7 @@ func (p *OIDCProvider) Exchange(ctx context.Context, code string) (User, error) 
 	return p.userFromRawIDToken(ctx, rawID)
 }
 
-// claims is the subset of ID-token claims VORTEX consumes.
+// claims is the subset of ID-token claims Gubern consumes.
 type claims struct {
 	Subject string `json:"sub"`
 	Email   string `json:"email"`

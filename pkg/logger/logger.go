@@ -1,4 +1,4 @@
-// Package logger provides VORTEX's structured logging built on the Go standard
+// Package logger provides Gubern's structured logging built on the Go standard
 // library's log/slog (Non-Negotiable Rule #10: standard library first).
 //
 // It supports two output formats — machine-readable JSON for production and a
@@ -151,7 +151,7 @@ func resolveSink(cfg Config) io.Writer {
 
 // ParseLevel converts a config string ("debug", "info", "warn", "error") into a
 // slog.Level. Unknown values fall back to Info. The mapping mirrors the
-// observability.log_level field in vortex.cue.
+// observability.log_level field in gubern.cue.
 func ParseLevel(s string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":

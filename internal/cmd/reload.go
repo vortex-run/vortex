@@ -15,7 +15,7 @@ import (
 	"github.com/vortex-run/vortex/pkg/pidfile"
 )
 
-// newReloadCommand builds `vortex reload`, which asks a running server to
+// newReloadCommand builds `gubern reload`, which asks a running server to
 // re-read its config without restarting. On Unix it sends SIGHUP to the PID in
 // the pidfile; on Windows it calls the localhost-only POST /internal/reload
 // endpoint. It then checks the outcome the server recorded and reads /health
@@ -34,7 +34,7 @@ func newReloadCommand() *cobra.Command {
 
 			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (err == nil && !alive) {
-				fmt.Fprintln(out, "VORTEX is not running")
+				fmt.Fprintln(out, "Gubern is not running")
 				return errNotRunning
 			}
 			if err != nil {

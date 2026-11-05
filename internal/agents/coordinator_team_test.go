@@ -75,7 +75,7 @@ func TestCoordinator_TeamPrefixForcesPipeline(t *testing.T) {
 	c := teamCoordinator(t, gw, written, "--- PASS: TestX (0.00s)")
 
 	// "a flask calculator" does NOT match shouldUseTeam keywords, but the /team
-	// prefix (sent by `vortex code --team`) must force the pipeline anyway.
+	// prefix (sent by `gubern code --team`) must force the pipeline anyway.
 	if shouldUseTeam("a flask calculator") {
 		t.Fatal("precondition: goal should not match team keywords")
 	}

@@ -95,7 +95,7 @@ func TestEnsureServiceUser_CommandFailureStops(t *testing.T) {
 func TestInstallSystemdDryRun_CreatesUserBeforeUnit(t *testing.T) {
 	stubSeams(t, false, "useradd")
 	var out bytes.Buffer
-	if err := Install(InstallConfig{ExecPath: "/usr/bin/vortex", ConfigPath: "/etc/vortex/vortex.cue",
+	if err := Install(InstallConfig{ExecPath: "/usr/bin/vortex", ConfigPath: "/etc/vortex/gubern.cue",
 		InitSystem: InitSystemd, DryRun: true, Out: &out}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestInstallSystemdDryRun_CreatesUserBeforeUnit(t *testing.T) {
 }
 
 func TestGenerateSystemd_Hardening(t *testing.T) {
-	unit := GenerateSystemd(DefaultSystemdConfig("/usr/bin/vortex", "/etc/vortex/vortex.cue"))
+	unit := GenerateSystemd(DefaultSystemdConfig("/usr/bin/vortex", "/etc/vortex/gubern.cue"))
 	for _, want := range []string{
 		"User=gubern", "WorkingDirectory=/var/lib/gubern",
 		"AmbientCapabilities=CAP_NET_BIND_SERVICE", "CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
@@ -123,13 +123,13 @@ func TestGenerateSystemd_Hardening(t *testing.T) {
 	for _, banned := range []string{"MemoryDenyWriteExecute", "ProtectSystem", "ProtectHome",
 		"RestrictNamespaces", "ProtectClock", "PrivateDevices", "DynamicUser"} {
 		if strings.Contains(unit, banned) {
-			t.Errorf("unit contains %s, which breaks VORTEX features", banned)
+			t.Errorf("unit contains %s, which breaks Gubern features", banned)
 		}
 	}
 }
 
 func TestGenerateOpenRC_BindCapabilityAndDirectory(t *testing.T) {
-	s := GenerateOpenRC(DefaultOpenRCConfig("/usr/bin/vortex", "/etc/vortex/vortex.cue"))
+	s := GenerateOpenRC(DefaultOpenRCConfig("/usr/bin/vortex", "/etc/vortex/gubern.cue"))
 	for _, want := range []string{"directory=/var/lib/gubern\n", `capabilities="^cap_net_bind_service"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("OpenRC script missing %q", want)

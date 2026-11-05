@@ -26,7 +26,7 @@ func appendEvents(t *testing.T, l *Log) {
 	t.Helper()
 	ctx := context.Background()
 	events := []struct{ actor, action, resource string }{
-		{"admin", "config.reload", "vortex.cue"},
+		{"admin", "config.reload", "gubern.cue"},
 		{"admin", "secret.set", "db_password"},
 		{"cli", "secret.set", "jwt_secret"},
 		{"10.0.0.9", "auth.failure", "/api/keys"},
@@ -136,7 +136,7 @@ func TestComplianceReport_WriteMarkdown(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"# VORTEX Compliance Report",
+		"# Gubern Compliance Report",
 		"**Total events:** 6",
 		"## Events by actor",
 		"## Security events",
@@ -288,7 +288,7 @@ func TestAppend_AutoArchivesOverThreshold(t *testing.T) {
 	if _, _, err := l.ArchiveIfOver(1); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Append(context.Background(), "cli", "config.reload", "vortex.cue", nil); err != nil {
+	if err := l.Append(context.Background(), "cli", "config.reload", "gubern.cue", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Verify(); err != nil {

@@ -21,9 +21,9 @@ func TestLastReloadStatus(t *testing.T) {
 	defer srv.Close()
 	port := srv.Listener.Addr().(*net.TCPAddr).Port
 
-	body = `{"cluster_name":"x","last_reload":{"at":"2026-11-03T13:42:57Z","ok":false,"error":"config error at vortex.cue:6:13"}}`
+	body = `{"cluster_name":"x","last_reload":{"at":"2026-11-03T13:42:57Z","ok":false,"error":"config error at gubern.cue:6:13"}}`
 	st, ok := lastReloadStatus(port)
-	if !ok || st.OK || st.Error != "config error at vortex.cue:6:13" || st.At.IsZero() {
+	if !ok || st.OK || st.Error != "config error at gubern.cue:6:13" || st.At.IsZero() {
 		t.Errorf("failed reload: got %+v ok=%v", st, ok)
 	}
 
