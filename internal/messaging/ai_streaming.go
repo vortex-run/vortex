@@ -454,7 +454,7 @@ func (g *AIGateway) streamGemini(ctx context.Context, p AIProvider, prompt, syst
 	if model == "" {
 		model = "gemini-1.5-flash"
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", base, model, p.APIKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", base, model)
 	payload := map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]any{{"text": prompt}}},
@@ -467,7 +467,7 @@ func (g *AIGateway) streamGemini(ctx context.Context, p AIProvider, prompt, syst
 		b      strings.Builder
 		tokens int
 	)
-	err := g.doStreamLines(ctx, url, nil, payload, func(line []byte) error {
+	err := g.doStreamLines(ctx, url, geminiHeaders(p), payload, func(line []byte) error {
 		data, ok := sseData(line)
 		if !ok {
 			return nil

@@ -799,8 +799,9 @@ func verifyOpenAICompat(url, model string) func(string) string {
 }
 
 func verifyGemini(key string) string {
-	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + key
-	return httpVerify(http.MethodPost, url, nil,
+	// Key in a header, not ?key=: a URL ends up in transport error text.
+	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+	return httpVerify(http.MethodPost, url, map[string]string{"x-goog-api-key": key},
 		map[string]any{"contents": []map[string]any{{"parts": []map[string]any{{"text": "hi"}}}}})
 }
 

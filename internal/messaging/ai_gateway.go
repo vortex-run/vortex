@@ -380,8 +380,15 @@ func (g *AIGateway) callDeepSeek(ctx context.Context, p AIProvider, prompt, syst
 	return text, tokens, nil
 }
 
-// callGemini calls Google's Gemini generateContent REST API. The API key is a
-// query parameter; the system prompt goes in systemInstruction.
+// geminiHeaders carries the API key in x-goog-api-key. It used to be a ?key=
+// query parameter, and net/http puts the URL in transport errors, so a
+// connection failure wrote the key into the returned error and the logs.
+func geminiHeaders(p AIProvider) map[string]string {
+	return map[string]string{"x-goog-api-key": p.APIKey}
+}
+
+// callGemini calls Google's Gemini generateContent REST API. The system
+// prompt goes in systemInstruction.
 func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	base := p.Endpoint
 	if base == "" {
@@ -391,7 +398,7 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 	if model == "" {
 		model = "gemini-1.5-flash"
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, model, p.APIKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, model)
 
 	var out struct {
 		Candidates []struct {
@@ -405,7 +412,7 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 			TotalTokenCount int `json:"totalTokenCount"`
 		} `json:"usageMetadata"`
 	}
-	_, err := g.doJSON(ctx, url, nil, map[string]any{
+	_, err := g.doJSON(ctx, url, geminiHeaders(p), map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]any{{"text": prompt}}},
 		},
