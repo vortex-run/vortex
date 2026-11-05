@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/vortex-run/vortex/internal/llm"
 	"github.com/vortex-run/vortex/internal/messaging"
 )
 
@@ -57,6 +59,25 @@ func newAIProbeCommand() *cobra.Command {
 	return c
 }
 
+// printChecks prints one block of probe results and reports whether all passed.
+func printChecks(out io.Writer, checks []agents.ProbeCheck) bool {
+	ok := true
+	for _, c := range checks {
+		mark := "ok  "
+		if !c.Pass {
+			mark, ok = "FAIL", false
+		}
+		fmt.Fprintf(out, "  %s %-30s %6s  %s\n", mark, c.Name, c.Took.Round(time.Millisecond*10), c.Detail)
+	}
+	return ok
+}
+
+// unsupportedNative reports a model that has no native tool calling (as
+// opposed to one that is unreachable or answered wrongly).
+func unsupportedNative(checks []agents.ProbeCheck) bool {
+	return len(checks) > 0 && strings.Contains(checks[0].Detail, llm.ErrToolsUnsupported.Error())
+}
+
 func runAIProbe(ctx context.Context, out io.Writer, providers []messaging.ProviderTools, only string) error {
 	failed, ran := false, 0
 	for _, p := range providers {
@@ -72,12 +93,18 @@ func runAIProbe(ctx context.Context, out io.Writer, providers []messaging.Provid
 		pctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		checks := agents.ProbeModel(pctx, p)
 		cancel()
-		for _, c := range checks {
-			mark := "ok  "
-			if !c.Pass {
-				mark, failed = "FAIL", true
+		if !printChecks(out, checks) {
+			failed = true
+			if unsupportedNative(checks) {
+				// /agent falls back to the text protocol for such models;
+				// report how well that works too.
+				fmt.Fprintln(out, "  no native tool calling; trying the text protocol /agent falls back to:")
+				pctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+				if printChecks(out, agents.ProbeModel(pctx, agents.PromptedTools{Model: p})) {
+					fmt.Fprintln(out, "  usable through the text protocol (less reliable than native tools)")
+				}
+				cancel()
 			}
-			fmt.Fprintf(out, "  %s %-30s %6s  %s\n", mark, c.Name, c.Took.Round(time.Millisecond*10), c.Detail)
 		}
 	}
 	if ran == 0 {

@@ -94,6 +94,19 @@ func (pt ProviderTools) ChatWithTools(ctx context.Context, system string, msgs [
 	return res, err
 }
 
+// Complete is a plain completion from this provider only (what the
+// text-protocol fallback uses). Usage counts toward the budget.
+func (pt ProviderTools) Complete(ctx context.Context, prompt, system string) (string, error) {
+	if pt.g.budgetExceeded() {
+		return "", ErrBudgetExceeded
+	}
+	text, tokens, err := pt.g.callProvider(ctx, pt.p, prompt, system)
+	if err == nil {
+		pt.g.recordCost(pt.g.modelOf(pt.p), tokens)
+	}
+	return text, err
+}
+
 // EachProvider returns every configured provider, in priority order.
 func (g *AIGateway) EachProvider() []ProviderTools {
 	out := make([]ProviderTools, 0, len(g.cfg.Providers))

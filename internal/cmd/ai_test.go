@@ -106,3 +106,51 @@ func TestAIProbe_UnknownProvider(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// fakeNoToolsOllama is a model without tool support: /api/chat with tools is
+// a 400, and /api/generate follows the text protocol.
+func fakeNoToolsOllama(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Prompt string `json:"prompt"`
+			System string `json:"system"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if r.URL.Path == "/api/chat" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "m does not support tools"})
+			return
+		}
+		reply := "```json\n{\"tool\": \"echo\", \"args\": {\"text\": \"ping\"}}\n```"
+		switch {
+		case strings.Contains(req.Prompt, "<tool_result"):
+			start := strings.Index(req.Prompt, "<tool_result")
+			body := req.Prompt[strings.Index(req.Prompt[start:], "\n")+start+1:]
+			reply = "It returned " + strings.SplitN(body, "\n", 2)[0]
+		case strings.Contains(req.System, "add:") && strings.Contains(req.Prompt, "add"):
+			reply = "```json\n{\"tool\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}\n```"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"response": reply, "done": true})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestAIProbe_NoNativeToolsTriesTextProtocol(t *testing.T) {
+	srv := fakeNoToolsOllama(t)
+	gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: []messaging.AIProvider{
+		{Name: messaging.ProviderOllama, Endpoint: srv.URL, Models: []string{"m"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runAIProbe(context.Background(), &out, gw.EachProvider(), ""); !errors.Is(err, errProbe) {
+		t.Fatalf("err = %v (native tools are missing, so the probe still fails)", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "trying the text protocol") || !strings.Contains(text, "usable through the text protocol") {
+		t.Errorf("text-protocol result not reported:\n%s", text)
+	}
+}
