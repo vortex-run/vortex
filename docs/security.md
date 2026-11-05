@@ -169,6 +169,8 @@ commands.
   the model, never as permissions: loading one runs nothing, and actions a
   skill suggests go through the same approval gate. A skill in a repository
   you clone is third-party text, like any other file the model reads.
+  When `/agent` reads a skill, the audit log records `agent.skill.read` with
+  the skill name and the SHA-256 of the `SKILL.md` it catalogued.
 - **Provider keys** are sent in request headers, never in URLs, so they can't
   appear in transport errors or logs (Gemini's key used to be a `?key=`
   parameter; fixed). The Telegram bot token is part of the API URL by

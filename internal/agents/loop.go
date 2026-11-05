@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -35,7 +37,10 @@ type LoopConfig struct {
 	// catalog, written by whoever wrote the repo). It goes in the user turn
 	// ahead of the request, never in System, so it can't pose as instructions.
 	Reference string
-	Session   string // passed to session-aware tools (backups, undo)
+	// SkillFiles maps catalogued SKILL.md paths (see SkillKey) to the skill,
+	// so reading one is recorded as skill use in the audit log.
+	SkillFiles map[string]SkillRef
+	Session    string // passed to session-aware tools (backups, undo)
 
 	MaxSteps       int           // model turns; default 20
 	MaxObservation int           // bytes of tool output shown to the model per call; default 8 KiB
@@ -223,7 +228,31 @@ func runLoopCall(ctx context.Context, cfg LoopConfig, specs map[string]ToolSpec,
 	}
 	emit(toolDoneLine(call.Name, out))
 	step.Outcome, step.Observed = "ok", observationText(out)
+	if call.Name == "read_file" && cfg.SkillFiles != nil {
+		if p, _ := args["path"].(string); p != "" {
+			if ref, ok := cfg.SkillFiles[SkillKey(p)]; ok {
+				emit("📘 Using skill: " + ref.Name)
+				loopAudit(ctx, cfg, "agent.skill.read", call.Name, map[string]any{"skill": ref.Name, "sha256": ref.Hash})
+			}
+		}
+	}
 	return step
+}
+
+// SkillRef identifies a catalogued skill for the audit trail.
+type SkillRef struct {
+	Name string
+	Hash string // sha256 of the SKILL.md that was catalogued
+}
+
+// SkillKey normalises a path for SkillFiles lookups: cleaned, forward
+// slashes, and case-folded on Windows, whose paths are case-insensitive.
+func SkillKey(p string) string {
+	k := filepath.ToSlash(filepath.Clean(p))
+	if runtime.GOOS == "windows" {
+		k = strings.ToLower(k)
+	}
+	return k
 }
 
 func loopAudit(ctx context.Context, cfg LoopConfig, action, tool string, detail map[string]any) {
