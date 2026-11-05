@@ -38,6 +38,19 @@ Not reachable from chat yet: an `http_get` tool (web fetching happens inside
 the research agent) and **LSP diagnostics** (`lsp_diagnostics`). Both exist in
 the code but nothing routes requests to them.
 
+### Model-driven runs: `/agent <task>` (new)
+
+`/agent fix the failing test in internal/foo` hands the task to the model
+with the same local tools: it chooses which tools to call, sees their
+results, and keeps going until it answers. Every write, command and commit
+still goes through the approval gate (Telegram if configured, otherwise the
+TUI/API approve call; pending approvals expire after 15 minutes), and each
+decision is in the audit log. A run stops after 20 model turns or about two
+minutes. Needs a provider with native tool calling: Claude, OpenAI,
+DeepSeek, Groq, OpenRouter, Azure OpenAI or Ollama (not Gemini or Bedrock
+yet). Without `/agent`, requests use the existing command and keyword
+routing.
+
 > _"Read main.go, find the bug in the retry loop, and fix it."_
 
 ### VORTEX Forge — autonomous app builds

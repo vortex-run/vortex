@@ -1166,6 +1166,13 @@ func (c *Coordinator) handleMessageInner(userMsg, sessionID string, sf *streamFi
 		userMsg = goal
 	}
 
+	// Explicit model-driven run ("/agent <task>"): the model plans and picks
+	// tools itself through RunLoop, under the same approval gates. Opt-in
+	// while the loop is new; everything else keeps the routes below.
+	if task, isAgent := strings.CutPrefix(strings.TrimSpace(userMsg), "/agent "); isAgent {
+		return c.handleAgentLoop(ctx, sessionID, strings.TrimSpace(task), sf)
+	}
+
 	// Specialist team mode (agent teams): a complex coding task is run through
 	// the coder → tester → reviewer pipeline instead of the single-agent path.
 	if team, on := c.teamHandler(); on && team != nil && shouldUseTeam(userMsg) {
@@ -1970,3 +1977,89 @@ func newSubAgent(cfg AgentConfig, tools []string) *subAgent {
 
 // Tools returns the names of the tools this sub-agent may use.
 func (s *subAgent) Tools() []string { return s.tools }
+
+// handleAgentLoop runs a task through the model-driven loop with the local
+// tools. Progress lines stream to sf when the caller streams.
+func (c *Coordinator) handleAgentLoop(ctx context.Context, sessionID, task string, sf *streamFilter) (string, error) {
+	if task == "" {
+		return "Usage: /agent <task>", nil
+	}
+	model, ok := c.cfg.AIGateway.(ToolChatter)
+	if !ok {
+		return "The configured AI gateway doesn't support tool calling, so /agent isn't available.", nil
+	}
+	if c.cfg.LocalTools == nil {
+		return "No local tools are configured, so /agent isn't available.", nil
+	}
+	var transcript []string
+	emit := func(line string) {
+		transcript = append(transcript, line)
+		if sf != nil {
+			sf.Write(line + "\n")
+		}
+	}
+	res := RunLoop(ctx, LoopConfig{
+		Model:    model,
+		Tools:    c.cfg.LocalTools,
+		Approval: c.loopApprover(sessionID, emit),
+		Audit:    c.cfg.Audit,
+		System:   DefaultLoopSystemPrompt(c.WorkingDir()),
+		Session:  sessionID,
+		Timeout:  handleMessageTimeout - 5*time.Second,
+		Emit:     emit,
+	}, task)
+
+	// The final line goes through emit too: when the caller streams, the
+	// streamed lines are the reply, so an answer only in the return value
+	// would never reach the user.
+	switch res.Stop {
+	case LoopDone:
+		emit(res.Answer)
+	case LoopBudgetExceeded:
+		emit(fmt.Sprintf("Stopped: budget reached after %d model turns (%v).", res.Turns, res.Err))
+	default:
+		emit("Stopped: " + errString(res.Err))
+	}
+	return strings.Join(transcript, "\n"), nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	return err.Error()
+}
+
+// loopApprover returns the approval function for a loop run: the configured
+// synchronous approver (Telegram) when there is one; otherwise a pending
+// action resolved by ApproveAction (the TUI/API approve call), waited on
+// until the run's deadline.
+func (c *Coordinator) loopApprover(sessionID string, emit func(string)) ApprovalFunc {
+	if c.cfg.Approval != nil {
+		return c.cfg.Approval
+	}
+	return func(ctx context.Context, req ApprovalRequest) bool {
+		emit("[APPROVAL_REQUIRED|" + req.Risk() + "|" + req.Tool + "] " + req.Description)
+		if req.Preview != "" {
+			emit(req.Preview)
+		}
+		p := &pendingApproval{
+			toolName: req.Tool, result: make(chan bool, 1),
+			description: req.Description, created: time.Now(),
+		}
+		c.mu.Lock()
+		c.pending[sessionID] = p
+		c.mu.Unlock()
+		select {
+		case ok := <-p.result:
+			return ok
+		case <-ctx.Done():
+			c.mu.Lock()
+			if c.pending[sessionID] == p {
+				delete(c.pending, sessionID)
+			}
+			c.mu.Unlock()
+			return false
+		}
+	}
+}
