@@ -508,3 +508,23 @@ func TestVortexAPITool_DenylistCannotBeSidestepped(t *testing.T) {
 		t.Errorf("trailing slash + query should be fine: %v", err)
 	}
 }
+
+// TestSandbox_SymlinkedAncestorOfNewDirs: writing below a not-yet-existing
+// directory under an escaping symlink must not create anything outside.
+func TestSandbox_SymlinkedAncestorOfNewDirs(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	mkSymlink(t, outside, filepath.Join(dir, "link"))
+	_, err := WriteFileTool{SandboxDir: dir}.Execute(context.Background(),
+		map[string]any{"path": filepath.Join("link", "new", "deeper", "f.txt"), "content": "x"})
+	if !errors.Is(err, ErrSandboxEscape) {
+		t.Errorf("err = %v, want ErrSandboxEscape", err)
+	}
+	if _, serr := os.Stat(filepath.Join(outside, "new")); !os.IsNotExist(serr) {
+		t.Errorf("directory created outside the sandbox: %v", serr)
+	}
+	// New nested dirs inside the sandbox still work.
+	if _, err := (WriteFileTool{SandboxDir: dir}).Execute(context.Background(),
+		map[string]any{"path": filepath.Join("a", "b", "f.txt"), "content": "x"}); err != nil {
+		t.Errorf("nested write inside the sandbox: %v", err)
+	}
+}

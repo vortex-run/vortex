@@ -281,17 +281,12 @@ func sandboxResolve(sandboxDir, rel string) (string, error) {
 	}
 
 	// Step 3: the path does not exist yet (e.g. a new file to write). Resolve
-	// the parent directory's real path and ensure it is within the sandbox, so
-	// a symlinked parent cannot redirect the write outside.
-	parent := filepath.Dir(joined)
-	if _, lerr := os.Lstat(parent); lerr == nil {
-		realParent, rerr := filepath.EvalSymlinks(parent)
-		if rerr != nil {
-			return "", fmt.Errorf("agents: resolve parent: %w", rerr)
-		}
-		if !containedIn(realParent, realBase) {
-			return "", fmt.Errorf("%w: parent of %q resolves outside sandbox", ErrSandboxEscape, rel)
-		}
+	// the nearest existing ancestor's real path and ensure it is within the
+	// sandbox, so a symlinked directory cannot redirect the write outside.
+	// Checking only the immediate parent missed link/new/file.txt: "new"
+	// doesn't exist, the check was skipped, and MkdirAll followed "link".
+	if realAnc := resolveExistingPrefix(filepath.Dir(joined)); !containedIn(realAnc, realBase) {
+		return "", fmt.Errorf("%w: parent of %q resolves outside sandbox", ErrSandboxEscape, rel)
 	}
 	return joined, nil
 }
