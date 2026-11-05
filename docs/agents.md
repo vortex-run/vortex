@@ -65,9 +65,10 @@ short model calls.
 `/agent` reads [Agent Skills](https://agentskills.io) — `SKILL.md` folders
 written for Claude Code, Codex, OpenCode and similar tools — from the
 workspace's `.agents/skills/`, `.claude/skills/` and `.opencode/skills/`
-directories. Only each skill's name and description go into the model's
-prompt; it reads the full `SKILL.md` with `read_file` when a task calls for
-it. Skills are instructions, not permissions: they can't run anything on
+directories. Only each skill's name and description are given to the model,
+in its first message and marked as text from the repository (never in the
+system prompt); it reads the full `SKILL.md` with `read_file` when a task
+calls for it. Skills are instructions, not permissions: they can't run anything on
 load, `allowed-tools` is ignored for now, and every action a skill suggests
 still goes through the approval gate. Invalid skills (bad name, name not
 matching the folder, missing description, unsupported YAML such as `[a, b]`

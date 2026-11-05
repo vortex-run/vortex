@@ -128,7 +128,9 @@ func TestAgentCommand_StreamedReplyIncludesAnswer(t *testing.T) {
 }
 
 // TestAgentCommand_SkillCatalogInPrompt: workspace skills are listed (name
-// and description only) in the loop's system prompt; invalid ones are not.
+// and description only) in the first user turn, fenced as repository data;
+// never in the system prompt, where repo-written text could pose as
+// instructions. Invalid skills and skill bodies are not included.
 func TestAgentCommand_SkillCatalogInPrompt(t *testing.T) {
 	model := &scriptedModel{}
 	c, dir := agentCoord(t, toolGateway{model}, nil)
@@ -147,10 +149,16 @@ func TestAgentCommand_SkillCatalogInPrompt(t *testing.T) {
 	if _, err := c.HandleMessage(context.Background(), "/agent summarise", "s6"); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(model.system, "- release-notes: Draft release notes from git log (.agents/skills/release-notes/SKILL.md)") {
-		t.Errorf("system prompt lacks the skill:\n%s", model.system)
+	first := model.seen[0][0]
+	if first.Role != "user" || !strings.Contains(first.Content, "<workspace_skills>") ||
+		!strings.Contains(first.Content, "- release-notes: Draft release notes from git log (.agents/skills/release-notes/SKILL.md)") ||
+		!strings.HasSuffix(first.Content, "summarise") {
+		t.Errorf("first turn lacks the fenced catalog before the task:\n%s", first.Content)
 	}
-	if strings.Contains(model.system, "SECRET BODY") || strings.Contains(model.system, "not-bad") {
-		t.Errorf("system prompt leaked a body or listed an invalid skill:\n%s", model.system)
+	if strings.Contains(model.system, "release-notes") {
+		t.Errorf("skill text reached the system prompt:\n%s", model.system)
+	}
+	if strings.Contains(first.Content, "SECRET BODY") || strings.Contains(first.Content, "not-bad") {
+		t.Errorf("catalog leaked a body or listed an invalid skill:\n%s", first.Content)
 	}
 }
