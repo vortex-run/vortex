@@ -790,6 +790,19 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 	// Encode the risk level + tool so the TUI can render a risk badge and the
 	// matching header severity (brand redesign part 6).
 	actionID := ActionID(ae.Request)
+	if c.cfg.Approval == nil {
+		// Async (TUI/API) path: stash the action BEFORE showing it, so an
+		// approve call can't arrive while nothing is pending yet.
+		c.mu.Lock()
+		c.pending[session] = &pendingApproval{
+			toolName: name, tool: tool, params: params,
+			result:      make(chan bool, 1),
+			description: ae.Request.Description,
+			actionID:    actionID,
+			created:     time.Now(),
+		}
+		c.mu.Unlock()
+	}
 	emit(approvalLine(ae.Request, actionID))
 	if ae.Request.Preview != "" {
 		emit(ae.Request.Preview)
@@ -817,16 +830,7 @@ func (c *Coordinator) ExecuteLocalTool(ctx context.Context, session, name string
 		return approvedResult, nil
 	}
 
-	// Async (TUI) path: stash the action and return the preview now.
-	c.mu.Lock()
-	c.pending[session] = &pendingApproval{
-		toolName: name, tool: tool, params: params,
-		result:      make(chan bool, 1),
-		description: ae.Request.Description,
-		actionID:    actionID,
-		created:     time.Now(),
-	}
-	c.mu.Unlock()
+	// Async (TUI) path: the action was stashed above; return the preview now.
 	return nil, nil
 }
 
@@ -2264,17 +2268,20 @@ func (c *Coordinator) loopApprover(sessionID string, emit func(string)) Approval
 	}
 	return func(ctx context.Context, req ApprovalRequest) bool {
 		actionID := ActionID(req)
-		emit(approvalLine(req, actionID))
-		if req.Preview != "" {
-			emit(req.Preview)
-		}
 		p := &pendingApproval{
 			toolName: req.Tool, result: make(chan bool, 1),
 			description: req.Description, actionID: actionID, created: time.Now(),
 		}
+		// Register before announcing: a client that approves the moment it
+		// reads the line (a script, or the TUI mid-stream) otherwise found
+		// nothing pending, got a 404, and the run waited out its deadline.
 		c.mu.Lock()
 		c.pending[sessionID] = p
 		c.mu.Unlock()
+		emit(approvalLine(req, actionID))
+		if req.Preview != "" {
+			emit(req.Preview)
+		}
 		select {
 		case ok := <-p.result:
 			return ok

@@ -193,3 +193,34 @@ func TestApproval_LoopDecisionAuditedOnce(t *testing.T) {
 		t.Errorf("audit = %v", rec.entries)
 	}
 }
+
+// TestApproval_ApproveTheMomentTheLineArrives: a client that approves as soon
+// as it reads the approval line (here: synchronously, inside the stream
+// callback) must find the action pending. The line used to be emitted before
+// the action was registered, so such a client got "nothing pending" and the
+// run waited out its deadline.
+func TestApproval_ApproveTheMomentTheLineArrives(t *testing.T) {
+	c, dir := agentCoord(t, toolGateway{writeScript()}, nil)
+	var matched bool
+	onDelta := func(d string) {
+		if strings.Contains(d, "[APPROVAL_REQUIRED") {
+			_, matched = c.ApproveAction("instant", true)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.HandleMessageStream(context.Background(), "/agent create hello.txt", "instant", onDelta)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run never finished: the instant approval was lost")
+	}
+	if !matched {
+		t.Error("approval sent on the line found nothing pending")
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "hello.txt")); string(data) != "hi" {
+		t.Errorf("file = %q", data)
+	}
+}
