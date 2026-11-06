@@ -1,7 +1,6 @@
 package security
 
 import (
-	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -61,7 +60,7 @@ func (e *Edge) Middleware() func(http.Handler) http.Handler {
 			// the context for Gubern's own limiters (a client can't set it),
 			// the header for backends.
 			r.Header.Set(clientIPHeader, ip)
-			r = r.WithContext(context.WithValue(r.Context(), clientIPKey{}, ip))
+			r = r.WithContext(WithClientIP(r.Context(), ip))
 
 			if e.cfg.RateLimit != nil && !e.cfg.RateLimit.Allow(ip) {
 				retry := e.cfg.RateLimit.retryAfterSeconds()

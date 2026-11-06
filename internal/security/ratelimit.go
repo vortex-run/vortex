@@ -224,6 +224,20 @@ func clientIP(r *http.Request) string {
 // clientIPKey carries the edge-resolved client IP in the request context.
 type clientIPKey struct{}
 
+// ClientIPHeader is the header the edge sets for backends.
+const ClientIPHeader = clientIPHeader
+
+// WithClientIP records the edge-resolved client IP in ctx.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey{}, ip)
+}
+
+// ClientIPFromContext returns the edge-resolved client IP, if the edge ran.
+func ClientIPFromContext(ctx context.Context) (string, bool) {
+	ip, ok := ctx.Value(clientIPKey{}).(string)
+	return ip, ok && ip != ""
+}
+
 // hostOnly strips the port from a host:port address, returning the input
 // unchanged if it has no port.
 func hostOnly(addr string) string {
