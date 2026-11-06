@@ -208,12 +208,21 @@ const clientIPHeader = "X-Vortex-Client-IP"
 
 // clientIP returns the request's client IP: the edge-resolved header if present,
 // otherwise the host portion of RemoteAddr.
+//
+// Only the edge's own resolution (carried in the request context) is used.
+// The X-Vortex-Client-IP header itself is client-controlled whenever the
+// edge isn't in front (its default: no allow-list or exit-node filter), so
+// trusting it let a client send a new fake address with every request and
+// never hit a per-route or global rate limit.
 func clientIP(r *http.Request) string {
-	if ip := r.Header.Get(clientIPHeader); ip != "" {
+	if ip, ok := r.Context().Value(clientIPKey{}).(string); ok && ip != "" {
 		return ip
 	}
 	return hostOnly(r.RemoteAddr)
 }
+
+// clientIPKey carries the edge-resolved client IP in the request context.
+type clientIPKey struct{}
 
 // hostOnly strips the port from a host:port address, returning the input
 // unchanged if it has no port.
