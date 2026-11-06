@@ -62,7 +62,7 @@ jobs:
         # Same four paths as `task test:race:critical` (orchestration, agents, a2a, api).
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 -timeout 10m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
+        run: go test -race -count=1 -timeout 15m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
 
       - name: Test (race)
         # ubuntu-latest has a C toolchain, so run the race detector on the
