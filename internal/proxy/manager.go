@@ -366,11 +366,17 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	if m.cfg.TLS == nil {
 		return nil, errors.New("h3 route requires a TLS manager")
 	}
+	hookChain, err := m.buildHookChain(rc)
+	if err != nil {
+		return nil, err
+	}
 	handler, err := proxyhttp.NewHandler(proxyhttp.HandlerConfig{
 		Backends:     routeToHTTPBackends(rc.Backends),
 		Balancer:     "round-robin",
 		RoundTripper: proxyhttp.NewRoundTripper(proxyhttp.RoundTripperConfig{Pool: m.cfg.TCPPool}),
 		Timeout:      parseTimeout(rc.Timeout),
+		HookChain:    hookChain,
+		RouteName:    rc.Name,
 	})
 	if err != nil {
 		return nil, err
@@ -378,11 +384,24 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	router := proxyhttp.NewRouter()
 	router.Handle(routePattern(rc), handler)
 
+	// The same L7 chain buildHTTP gives an https route (edge allowlist / Tor /
+	// quota / rate limit, metrics, OPA policy) — on both QUIC and the TCP
+	// fallback. Before audit F-02 an h3 route skipped all of it.
+	edge, obs, pol := m.edgeMiddleware(rc), (func(http.Handler) http.Handler)(nil), (func(http.Handler) http.Handler)(nil)
+	if m.cfg.Metrics != nil {
+		obs = m.obsMiddleware(rc.Name)
+	}
+	if m.cfg.PolicyEngine != nil {
+		pol = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
+	}
 	ds, err := proxyquic.NewDualStack(proxyquic.DualStackConfig{
 		Addr:      m.listenAddr(rc.Listen),
 		TLSConfig: m.cfg.TLS.TLSConfig(),
 		Router:    router,
-		Logger:    m.log,
+		Middleware: func(next http.Handler) http.Handler {
+			return proxyhttp.Chain(next, edge, obs, pol)
+		},
+		Logger: m.log,
 	})
 	if err != nil {
 		return nil, err
