@@ -157,14 +157,41 @@ func (s *SlackBot) HandleSlashCommand(runtime *agents.Runtime) http.Handler {
 		text := strings.TrimSpace(form.Get("text")) // e.g. "status" or "deploy prod"
 		sub, args := splitCommand(text)
 
+		// One agent session per signed Slack principal (team + user), like
+		// telegram:<chat> and whatsapp:<number>. A shared session fed every
+		// workspace member's history into everyone else's replies (audit F-07).
+		session := slackSessionID(form.Get("team_id"), form.Get("user_id"))
+
 		// Acknowledge immediately (Slack requires a fast 200).
-		ack := s.handleSub(r.Context(), runtime, sub, args)
+		ack := s.handleSub(r.Context(), runtime, session, sub, args)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response_type": "ephemeral",
 			"text":          ack,
 		})
 	})
+}
+
+// slackSessionID builds the per-principal agent session for a signed Slack
+// request, "slack-<team>-<user>". Slack IDs are short alphanumerics; anything
+// else (or a missing id) yields "" so the caller refuses rather than falling
+// back to a shared session.
+func slackSessionID(teamID, userID string) string {
+	valid := func(id string) bool {
+		if id == "" || len(id) > 32 {
+			return false
+		}
+		for _, c := range id {
+			if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+				return false
+			}
+		}
+		return true
+	}
+	if !valid(teamID) || !valid(userID) {
+		return ""
+	}
+	return "slack-" + teamID + "-" + userID
 }
 
 // splitCommand splits "status extra args" into ("status", "extra args").
@@ -179,7 +206,7 @@ func splitCommand(text string) (sub, args string) {
 
 // handleSub processes a recognised /vortex subcommand and returns the immediate
 // acknowledgement text.
-func (s *SlackBot) handleSub(ctx context.Context, runtime *agents.Runtime, sub, args string) string {
+func (s *SlackBot) handleSub(ctx context.Context, runtime *agents.Runtime, session, sub, args string) string {
 	switch sub {
 	case "status":
 		if runtime == nil {
@@ -201,7 +228,10 @@ func (s *SlackBot) handleSub(ctx context.Context, runtime *agents.Runtime, sub, 
 		if runtime == nil {
 			return "agent runtime not configured"
 		}
-		ch, err := runtime.Submit(ctx, sub+" "+args, "slack")
+		if session == "" {
+			return "error: request carries no Slack team/user identity"
+		}
+		ch, err := runtime.Submit(ctx, sub+" "+args, session)
 		if err != nil {
 			return "error: " + err.Error()
 		}
