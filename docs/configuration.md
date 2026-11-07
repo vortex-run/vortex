@@ -134,6 +134,9 @@ observability: {
 | `GUBERN_WA_ALLOWED_NUMBERS` | Comma-separated sender numbers allowed to drive the agent (any formatting; digits are compared). Empty allows nobody: a valid signature only proves Meta delivered the message. |
 | `GUBERN_SLACK_WEBHOOK` | Slack incoming webhook for outbound alerts. |
 | `GUBERN_SLACK_SIGNING_SECRET` | Verifies slash-command requests. **Required for `/webhook/slack` to be mounted**; without it, Slack is outbound-only. |
+| `GUBERN_SLACK_ALLOWED_USERS` | Registered Slack operators (comma-separated): full access, i.e. agent requests, `deploy`, `reload`. Each entry is a user ID (`U012AB`) or team-scoped (`T012AB:U012AB`). **Empty allows nobody**: unregistered people can only run `/vortex whoami`, which prints the IDs to register. |
+| `GUBERN_SLACK_READONLY_USERS` | Slack users who may run `status`, `logs` and `help` only. Same format. |
+| `GUBERN_SLACK_ALLOWED_TEAMS` | Optional: restrict all registered users to these workspace (team) IDs. |
 | `GUBERN_STUDIO_WORKSPACE` | Enables Studio under `/studio/` (browser terminal, git panel, DB console, and code-server if installed) for this directory. Off when unset. Admin API keys only: the terminal is a shell that bypasses the approval gate. code-server listens on a Unix socket in a private directory (Windows: a random loopback port), never on a public or fixed port. |
 | `GUBERN_STUDIO_DB_READONLY` | Reserved. The Studio DB console lists mTLS TCP routes but ships no database driver, so it runs no queries yet; when one is added, this defaults to read-only. |
 | `GUBERN_SECRET_STORE`, `GUBERN_AUDIT_LOG`, `GUBERN_MTLS_STORE` | Relocate on-disk state. |

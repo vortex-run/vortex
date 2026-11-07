@@ -2699,7 +2699,13 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		bot, _ := messaging.NewSlackBot(messaging.SlackConfig{
 			WebhookURL:    wh,
 			SigningSecret: os.Getenv("GUBERN_SLACK_SIGNING_SECRET"),
+			AllowedUsers:  splitCSV(os.Getenv("GUBERN_SLACK_ALLOWED_USERS")),
+			ReadOnlyUsers: splitCSV(os.Getenv("GUBERN_SLACK_READONLY_USERS")),
+			AllowedTeams:  splitCSV(os.Getenv("GUBERN_SLACK_ALLOWED_TEAMS")),
 		})
+		if bot.InboundEnabled() && os.Getenv("GUBERN_SLACK_ALLOWED_USERS") == "" && os.Getenv("GUBERN_SLACK_READONLY_USERS") == "" {
+			log.Warn("slack: no users registered; slash commands answer only whoami until GUBERN_SLACK_ALLOWED_USERS is set")
+		}
 		m.slack = bot
 	}
 

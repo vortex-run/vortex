@@ -78,7 +78,7 @@ func slackSign(secret, ts, body string) string {
 
 func slashRequest(t *testing.T, secret, command string, fixedNow time.Time) *http.Request {
 	t.Helper()
-	form := url.Values{"command": {"/vortex"}, "text": {command}}.Encode()
+	form := url.Values{"team_id": {"T1"}, "user_id": {"U_OPS"}, "command": {"/vortex"}, "text": {command}}.Encode()
 	ts := strconv.FormatInt(fixedNow.Unix(), 10)
 	req := httptest.NewRequest(http.MethodPost, "/webhook/slack", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -91,6 +91,7 @@ func newSignedSlackBot(t *testing.T, secret string, fixedNow time.Time) *SlackBo
 	t.Helper()
 	bot, _ := NewSlackBot(SlackConfig{
 		SigningSecret: secret,
+		AllowedUsers:  []string{"T1:U_OPS"},
 		now:           func() time.Time { return fixedNow },
 	})
 	return bot
@@ -211,4 +212,17 @@ func TestSlack_SlashRespondsImmediately(t *testing.T) {
 	if resp["response_type"] != "ephemeral" {
 		t.Errorf("response_type = %v, want ephemeral", resp["response_type"])
 	}
+}
+
+// slashAs sends a signed slash command as team/user and returns the reply text.
+func slashAs(t *testing.T, bot *SlackBot, secret, team, user, text string, now time.Time) string {
+	t.Helper()
+	form := url.Values{"team_id": {team}, "user_id": {user}, "command": {"/vortex"}, "text": {text}}.Encode()
+	ts := strconv.FormatInt(now.Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/slack", strings.NewReader(form))
+	req.Header.Set("X-Slack-Request-Timestamp", ts)
+	req.Header.Set("X-Slack-Signature", slackSign(secret, ts, form))
+	rec := httptest.NewRecorder()
+	bot.HandleSlashCommand(nil).ServeHTTP(rec, req)
+	return rec.Body.String()
 }

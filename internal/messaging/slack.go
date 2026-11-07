@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,7 +25,16 @@ type SlackConfig struct {
 	WebhookURL    string // incoming webhook for SendMessage/SendAlert
 	SigningSecret string // verifies slash-command requests
 	BotToken      string // bot token for Web API (future use)
-	Client        *http.Client
+	// AllowedUsers are the registered operators: full access (agent
+	// requests, deploy, reload). Entries are Slack user IDs ("U012AB") or
+	// team-scoped ("T012AB:U012AB"). Empty with ReadOnlyUsers empty means
+	// nobody can command the bot — only `whoami` answers.
+	AllowedUsers []string
+	// ReadOnlyUsers may run status, logs and help only.
+	ReadOnlyUsers []string
+	// AllowedTeams, when set, restricts every user to these workspaces.
+	AllowedTeams []string
+	Client       *http.Client
 	// now is an injectable clock for tests; defaults to time.Now.
 	now func() time.Time
 }
@@ -42,6 +52,7 @@ type SlackBot struct {
 	cfg    SlackConfig
 	client *http.Client
 	now    func() time.Time
+	allow  slackAllowList
 }
 
 // NewSlackBot constructs the bot.
@@ -54,7 +65,8 @@ func NewSlackBot(cfg SlackConfig) (*SlackBot, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &SlackBot{cfg: cfg, client: client, now: now}, nil
+	return &SlackBot{cfg: cfg, client: client, now: now,
+		allow: newSlackAllowList(cfg.AllowedTeams, cfg.AllowedUsers, cfg.ReadOnlyUsers)}, nil
 }
 
 // SendMessage posts text to the configured incoming webhook.
@@ -160,10 +172,25 @@ func (s *SlackBot) HandleSlashCommand(runtime *agents.Runtime) http.Handler {
 		// One agent session per signed Slack principal (team + user), like
 		// telegram:<chat> and whatsapp:<number>. A shared session fed every
 		// workspace member's history into everyone else's replies (audit F-07).
-		session := slackSessionID(form.Get("team_id"), form.Get("user_id"))
+		teamID, userID := form.Get("team_id"), form.Get("user_id")
+		session := slackSessionID(teamID, userID)
 
-		// Acknowledge immediately (Slack requires a fast 200).
-		ack := s.handleSub(r.Context(), runtime, session, sub, args)
+		// Signed by Slack is not the same as trusted by the operator: every
+		// command but whoami/help needs a registered user.
+		sub = strings.ToLower(sub)
+		var ack string
+		have, need := s.allow.access(teamID, userID), requiredAccess(sub)
+		switch {
+		case sub == "whoami":
+			ack = s.whoami(teamID, userID, have)
+		case have < need:
+			slog.Warn("slack: command refused for unregistered or read-only user",
+				"team", teamID, "user", userID, "command", sub)
+			ack = s.refusal(teamID, userID, have)
+		default:
+			// Acknowledge immediately (Slack requires a fast 200).
+			ack = s.handleSub(r.Context(), runtime, session, sub, args)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"response_type": "ephemeral",
@@ -194,6 +221,25 @@ func slackSessionID(teamID, userID string) string {
 	return "slack-" + teamID + "-" + userID
 }
 
+// whoami tells a person their Slack IDs and access level, so an operator can
+// register them. It reveals only the caller's own identifiers.
+func (s *SlackBot) whoami(teamID, userID string, have SlackAccess) string {
+	level := map[SlackAccess]string{SlackNone: "not registered", SlackReadOnly: "read-only", SlackOperator: "operator"}[have]
+	return fmt.Sprintf("team_id=%s user_id=%s access=%s\nTo register: add %s:%s to GUBERN_SLACK_ALLOWED_USERS (or GUBERN_SLACK_READONLY_USERS) and restart Gubern.",
+		teamID, userID, level, teamID, userID)
+}
+
+// refusal explains why a command was refused.
+func (s *SlackBot) refusal(teamID, userID string, have SlackAccess) string {
+	if have == SlackReadOnly {
+		return "You have read-only access: status, logs and help only."
+	}
+	if !s.allow.configured() {
+		return "No Slack users are registered with this Gubern server yet. Run /vortex whoami and give the IDs to the operator."
+	}
+	return "You are not registered with this Gubern server. Run /vortex whoami and give the IDs to the operator."
+}
+
 // splitCommand splits "status extra args" into ("status", "extra args").
 func splitCommand(text string) (sub, args string) {
 	parts := strings.SplitN(text, " ", 2)
@@ -221,8 +267,8 @@ func (s *SlackBot) handleSub(ctx context.Context, runtime *agents.Runtime, sessi
 		return "deploy requested: " + args
 	case "logs":
 		return "recent logs for: " + args
-	case "":
-		return "usage: /vortex <status|deploy|logs|reload>"
+	case "", "help":
+		return "usage: /vortex <status|logs|deploy|reload|whoami> or /vortex <request for the agent>"
 	default:
 		// Anything else is treated as a free-form request to the coordinator.
 		if runtime == nil {

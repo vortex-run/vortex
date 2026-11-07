@@ -52,7 +52,7 @@ func TestSlack_SessionsArePerPrincipal(t *testing.T) {
 	}
 	defer func() { _ = rt.Stop(context.Background()) }()
 	const secret = "slack-session-test-secret"
-	bot, err := NewSlackBot(SlackConfig{SigningSecret: secret})
+	bot, err := NewSlackBot(SlackConfig{SigningSecret: secret, AllowedUsers: []string{"U_ALICE", "U_BOB"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestSlack_SessionsArePerPrincipal(t *testing.T) {
 		t.Errorf("own history lost: %s", r3)
 	}
 	// A request with no user identity is refused, not routed to a shared session.
-	if r4 := send("T1", "", "hello there"); !strings.Contains(r4, "no Slack team/user identity") {
+	if r4 := send("T1", "", "hello there"); !strings.Contains(r4, "not registered") {
 		t.Errorf("identity-less request: %s", r4)
 	}
 }

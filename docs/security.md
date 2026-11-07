@@ -141,8 +141,11 @@ authenticates the platform itself and fails closed:
   that its sender may drive your agent.
 - **Slack:** requests must carry a valid, fresh (±5 min) signature for
   `GUBERN_SLACK_SIGNING_SECRET`. The route isn't mounted without the secret.
-  Anyone in the Slack workspace that installed the app can use the slash
-  command.
+  A valid signature proves Slack sent the request, not that the person may
+  drive your agent, so access is per registered user and denied by default:
+  `GUBERN_SLACK_ALLOWED_USERS` (operators) and `GUBERN_SLACK_READONLY_USERS`
+  (status/logs), optionally pinned to `GUBERN_SLACK_ALLOWED_TEAMS`. Anyone
+  else gets only `/vortex whoami`. Each user has their own agent session.
 
 Command approval prompts go to the operator's configured Telegram chat, not
 back to whoever sent the message, so a webhook sender can't approve their own
