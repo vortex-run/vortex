@@ -3,9 +3,11 @@ package messaging
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
@@ -73,7 +75,7 @@ func (m *ApprovalManager) request(ctx context.Context, req agents.ApprovalReques
 		m.mu.Unlock()
 	}()
 
-	desc := fmt.Sprintf("🔐 *Approval required*\nRun command: `%s %v`", req.Command, req.Args)
+	desc := approvalPrompt(id, req)
 	if err := m.telegram.SendApprovalRequest(ctx, m.chatID, desc, "approve:"+id, "reject:"+id); err != nil {
 		return false
 	}
@@ -88,6 +90,53 @@ func (m *ApprovalManager) request(ctx context.Context, req agents.ApprovalReques
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// maxApprovalPreview caps the preview so the prompt stays well under
+// Telegram's 4096-character message limit.
+const maxApprovalPreview = 3000
+
+// approvalPrompt renders what the approver is actually signing off on: the
+// tool, its risk level, the one-line summary, the command or content preview,
+// and the approval id. An approver must never see a prompt that is identical
+// for every action (audit F-01). The text is sent without a parse mode, so the
+// model-influenced fields cannot inject formatting.
+func approvalPrompt(id string, req agents.ApprovalRequest) string {
+	var b strings.Builder
+	b.WriteString("🔐 Approval required (" + id + ")\n")
+	tool := req.Tool
+	if tool == "" && req.Command != "" {
+		tool = "run_command"
+	}
+	if tool != "" {
+		b.WriteString("Tool: " + tool + "\n")
+	}
+	b.WriteString("Risk: " + req.Risk() + "\n")
+	if req.Description != "" {
+		b.WriteString("Action: " + req.Description + "\n")
+	}
+	if req.Command != "" {
+		cmd := req.Command
+		if len(req.Args) > 0 {
+			cmd += " " + strings.Join(req.Args, " ")
+		}
+		b.WriteString("Command: " + cmd + "\n")
+	}
+	preview := req.Preview
+	if preview == "" && req.Command == "" && req.Description == "" {
+		preview = "(no details were supplied for this action — reject unless you expected it)"
+	}
+	if preview != "" {
+		if len(preview) > maxApprovalPreview {
+			cut := maxApprovalPreview
+			for cut > 0 && !utf8.RuneStart(preview[cut]) {
+				cut--
+			}
+			preview = preview[:cut] + "\n…(truncated)"
+		}
+		b.WriteString("\n" + preview)
+	}
+	return b.String()
 }
 
 // Resolve records an approve/reject decision for the approval with the given id
