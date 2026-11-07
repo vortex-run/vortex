@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // writePolicyDir writes a single policy.rego with the given contents into a
@@ -27,7 +27,7 @@ func writePolicyDir(t *testing.T, rego string) string {
 	return dir
 }
 
-// TestPolicy_DefaultAllowAll starts vortex with no VORTEX_POLICY_DIR; the
+// TestPolicy_DefaultAllowAll starts vortex with no GUBERN_POLICY_DIR; the
 // built-in allow-all policy must let traffic through and the startup log must
 // report the default policy.
 func TestPolicy_DefaultAllowAll(t *testing.T) {
@@ -73,7 +73,7 @@ func TestPolicy_CustomPolicyDenies(t *testing.T) {
 	beHost, bePort := hostPort(t, be)
 
 	policyDir := writePolicyDir(t, "package vortex\n\ndefault allow = false\n")
-	t.Setenv("VORTEX_POLICY_DIR", policyDir)
+	t.Setenv("GUBERN_POLICY_DIR", policyDir)
 
 	listen := testutil.FreePort(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(httpRoute("web", listen, beHost, bePort)))
@@ -108,7 +108,7 @@ func TestPolicy_ReloadPolicy(t *testing.T) {
 	beHost, bePort := hostPort(t, be)
 
 	policyDir := writePolicyDir(t, "package vortex\n\ndefault allow = true\n")
-	t.Setenv("VORTEX_POLICY_DIR", policyDir)
+	t.Setenv("GUBERN_POLICY_DIR", policyDir)
 
 	listen := testutil.FreePort(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(httpRoute("web", listen, beHost, bePort)))

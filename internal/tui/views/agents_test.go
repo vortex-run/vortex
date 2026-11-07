@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 func TestAgents_Init(t *testing.T) {
@@ -106,7 +106,7 @@ func TestAgents_RoleStyling(t *testing.T) {
 	if !strings.Contains(out, "┌─ You ") || !strings.Contains(out, "hi") {
 		t.Errorf("user bubble missing, got:\n%s", out)
 	}
-	if !strings.Contains(out, "┌─ VORTEX ") || !strings.Contains(out, "hello") {
+	if !strings.Contains(out, "┌─ Gubern ") || !strings.Contains(out, "hello") {
 		t.Errorf("agent bubble missing, got:\n%s", out)
 	}
 	// System greeting renders as a centered separator line.
@@ -638,7 +638,7 @@ func TestAgents_ApprovalRiskBadgeAndHeader(t *testing.T) {
 		wantBadge  string
 		wantHeader string
 	}{
-		{"[APPROVAL_REQUIRED|LOW RISK|write_file] write calc.py", "[LOW RISK]", "VORTEX wants to make a change"},
+		{"[APPROVAL_REQUIRED|LOW RISK|write_file] write calc.py", "[LOW RISK]", "Gubern wants to make a change"},
 		{"[APPROVAL_REQUIRED|HIGH RISK|run_terminal] run rm -rf old", "[HIGH RISK]", "Review carefully"},
 		{"[APPROVAL_REQUIRED|CRITICAL — review carefully|ssh_command] ssh deploy", "[CRITICAL", "cannot be undone"},
 	}
@@ -676,5 +676,17 @@ func TestAgents_ApprovalRendersInWarningFrame(t *testing.T) {
 	})
 	if out := m.renderMessages(); !strings.Contains(out, "┌─ Approval Required ") {
 		t.Errorf("approval should render in the Approval Required frame:\n%s", out)
+	}
+}
+
+// TestAgents_ApprovalCapturesLastActionID: the decision is bound to the
+// action id on the newest approval line in the reply.
+func TestAgents_ApprovalCapturesLastActionID(t *testing.T) {
+	m := NewAgents(nil)
+	content := "[APPROVAL_REQUIRED|LOW RISK|write_file] Write a.txt (action 0123456789abcdef)\n✓ done\n" +
+		"[APPROVAL_REQUIRED|LOW RISK|write_file] Write b.txt (action fedcba9876543210)"
+	updated, _ := m.Update(agentResponse{content: content})
+	if got := updated.(AgentsModel).approvalAction; got != "fedcba9876543210" {
+		t.Errorf("approvalAction = %q", got)
 	}
 }

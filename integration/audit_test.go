@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // auditConfig renders a config with a fixed cluster name so the audit HMAC key
-// is stable between the server and the `vortex audit` CLI.
+// is stable between the server and the `gubern audit` CLI.
 func auditConfig() string {
 	return `cluster: { name: "audit-int" }
 tls: { acme_email: "a@b.com", provider: "internal", min_version: "TLS1.2" }
@@ -26,8 +26,8 @@ observability: { log_level: "info", log_sink: "stderr" }
 
 func TestAudit_SecretSetRecorded(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	t.Setenv("VORTEX_AUDIT_LOG", auditPath)
-	t.Setenv("VORTEX_SECRET_STORE", t.TempDir())
+	t.Setenv("GUBERN_AUDIT_LOG", auditPath)
+	t.Setenv("GUBERN_SECRET_STORE", t.TempDir())
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, auditConfig())
@@ -54,8 +54,8 @@ func TestAudit_SecretSetRecorded(t *testing.T) {
 
 func TestAudit_ReloadRecorded(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	t.Setenv("VORTEX_AUDIT_LOG", auditPath)
-	t.Setenv("VORTEX_SECRET_STORE", t.TempDir())
+	t.Setenv("GUBERN_AUDIT_LOG", auditPath)
+	t.Setenv("GUBERN_SECRET_STORE", t.TempDir())
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, auditConfig())
@@ -84,8 +84,8 @@ func TestAudit_ReloadRecorded(t *testing.T) {
 
 func TestAudit_StartEventAndVerify(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	t.Setenv("VORTEX_AUDIT_LOG", auditPath)
-	t.Setenv("VORTEX_SECRET_STORE", t.TempDir())
+	t.Setenv("GUBERN_AUDIT_LOG", auditPath)
+	t.Setenv("GUBERN_SECRET_STORE", t.TempDir())
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, auditConfig())

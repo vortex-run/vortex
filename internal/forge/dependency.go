@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // safeTools are binaries the DependencyAgent may invoke directly: they have
@@ -108,6 +110,7 @@ func (d *DependencyAgent) run(ctx context.Context, command string, args ...strin
 	defer cancel()
 	cmd := exec.CommandContext(cctx, command, args...)
 	cmd.Dir = d.cfg.SandboxDir
+	cmd.Env = agents.BuildEnv() // no provider keys, tokens or master key
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -130,6 +133,7 @@ func (d *DependencyAgent) version(ctx context.Context, name string) (string, boo
 	defer cancel()
 	cmd := exec.CommandContext(cctx, name, verArg)
 	cmd.Dir = d.cfg.SandboxDir
+	cmd.Env = agents.BuildEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false, err

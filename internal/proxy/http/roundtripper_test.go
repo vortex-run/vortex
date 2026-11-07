@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/sandeepbollavaram/vortex/internal/security"
 )
 
 // captureBackend starts a test backend that records the last request headers it
@@ -140,5 +142,24 @@ func TestRT_ReturnsResponse(t *testing.T) {
 	}
 	if body != "hello from backend" {
 		t.Errorf("body = %q, want 'hello from backend'", body)
+	}
+}
+
+// TestRT_EdgeClientIPHeaderOnlyFromEdge: a client-sent X-Vortex-Client-IP is
+// dropped; the edge's resolution (request context) is forwarded.
+func TestRT_EdgeClientIPHeaderOnlyFromEdge(t *testing.T) {
+	srv, got := captureBackend(t, "ok")
+	req := newReq(t, "app.example.com")
+	req.Header.Set(security.ClientIPHeader, "1.1.1.1")
+	_, _ = forward(t, srv, req)
+	if v := got().Get(security.ClientIPHeader); v != "" {
+		t.Errorf("client-supplied %s forwarded: %q", security.ClientIPHeader, v)
+	}
+	req = newReq(t, "app.example.com")
+	req.Header.Set(security.ClientIPHeader, "1.1.1.1")
+	req = req.WithContext(security.WithClientIP(req.Context(), "198.51.100.4"))
+	_, _ = forward(t, srv, req)
+	if v := got().Get(security.ClientIPHeader); v != "198.51.100.4" {
+		t.Errorf("%s = %q, want the edge-resolved 198.51.100.4", security.ClientIPHeader, v)
 	}
 }

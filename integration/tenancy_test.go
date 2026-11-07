@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/secrets"
-	"github.com/vortex-run/vortex/internal/tenancy"
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 func TestTenancy_NamespaceIsolatesSecrets(t *testing.T) {

@@ -36,6 +36,11 @@ func (t *LSPDiagnosticsTool) Execute(_ context.Context, params map[string]any) (
 	if err != nil {
 		return nil, err
 	}
+	// The file is read and handed to the language server, whose diagnostics
+	// can quote it: keep it inside the workspace like any other file tool.
+	if file, err = t.resolve(file); err != nil {
+		return nil, err
+	}
 	lang := languageForFile(file)
 	if lang == "" {
 		return map[string]any{"diagnostics": []Diagnostic{}, "count": 0, "note": "unsupported file type"}, nil
@@ -54,6 +59,19 @@ func (t *LSPDiagnosticsTool) Execute(_ context.Context, params map[string]any) (
 		return nil, derr
 	}
 	return map[string]any{"diagnostics": diags, "count": len(diags)}, nil
+}
+
+// resolve makes file absolute against WorkDir and keeps it inside WorkDir
+// (symlinks included). Relative paths used to resolve against the process's
+// working directory, and absolute ones could name any file.
+func (t *LSPDiagnosticsTool) resolve(file string) (string, error) {
+	if t.WorkDir == "" {
+		return filepath.Abs(file)
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(t.WorkDir, file)
+	}
+	return containInTrustedRoot(t.WorkDir, file)
 }
 
 // clientFor returns (lazily starting) the LSP client for a language, or nil

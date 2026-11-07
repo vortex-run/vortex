@@ -21,8 +21,8 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
-	proxyquic "github.com/vortex-run/vortex/internal/proxy/quic"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
+	proxyquic "github.com/sandeepbollavaram/vortex/internal/proxy/quic"
 )
 
 // quicTLS builds a self-signed server TLS config plus a client config that
@@ -66,15 +66,33 @@ func quicRouter(t *testing.T, body string) *proxyhttp.Router {
 	return r
 }
 
+// reserveAddr returns a loopback address whose port is free for both TCP and
+// UDP: the dual-stack server binds TCP and QUIC (UDP) on the same port.
+// Windows reserves dynamic UDP ranges (netsh int ipv4 show excludedportrange
+// protocol=udp), so a TCP-free port can still refuse a UDP bind; probe both
+// and retry.
 func reserveAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	// UDP first: the OS only assigns UDP ports it will let us bind, while
+	// consecutive TCP picks can all fall inside a Windows-reserved UDP range.
+	var lastErr error
+	for range 50 {
+		u, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := u.LocalAddr().String()
+		ln, err := net.Listen("tcp", addr)
+		_ = u.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		_ = ln.Close()
+		return addr
 	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
+	t.Fatalf("no port free for both TCP and UDP after 50 tries: %v", lastErr)
+	return ""
 }
 
 func TestQUIC_HTTP3Request(t *testing.T) {

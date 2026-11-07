@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 const sampleConfig = `
@@ -35,7 +35,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 // readers without a restart.
 func TestHealthReflectsConfigReload(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "vortex.cue")
+	path := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}

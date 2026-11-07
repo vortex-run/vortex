@@ -1,4 +1,4 @@
-// Package schema exposes VORTEX's embedded master configuration schema.
+// Package schema exposes Gubern's embedded master configuration schema.
 //
 // The authoritative schema lives next to this file as schema.cue (per the
 // repo layout in README.md). go:embed can only reference files within its own

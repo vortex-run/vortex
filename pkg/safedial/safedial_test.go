@@ -107,3 +107,29 @@ func TestClient_RedirectToInternalBlocked(t *testing.T) {
 		t.Error("redirect to metadata IP should be refused")
 	}
 }
+
+// Audit F-11: CGNAT (incl. Alibaba metadata), NAT64/6to4-embedded internal
+// IPv4, and other non-global ranges must be blocked; public addresses (incl.
+// NAT64-embedded public IPv4) must not be.
+func TestIsBlockedIP_NonGlobalRanges(t *testing.T) {
+	blocked := []string{
+		"100.100.100.200", "100.64.0.1", "100.127.255.254", // CGNAT / Alibaba metadata
+		"64:ff9b::a9fe:a9fe", "64:ff9b::7f00:1", "64:ff9b::a00:1", // NAT64 → 169.254.169.254 / 127.0.0.1 / 10.0.0.1
+		"2002:a9fe:a9fe::1", "2002:7f00:1::", // 6to4 embedding blocked v4
+		"::ffff:100.100.100.200", "::ffff:127.0.0.1", // IPv4-mapped
+		"0.1.2.3", "192.0.0.8", "198.18.0.1", "224.0.0.1", "240.0.0.1", "255.255.255.255",
+		"64:ff9b:1::1", "2001::1", "ff02::1",
+		"169.254.169.254", "fd00:ec2::254", "10.0.0.1", "127.0.0.1", "::1",
+	}
+	for _, s := range blocked {
+		if !IsBlockedIP(net.ParseIP(s)) {
+			t.Errorf("IsBlockedIP(%s) = false, want blocked", s)
+		}
+	}
+	allowed := []string{"8.8.8.8", "1.1.1.1", "100.128.0.1", "64:ff9b::808:808", "2002:808:808::1", "2001:4860:4860::8888", "2606:4700::1111"}
+	for _, s := range allowed {
+		if IsBlockedIP(net.ParseIP(s)) {
+			t.Errorf("IsBlockedIP(%s) = true, want allowed (public)", s)
+		}
+	}
+}

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 func TestLogBuffer_StoresEntries(t *testing.T) {
@@ -84,7 +84,7 @@ func logsServer(t *testing.T, populate bool) (*Server, string) {
 
 	buf := NewLogBuffer(100)
 	if populate {
-		buf.Write(LogEntry{Time: "10:00:00", Level: "INFO", Msg: "VORTEX started"})
+		buf.Write(LogEntry{Time: "10:00:00", Level: "INFO", Msg: "Gubern started"})
 		buf.Write(LogEntry{Time: "10:00:01", Level: "WARN", Msg: "gossip"})
 	}
 	s.SetLogBuffer(buf)
@@ -105,7 +105,7 @@ func TestAPI_LogsReturnsEntries(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Entries) != 2 || body.Entries[0].Msg != "VORTEX started" {
+	if len(body.Entries) != 2 || body.Entries[0].Msg != "Gubern started" {
 		t.Errorf("entries = %+v, want the 2 buffered lines", body.Entries)
 	}
 }

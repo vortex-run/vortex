@@ -17,8 +17,8 @@ func TestNewRootCommandInitialises(t *testing.T) {
 	if root == nil {
 		t.Fatal("NewRootCommand returned nil")
 	}
-	if root.Use != "vortex" {
-		t.Errorf("root.Use = %q, want vortex", root.Use)
+	if root.Use != "gubern" {
+		t.Errorf("root.Use = %q, want gubern", root.Use)
 	}
 }
 
@@ -37,8 +37,8 @@ func TestConfigFlagDefault(t *testing.T) {
 	if f == nil {
 		t.Fatal("--config not registered")
 	}
-	if f.DefValue != "vortex.cue" {
-		t.Errorf("--config default = %q, want vortex.cue", f.DefValue)
+	if f.DefValue != "gubern.cue" {
+		t.Errorf("--config default = %q, want gubern.cue", f.DefValue)
 	}
 }
 

@@ -7,8 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // KeysModel is the live API-key-rotation panel: per-slot score, latency,
@@ -90,7 +90,7 @@ func (m KeysModel) View() string {
 	if len(m.data.Slots) == 0 {
 		return brand.StyleTitle.Render("API Key Slots") + "\n\n" +
 			brand.StyleSubtitle.Render("Single-provider mode (no key slots configured).") + "\n\n" +
-			"Add a slot:  vortex keys add --provider deepseek --key <key>"
+			"Add a slot:  gubern keys add --provider deepseek --key <key>"
 	}
 	if m.detail {
 		return m.renderDetail()

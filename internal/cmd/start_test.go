@@ -20,18 +20,28 @@ func TestStartPidfileFlagDefault(t *testing.T) {
 	if f == nil {
 		t.Fatal("--pidfile flag not registered")
 	}
-	if f.DefValue != "vortex.pid" {
-		t.Errorf("--pidfile default = %q, want vortex.pid", f.DefValue)
+	if f.DefValue != "gubern.pid" {
+		t.Errorf("--pidfile default = %q, want gubern.pid", f.DefValue)
 	}
 }
 
 func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "vortex.cue")
-	if err := os.WriteFile(cfgPath, []byte(checkValidConfig), 0o600); err != nil {
+	cfgPath := filepath.Join(dir, "gubern.cue")
+	// A local-only config: the internal CA (Let's Encrypt would start the ACME
+	// challenge server on :80, all interfaces), no routes (no public edge
+	// listeners), and a single node (no gossip toward peer IPs). Anything that
+	// binds a non-loopback interface makes Windows Firewall prompt for the
+	// ephemeral cmd.test.exe on every run, and this test only checks a clean
+	// start→shutdown sequence.
+	const localOnlyConfig = `
+cluster: {name: "start-test"}
+tls: {provider: "internal", acme_email: "test@example.com"}
+`
+	if err := os.WriteFile(cfgPath, []byte(localOnlyConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	pidPath := filepath.Join(dir, "vortex.pid")
+	pidPath := filepath.Join(dir, "gubern.pid")
 
 	// Point the global config flag at our temp config and initialise the logger
 	// (normally done by PersistentPreRunE).
@@ -43,7 +53,7 @@ func TestRunStartReturnsCleanlyOnContextCancel(t *testing.T) {
 	// Bind management API to loopback only. Without this, runStart uses
 	// api.DefaultAddr (":9090"), which listens on all interfaces and triggers
 	// Windows Firewall prompts for the ephemeral cmd.test.exe binary.
-	t.Setenv("VORTEX_API_LISTEN", "127.0.0.1:0")
+	t.Setenv("GUBERN_API_LISTEN", "127.0.0.1:0")
 
 	// A pre-cancelled context makes lifecycle.Run return immediately, so
 	// runStart performs its full start→shutdown sequence without blocking.
@@ -85,6 +95,7 @@ func TestTelegramFromFile(t *testing.T) {
 	// with telegram fields.
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", dir)
 
 	cfg := AIProviderConfig{
@@ -102,6 +113,7 @@ func TestTelegramFromFile(t *testing.T) {
 func TestTelegramFromFile_AbsentWhenNoToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", dir)
 	if _, _, ok := telegramFromFile(); ok {
 		t.Error("telegramFromFile should be false when no config exists")

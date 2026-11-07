@@ -28,7 +28,7 @@ func TestNewFriendly_RateLimit(t *testing.T) {
 		if fe.Code != "AI_RATE_LIMIT" {
 			t.Errorf("%q → code %q, want AI_RATE_LIMIT", in, fe.Code)
 		}
-		if !strings.Contains(fe.Fix, "vortex keys add") {
+		if !strings.Contains(fe.Fix, "gubern keys add") {
 			t.Errorf("%q fix should suggest backup keys: %q", in, fe.Fix)
 		}
 	}
@@ -48,7 +48,7 @@ func TestNewFriendly_InvalidKey(t *testing.T) {
 		if fe.Code != "AI_AUTH" {
 			t.Errorf("%q → code %q, want AI_AUTH", in, fe.Code)
 		}
-		if !strings.Contains(fe.Fix, "vortex setup") {
+		if !strings.Contains(fe.Fix, "gubern setup") {
 			t.Errorf("%q fix should suggest setup: %q", in, fe.Fix)
 		}
 	}
@@ -59,7 +59,7 @@ func TestNewFriendly_MissingSecret(t *testing.T) {
 	if fe.Code != "SECRET_MISSING" {
 		t.Fatalf("code = %q, want SECRET_MISSING", fe.Code)
 	}
-	if !strings.Contains(fe.Fix, "vortex secret set db_password") {
+	if !strings.Contains(fe.Fix, "gubern secret set db_password") {
 		t.Errorf("fix should name the exact command: %q", fe.Fix)
 	}
 }
@@ -85,7 +85,7 @@ func TestNewFriendly_ConnectionRefused(t *testing.T) {
 }
 
 func TestNewFriendly_PermissionDenied(t *testing.T) {
-	fe := NewFriendly(errors.New("open /etc/vortex/vortex.cue: permission denied"))
+	fe := NewFriendly(errors.New("open /etc/vortex/gubern.cue: permission denied"))
 	if fe.Code != "PERM_DENIED" {
 		t.Errorf("code = %q, want PERM_DENIED", fe.Code)
 	}
@@ -99,7 +99,7 @@ func TestNewFriendly_UnknownDefault(t *testing.T) {
 	if !strings.Contains(fe.Detail, "flux capacitor") {
 		t.Errorf("default should surface the raw message: %q", fe.Detail)
 	}
-	if !strings.Contains(fe.Fix, "--verbose") || !strings.Contains(fe.Fix, "github.com/vortex-run") {
+	if !strings.Contains(fe.Fix, "--verbose") || !strings.Contains(fe.Fix, "github.com/sandeepbollavaram/vortex") {
 		t.Errorf("default fix should point at logs + issues: %q", fe.Fix)
 	}
 }
@@ -151,5 +151,21 @@ func TestAllPatternsCovered(t *testing.T) {
 		if got := NewFriendly(errors.New(in)).Code; got != want {
 			t.Errorf("%q → %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestNewFriendly_StatusCodeOnlyAsAWord: digits inside a path or ID must not
+// be read as an HTTP status (a temp dir name containing 401 turned a config
+// error into "Invalid API key").
+func TestNewFriendly_StatusCodeOnlyAsAWord(t *testing.T) {
+	cfgErr := errors.New(`D:\tmp\TestBoot_RejectsInvalidConfig1234014012\001\gubern.cue: cluster.name: conflicting values 12345 and string`)
+	if f := NewFriendly(cfgErr); strings.Contains(f.Title, "API key") {
+		t.Errorf("config error classified as %q", f.Title)
+	}
+	if f := NewFriendly(errors.New("claude: status 401: unauthorized")); !strings.Contains(f.Title, "API key") {
+		t.Errorf("real 401 not recognised: %q", f.Title)
+	}
+	if !hasStatus("got 429 too many", "429") || hasStatus("id4290x", "429") || hasStatus("14290", "429") {
+		t.Error("hasStatus word boundaries wrong")
 	}
 }

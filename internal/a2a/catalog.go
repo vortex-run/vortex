@@ -308,11 +308,11 @@ func ChildCompatible(child AgentManifest, req DelegationRequest) error {
 }
 
 // DefaultCatalog returns a small, meaningful initial catalog aligned with
-// real VORTEX specialist roles (not hundreds of fake personas).
+// real Gubern specialist roles (not hundreds of fake personas).
 func DefaultCatalog() *Catalog {
 	c, err := NewCatalog([]AgentManifest{
 		{
-			ID: "code-agent", Name: "VORTEX Code Agent", Role: "coder", Version: "1.0.0",
+			ID: "code-agent", Name: "Gubern Code Agent", Role: "coder", Version: "1.0.0",
 			Description:       "Implements and edits code in a trusted workspace",
 			Capabilities:      []string{"code.edit", "code.read", "workspace.local"},
 			Tools:             []string{"read_file", "write_file", "edit_file", "list_directory"},
@@ -320,7 +320,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "Covered by specialists package tests and local tool approval tests",
 		},
 		{
-			ID: "test-agent", Name: "VORTEX Test Agent", Role: "tester", Version: "1.0.0",
+			ID: "test-agent", Name: "Gubern Test Agent", Role: "tester", Version: "1.0.0",
 			Description:       "Runs and interprets tests",
 			Capabilities:      []string{"test.run", "code.read", "workspace.local"},
 			Tools:             []string{"run_terminal", "read_file", "list_directory"},
@@ -328,7 +328,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "Covered by specialists package tests",
 		},
 		{
-			ID: "review-agent", Name: "VORTEX Review Agent", Role: "reviewer", Version: "1.0.0",
+			ID: "review-agent", Name: "Gubern Review Agent", Role: "reviewer", Version: "1.0.0",
 			Description:       "Reviews diffs and scores change quality",
 			Capabilities:      []string{"review.diff", "code.read"},
 			Tools:             []string{"read_file", "git_diff", "git_status"},
@@ -336,7 +336,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "Covered by review agent unit tests",
 		},
 		{
-			ID: "research-agent", Name: "VORTEX Research Agent", Role: "researcher", Version: "1.0.0",
+			ID: "research-agent", Name: "Gubern Research Agent", Role: "researcher", Version: "1.0.0",
 			Description:       "Web research with SSRF-safe fetch",
 			Capabilities:      []string{"research.web", "research.summarize"},
 			Tools:             []string{"http_get"},
@@ -344,7 +344,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "SSRF dialer tests in agents/tools",
 		},
 		{
-			ID: "devops-agent", Name: "VORTEX DevOps Agent", Role: "devops", Version: "1.0.0",
+			ID: "devops-agent", Name: "Gubern DevOps Agent", Role: "devops", Version: "1.0.0",
 			Description:  "SSH/Docker operations on configured hosts",
 			Capabilities: []string{"devops.ssh", "devops.docker"},
 			// The devops route drives internal/devops SSH/Docker clients directly;
@@ -355,7 +355,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "Host-key verification covered in devops package",
 		},
 		{
-			ID: "orchestrator-agent", Name: "VORTEX Orchestrator", Role: "coordinator", Version: "1.0.0",
+			ID: "orchestrator-agent", Name: "Gubern Orchestrator", Role: "coordinator", Version: "1.0.0",
 			Description:       "Plans task DAGs and delegates bounded subagents",
 			Capabilities:      []string{"plan.dag", "delegate.bounded"},
 			Tools:             []string{},
@@ -363,7 +363,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "orchestration planner/queue tests",
 		},
 		{
-			ID: "forge-agent", Name: "VORTEX Forge", Role: "builder", Version: "1.0.0",
+			ID: "forge-agent", Name: "Gubern Forge", Role: "builder", Version: "1.0.0",
 			Description:       "Autonomous app builds in a sandbox",
 			Capabilities:      []string{"forge.build", "sandbox.write"},
 			Tools:             []string{"write_file", "run_terminal"},
@@ -371,7 +371,7 @@ func DefaultCatalog() *Catalog {
 			EvalNotes:         "forge API tests",
 		},
 		{
-			ID: "general-agent", Name: "VORTEX General", Role: "general", Version: "1.0.0",
+			ID: "general-agent", Name: "Gubern General", Role: "general", Version: "1.0.0",
 			Description:       "Default fallback for unclassified tasks",
 			Capabilities:      []string{"general.chat"},
 			Tools:             []string{},

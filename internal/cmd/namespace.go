@@ -11,23 +11,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/tenancy"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errNamespace signals a namespace-command failure whose detail was printed.
 var errNamespace = errors.New("namespace command failed")
 
 // namespaceStorePath returns the on-disk namespace registry path, honouring
-// VORTEX_NAMESPACE_STORE and otherwise <user-cache>/vortex/namespaces.json.
+// GUBERN_NAMESPACE_STORE and otherwise <user-cache>/vortex/namespaces.json.
 func namespaceStorePath() string {
-	if override := os.Getenv("VORTEX_NAMESPACE_STORE"); override != "" {
+	if override := os.Getenv("GUBERN_NAMESPACE_STORE"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	return filepath.Join(cacheDir, "vortex", "namespaces.json")
+	cacheDir := userdir.Cache()
+	return filepath.Join(userdir.App(cacheDir), "namespaces.json")
 }
 
 // openNamespaceRegistry loads the namespace registry from disk.
@@ -43,7 +41,7 @@ func openNamespaceRegistry() (*tenancy.Registry, string, error) {
 	return reg, path, nil
 }
 
-// newNamespaceCommand builds `vortex namespace` and its subcommands.
+// newNamespaceCommand builds `gubern namespace` and its subcommands.
 func newNamespaceCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "namespace",

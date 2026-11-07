@@ -19,6 +19,37 @@ func searchDir(t *testing.T) string {
 	return dir
 }
 
+// TestSearchFiles_DoesNotFollowSymlinksOutOfRoot: a symlinked file inside the
+// workspace that points outside it must not be read (search is read-only and
+// runs without approval; its matches go to the model).
+func TestSearchFiles_DoesNotFollowSymlinksOutOfRoot(t *testing.T) {
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "id_rsa")
+	if err := os.WriteFile(secret, []byte("-----BEGIN OPENSSH PRIVATE KEY-----\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := t.TempDir()
+	if err := os.Symlink(secret, filepath.Join(ws, "notes.txt")); err != nil {
+		t.Skipf("can't create symlinks here: %v", err)
+	}
+	_ = os.WriteFile(filepath.Join(ws, "ok.txt"), []byte("BEGIN inside\n"), 0o600)
+
+	res, err := SearchFilesTool{cfg: LocalFSConfig{Root: ws, TrustedRoot: ws}}.Execute(context.Background(),
+		map[string]any{"pattern": "BEGIN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := res.(map[string]any)["matches"].([]map[string]any)
+	for _, m := range matches {
+		if filepath.Base(m["file"].(string)) == "notes.txt" {
+			t.Errorf("search read through a symlink to %s: %v", secret, m)
+		}
+	}
+	if len(matches) != 1 {
+		t.Errorf("matches = %d, want 1 (ok.txt only): %+v", len(matches), matches)
+	}
+}
+
 func TestSearchFiles_FindsMatches(t *testing.T) {
 	dir := searchDir(t)
 	res, err := SearchFilesTool{cfg: LocalFSConfig{Root: dir}}.Execute(context.Background(),

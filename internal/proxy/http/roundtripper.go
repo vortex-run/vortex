@@ -1,4 +1,4 @@
-// Package proxyhttp implements VORTEX's L7 (HTTP/1.1 + HTTP/2) reverse proxy
+// Package proxyhttp implements Gubern's L7 (HTTP/1.1 + HTTP/2) reverse proxy
 // (build plan M2.2): a pooled RoundTripper, request router, load balancers, the
 // proxy handler, and the internet-facing server. It is named proxyhttp to avoid
 // clashing with the standard library's net/http. Standard library plus
@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/security"
 )
 
 // Defaults for RoundTripperConfig.
@@ -105,6 +106,16 @@ func (rt *PooledRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 // inbound request, appending to any existing X-Forwarded-For chain.
 func (rt *PooledRoundTripper) injectForwardedHeaders(req *http.Request) {
 	clientIP := clientIP(req.RemoteAddr)
+
+	// X-Vortex-Client-IP is the security edge's verdict on the client
+	// address. Forward it only when the edge produced it: with the edge off
+	// (the default) a value here came from the client, and a backend that
+	// trusts it could be told any address.
+	if ip, ok := security.ClientIPFromContext(req.Context()); ok {
+		req.Header.Set(security.ClientIPHeader, ip)
+	} else {
+		req.Header.Del(security.ClientIPHeader)
+	}
 
 	if clientIP != "" {
 		if prior := req.Header.Get("X-Forwarded-For"); prior != "" {

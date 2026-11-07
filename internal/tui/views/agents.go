@@ -13,9 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	vortexerrors "github.com/vortex-run/vortex/internal/errors"
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	vortexerrors "github.com/sandeepbollavaram/vortex/internal/errors"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // ChatMessage is one line in the agent conversation.
@@ -27,7 +27,7 @@ type ChatMessage struct {
 	Took      time.Duration // agent replies: time from submit to response
 }
 
-// AgentsModel is the interactive chat with the VORTEX coordinator.
+// AgentsModel is the interactive chat with the Gubern coordinator.
 type AgentsModel struct {
 	client         *tui.Client
 	messages       []ChatMessage
@@ -38,6 +38,7 @@ type AgentsModel struct {
 	sessionID      string
 	awaiting       bool                // an approval is pending (awaiting Y/N then Enter)
 	approvalID     string              // session the pending approval belongs to
+	approvalAction string              // action id from the approval line ("" for older servers)
 	approvalReady  bool                // box has rendered a frame; Y/N now accepted
 	approvalChoice string              // staged choice: "" | "approve" | "reject"
 	forgeJob       string              // active forge job id being polled ("" = none)
@@ -49,14 +50,21 @@ type AgentsModel struct {
 	// stale stream can never write into the buffer.
 	streamText string
 	streamCh   <-chan string
-	width      int
-	height     int
+	// Mid-stream approvals (/agent): the loop asks for approval and waits
+	// with the stream still open, so the box must come up before the stream
+	// ends. streamApproval is the action id already shown; approvalBody is
+	// the box's text, which keeps growing with the preview lines that follow.
+	streamApproval string
+	approvalBody   string
+	approvalInBox  bool // the pending approval's box is messages[len-1]
+	width          int
+	height         int
 }
 
 // slashCommands are the Claude-Code-style quick commands shown when the input
 // begins with "/". Each maps to an agent action.
 var slashCommands = []string{
-	"/ls", "/read", "/run", "/create", "/edit", "/project",
+	"/agent", "/ls", "/read", "/run", "/create", "/edit", "/project",
 	"/forge", "/status", "/reload", "/help",
 	"/diff", "/commit", "/search", "/find",
 	"/history", "/resume", "/undo",
@@ -134,10 +142,29 @@ var jobIDPattern = regexp.MustCompile(`Job ID:\s*(job-[A-Za-z0-9_-]+|[A-Za-z0-9]
 // "|<risk>|<tool>" metadata: "[APPROVAL_REQUIRED|HIGH RISK|run_terminal] ...".
 var approvalMarker = regexp.MustCompile(`\[APPROVAL_REQUIRED(?:\|([^|]*)\|([^\]]*))?\]`)
 
+// lastActionID returns the newest approval action id in s ("" if none):
+// a transcript can hold earlier, already-resolved approvals.
+func lastActionID(s string) string {
+	all := approvalActionID.FindAllStringSubmatch(s, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
+}
+
+// approvalBoxText renders an approval request (plus any preview) as the box.
+func approvalBoxText(s string) string {
+	return formatApproval(strings.TrimRight(s, "\n")) + "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
+}
+
+// approvalActionID matches the "(action <id>)" suffix the coordinator adds so
+// the decision is bound to the action the user actually saw.
+var approvalActionID = regexp.MustCompile(`\(action ([0-9a-f]{16})\)`)
+
 // riskHeaders maps a risk level to its approval-box header (escalating warnings).
 var riskHeaders = map[string]string{
-	brand.RiskLow:      "VORTEX wants to make a change",
-	brand.RiskMedium:   brand.IconWarn + " VORTEX wants to run a command",
+	brand.RiskLow:      "Gubern wants to make a change",
+	brand.RiskMedium:   brand.IconWarn + " Gubern wants to run a command",
 	brand.RiskHigh:     brand.IconWarn + brand.IconWarn + " Review carefully before approving",
 	brand.RiskCritical: brand.IconWarn + brand.IconWarn + brand.IconWarn + " This action cannot be undone",
 }
@@ -272,11 +299,45 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			full := m.streamText
 			m.streamText = ""
 			m.streamCh = nil
+			if m.awaiting && m.approvalInBox {
+				// The stream ended with the box up. For a plain tool request
+				// that is normal: the action stays pending server-side and the
+				// approve call executes it, so hand over to that flow (Y/N stay
+				// live, the result is shown). If a /agent run ended instead,
+				// the approve call reports that nothing is pending.
+				m.approvalInBox, m.approvalBody, m.streamApproval = false, "", ""
+				if strings.TrimSpace(full) == "" {
+					m.thinking = false
+					m.viewport.SetContent(m.renderMessages())
+					return m, nil
+				}
+			}
 			// Route the accumulated reply through the normal handling so
 			// approvals, forge-job detection, and timing behave unchanged.
 			return m.Update(agentResponse{content: full})
 		}
+		if m.awaiting && m.approvalInBox {
+			// Preview lines for the pending approval: show them in its box.
+			m.approvalBody += msg.chunk
+			m.messages[len(m.messages)-1].Content = approvalBoxText(m.approvalBody)
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			return m, readAgentStream(msg.ch)
+		}
 		m.streamText += msg.chunk
+		if id := lastActionID(m.streamText); id != "" && id != m.streamApproval && !m.awaiting {
+			// The run is now waiting on this approval with the stream open.
+			m.streamApproval = id
+			m.approvalBody = m.streamText
+			m.streamText = ""
+			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: approvalBoxText(m.approvalBody), Timestamp: time.Now()})
+			m.awaiting, m.approvalReady, m.approvalChoice = true, false, ""
+			m.approvalID, m.approvalAction, m.approvalInBox = m.sessionID, id, true
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			return m, tea.Batch(readAgentStream(msg.ch),
+				tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return approvalReadyMsg{} }))
+		}
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 		return m, readAgentStream(msg.ch)
@@ -300,6 +361,8 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.approvalReady = false // ignore keys until the box has rendered a frame
 			m.approvalChoice = ""
 			m.approvalID = m.sessionID
+			m.approvalAction = lastActionID(content)
+			m.approvalInBox = false
 			content = formatApproval(content)
 			content += "\n\nPress [Y] then Enter to approve, or [N] then Enter to reject."
 			m.messages = append(m.messages, ChatMessage{Role: "agent", Content: content, Timestamp: time.Now()})
@@ -361,6 +424,11 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.awaiting = false
 		m.approvalReady = false
 		m.approvalChoice = ""
+		if m.approvalInBox {
+			// The run continues on the open stream; its lines follow there.
+			m.approvalInBox, m.approvalBody, m.streamApproval = false, "", ""
+			msg.result = ""
+		}
 		if msg.approved {
 			m.messages = append(m.messages, ChatMessage{Role: "system", Content: "✓ Action approved", Timestamp: time.Now()})
 		} else {
@@ -463,7 +531,7 @@ func (m AgentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the chat screen.
 func (m AgentsModel) View() string {
-	header := tui.TitleStyle.Render("VORTEX Agent") + "  " +
+	header := tui.TitleStyle.Render("Gubern Agent") + "  " +
 		tui.StatusDot(m.client != nil) + " " +
 		tui.SubtitleStyle.Render("Session: "+m.sessionID)
 
@@ -485,7 +553,7 @@ func (m AgentsModel) View() string {
 }
 
 // renderMessages renders the full conversation as brand message bubbles:
-// user messages right-aligned, agent replies left-aligned with a VORTEX (or
+// user messages right-aligned, agent replies left-aligned with a Gubern (or
 // Approval Required) frame, system notices as centered separators.
 func (m AgentsModel) renderMessages() string {
 	w := m.width
@@ -499,7 +567,7 @@ func (m AgentsModel) renderMessages() string {
 			box := titledBox("You", msg.Content, brand.ColorPrimary, minInt(w-2, 70))
 			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Right, box) + "\n\n")
 		case "agent":
-			title, color := "VORTEX", brand.ColorBorder
+			title, color := "Gubern", brand.ColorBorder
 			if strings.Contains(msg.Content, "Agent wants approval") {
 				title, color = "Approval Required", brand.ColorWarning
 			}
@@ -519,7 +587,7 @@ func (m AgentsModel) renderMessages() string {
 		if m.streamText != "" {
 			body = m.streamText + " " + m.spinner.View()
 		}
-		b.WriteString(titledBox("VORTEX", body, brand.ColorBorder, minInt(w-2, 90)))
+		b.WriteString(titledBox("Gubern", body, brand.ColorBorder, minInt(w-2, 90)))
 	}
 	// Show the staged approval choice so the user sees it before confirming.
 	if m.awaiting && m.approvalChoice != "" {
@@ -720,11 +788,15 @@ func (m AgentsModel) ApprovalChoice() string { return m.approvalChoice }
 // and carries back the result transcript (the action executes on approval).
 func (m AgentsModel) sendApproval(approved bool) tea.Cmd {
 	c := m.client
-	sid := m.approvalID
+	sid, action := m.approvalID, m.approvalAction
 	return func() tea.Msg {
 		result := ""
 		if c != nil {
-			result, _ = c.Approve(sid, approved)
+			var err error
+			result, err = c.ApproveAction(sid, action, approved)
+			if err != nil && result == "" {
+				result = "⚠ " + err.Error()
+			}
 		}
 		return approvalResult{approved: approved, result: result}
 	}

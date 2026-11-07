@@ -1,4 +1,4 @@
-// Package proxyquic implements VORTEX's QUIC / HTTP/3 transport (build plan
+// Package proxyquic implements Gubern's QUIC / HTTP/3 transport (build plan
 // M2.3) on top of github.com/quic-go/quic-go. It serves the same proxyhttp
 // Router over HTTP/3 and provides a dual-stack listener that runs QUIC (UDP)
 // alongside the TCP HTTP/1.1+HTTP/2 server, degrading to TCP-only when QUIC
@@ -8,6 +8,7 @@ package proxyquic
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 // QUIC transport defaults.
@@ -33,6 +34,10 @@ type QUICConfig struct {
 	TLSConfig *tls.Config
 	// Router handles requests received over HTTP/3. Required.
 	Router *proxyhttp.Router
+	// Middleware, when set, wraps Router before it serves HTTP/3 requests.
+	// Callers pass the same L7 chain (edge, obs, policy) the TCP listener
+	// uses so HTTP/3 cannot bypass it (audit F-02).
+	Middleware func(http.Handler) http.Handler
 	// MaxStreams is the max concurrent bidirectional streams per connection.
 	// Default 100.
 	MaxStreams int64
@@ -78,11 +83,15 @@ func NewTransport(cfg QUICConfig) (*Transport, error) {
 		cfg.IdleTimeout = defaultIdleTimeout
 	}
 
+	var handler http.Handler = cfg.Router
+	if cfg.Middleware != nil {
+		handler = cfg.Middleware(handler)
+	}
 	t := &Transport{cfg: cfg}
 	t.server = &http3.Server{
 		Addr:      cfg.Addr,
 		TLSConfig: cfg.TLSConfig,
-		Handler:   cfg.Router,
+		Handler:   handler,
 		QUICConfig: &quic.Config{
 			MaxIncomingStreams: cfg.MaxStreams,
 			MaxIdleTimeout:     cfg.IdleTimeout,

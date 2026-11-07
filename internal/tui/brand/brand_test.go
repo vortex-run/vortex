@@ -17,8 +17,8 @@ func TestLogoIsMultiLine(t *testing.T) {
 	if lines := strings.Split(strings.TrimSpace(Logo), "\n"); len(lines) < 5 {
 		t.Errorf("Logo has %d lines, want a multi-line wordmark", len(lines))
 	}
-	if !strings.Contains(LogoSmall, "VORTEX") {
-		t.Errorf("LogoSmall = %q, want it to name VORTEX", LogoSmall)
+	if !strings.Contains(LogoSmall, "Gubern") {
+		t.Errorf("LogoSmall = %q, want it to name Gubern", LogoSmall)
 	}
 	if Tagline == "" || Version == "" {
 		t.Error("Tagline/Version must be set")

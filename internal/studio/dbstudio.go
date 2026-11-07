@@ -14,9 +14,9 @@ type DBAuditLogger interface {
 	Append(ctx context.Context, actor, action, resource string, detail map[string]any) error
 }
 
-// DBRoute describes a database exposed via a VORTEX mTLS TCP route.
+// DBRoute describes a database exposed via a Gubern mTLS TCP route.
 type DBRoute struct {
-	Name       string // route name from vortex.cue
+	Name       string // route name from gubern.cue
 	Kind       string // "postgres" | "mysql" | "redis" | "mongodb"
 	ListenAddr string // address of the mTLS TCP listener to connect through
 }
@@ -163,9 +163,18 @@ var readOnlyPrefixes = []string{"select", "show", "explain", "describe", "desc",
 
 // isReadOnlyQuery reports whether query is a read-only statement. It is a
 // conservative allow-list: anything not starting with a known read verb (after
-// trimming comments/whitespace) is treated as a write.
+// trimming comments/whitespace) is treated as a write, and so is anything
+// with a statement separator or block comment, which could hide a second
+// statement ("select 1; drop table t"). A prefix check can't see writes
+// inside one statement (a data-modifying CTE, SELECT INTO), so an executor
+// must also run read-only queries in a read-only transaction or as a
+// read-only database user.
 func isReadOnlyQuery(query string) bool {
 	q := strings.ToLower(strings.TrimSpace(query))
+	q = strings.TrimSpace(strings.TrimSuffix(q, ";"))
+	if strings.Contains(q, ";") || strings.Contains(q, "/*") {
+		return false
+	}
 	// Strip a leading line comment if present.
 	if strings.HasPrefix(q, "--") {
 		if i := strings.IndexByte(q, '\n'); i >= 0 {

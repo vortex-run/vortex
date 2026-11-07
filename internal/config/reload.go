@@ -3,8 +3,9 @@ package config
 import (
 	"context"
 	"log/slog"
+	"sync"
 
-	"github.com/vortex-run/vortex/pkg/lifecycle"
+	"github.com/sandeepbollavaram/vortex/pkg/lifecycle"
 )
 
 // Manager owns the live config Holder and the metadata needed to reload it. It
@@ -17,6 +18,9 @@ type Manager struct {
 	path   string
 	holder *Holder
 	log    *slog.Logger
+
+	mu      sync.Mutex
+	lastErr error // outcome of the most recent Reload
 }
 
 // NewManager loads the config at path once (failing if it is invalid — startup
@@ -33,12 +37,7 @@ func NewManager(path string, log *slog.Logger) (*Manager, error) {
 	}, nil
 }
 
-func pathOrDefault(path string) string {
-	if path == "" {
-		return DefaultPath
-	}
-	return path
-}
+func pathOrDefault(path string) string { return ResolvePath(path) }
 
 // Holder returns the thread-safe holder for the active config, suitable for
 // passing to subsystems that need to read config concurrently.
@@ -52,6 +51,9 @@ func (m *Manager) Current() *Config { return m.holder.Get() }
 // active config untouched. It never panics.
 func (m *Manager) Reload() error {
 	newCfg, err := Load(m.path)
+	m.mu.Lock()
+	m.lastErr = err
+	m.mu.Unlock()
 	if err != nil {
 		m.log.Error("config reload failed, keeping previous", "path", m.path, "err", err)
 		return err
@@ -64,6 +66,16 @@ func (m *Manager) Reload() error {
 		"new_hash", newCfg.Hash(),
 	)
 	return nil
+}
+
+// LastReloadError returns the error from the most recent Reload (nil if it
+// succeeded or none has run). The lifecycle hook swallows reload errors so
+// a bad file never stops the process; callers that must report the outcome,
+// like POST /internal/reload, read it here.
+func (m *Manager) LastReloadError() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastErr
 }
 
 func hashOf(c *Config) string {

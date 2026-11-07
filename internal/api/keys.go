@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
 )
 
 // createKeyRequest is the POST /api/keys body.
@@ -53,7 +53,7 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}

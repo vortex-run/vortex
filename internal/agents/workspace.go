@@ -35,15 +35,21 @@ func containInTrustedRoot(trustedRoot, abs string) (string, error) {
 	// IsLocal also rejects reserved Windows device names such as NUL. Rebuilding
 	// target from the checked relative part means nothing below can touch the
 	// unvalidated input.
-	rel, err := filepath.Rel(base, target)
-	if err != nil || !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%w: %q is outside trusted workspace %q", ErrWorkspaceEscape, target, base)
-	}
-	target = filepath.Join(base, rel)
-
 	realBase, err := filepath.EvalSymlinks(base)
 	if err != nil {
 		return "", fmt.Errorf("agents: resolve trusted root symlinks: %w", err)
+	}
+	// The target may be written against the root as configured or against
+	// its real path (this function returns the real form, and callers pass
+	// such results back in). Either is fine lexically; the symlink checks
+	// below are always made against realBase.
+	rel, err := filepath.Rel(base, target)
+	if err == nil && filepath.IsLocal(rel) {
+		target = filepath.Join(base, rel)
+	} else if rel, err = filepath.Rel(realBase, target); err == nil && filepath.IsLocal(rel) {
+		target = filepath.Join(realBase, rel)
+	} else {
+		return "", fmt.Errorf("%w: %q is outside trusted workspace %q", ErrWorkspaceEscape, target, base)
 	}
 
 	if _, lerr := os.Lstat(target); lerr == nil {
@@ -74,6 +80,14 @@ func containInTrustedRoot(trustedRoot, abs string) (string, error) {
 			}
 			if !pathWithinBase(realAnc, realBase) {
 				return "", fmt.Errorf("%w: parent of %q resolves outside trusted workspace", ErrWorkspaceEscape, abs)
+			}
+			// Return the resolved form, as for an existing target, so callers
+			// always get a path under the real root. When the root itself is
+			// reached through a link or an alias (macOS /var -> /private/var,
+			// a Windows 8.3 short name such as RUNNER~1), the lexical target
+			// would not be under realBase. Found by the macOS/Windows CI jobs.
+			if remainder, err := filepath.Rel(anc, target); err == nil && filepath.IsLocal(remainder) {
+				return filepath.Join(realAnc, remainder), nil
 			}
 			break
 		}
@@ -144,7 +158,7 @@ var autoModeSensitiveDirs = map[string]bool{
 }
 
 // autoModeSensitive reports whether a path inside trustedRoot must keep its
-// approval prompt under Auto Mode: hook directories, and vortex.cue, which
+// approval prompt under Auto Mode: hook directories, and gubern.cue, which
 // could widen trusted_root or auto_mode on the next restart. Paths it cannot
 // relate to the root count as sensitive.
 func autoModeSensitive(trustedRoot, resolved string) bool {
@@ -152,13 +166,43 @@ func autoModeSensitive(trustedRoot, resolved string) bool {
 	if !ok {
 		return true
 	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return sensitiveParts(strings.Split(filepath.ToSlash(rel), "/"))
+}
+
+// sensitiveParts reports whether a path, split into components, names a hook
+// directory anywhere or ends in gubern.cue / vortex.cue.
+func sensitiveParts(parts []string) bool {
 	for i, part := range parts {
 		// Windows ignores trailing dots and spaces, and ".git::$INDEX_ALLOCATION"
 		// names the .git directory itself.
 		part, _, _ = strings.Cut(part, ":")
 		part = strings.ToLower(strings.TrimRight(part, ". "))
-		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && part == "vortex.cue") {
+		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && (part == "gubern.cue" || part == "vortex.cue")) {
+			return true
+		}
+	}
+	return false
+}
+
+// needsApproval is the single approval decision for mutating local tools.
+// toolRequires is the tool's own RequireApproval; Auto Mode may waive it for
+// routine in-scope paths. Independently, GateSensitive (set for the approval-
+// free team specialists) keeps a prompt on paths that run as code on a later
+// action — .git (config, hooks), hook dirs, gubern.cue — so a specialist
+// cannot plant core.fsmonitor or a hook that git then executes with no shell
+// approval (audit F-05).
+func (cfg LocalFSConfig) needsApproval(toolRequires bool, abs string) bool {
+	if toolRequires && !cfg.waivesApproval(abs) {
+		return true
+	}
+	return cfg.GateSensitive && pathIsSensitive(abs)
+}
+
+// pathIsSensitive checks every component of abs, both as written and with
+// existing symlinks resolved, so a link into .git counts as .git.
+func pathIsSensitive(abs string) bool {
+	for _, p := range []string{abs, resolveExistingPrefix(abs)} {
+		if sensitiveParts(strings.Split(filepath.ToSlash(filepath.Clean(p)), "/")) {
 			return true
 		}
 	}

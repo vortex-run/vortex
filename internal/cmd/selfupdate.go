@@ -2,45 +2,51 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/semver"
 
-	"github.com/vortex-run/vortex/internal/update"
+	"github.com/sandeepbollavaram/vortex/internal/update"
 )
 
-// githubRepo is the source repository for VORTEX releases.
-const githubRepo = "vortex-run/vortex"
+// githubRepo is the source repository for Gubern releases.
+const githubRepo = "sandeepbollavaram/vortex"
 
 // errSelfUpdate signals a self-update failure whose detail was already printed.
 var errSelfUpdate = errors.New("self-update failed")
 
-// newSelfUpdateCommand builds `vortex self-update`.
+// newSelfUpdateCommand builds `gubern self-update`.
 func newSelfUpdateCommand() *cobra.Command {
 	var (
-		checkOnly bool
-		assumeYes bool
+		checkOnly      bool
+		assumeYes      bool
+		allowDowngrade bool
 	)
 	c := &cobra.Command{
 		Use:   "self-update",
-		Short: "Update VORTEX to the latest release",
+		Short: "Update Gubern to the latest release",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSelfUpdate(cmd, checkOnly, assumeYes)
+			return runSelfUpdate(cmd, checkOnly, assumeYes, allowDowngrade)
 		},
 	}
 	c.Flags().BoolVar(&checkOnly, "check", false, "check for updates without downloading")
 	c.Flags().BoolVar(&assumeYes, "yes", false, "skip the confirmation prompt")
+	c.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false, "install the latest release even when it is not newer than this binary")
 	return c
 }
 
-func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
+func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes, allowDowngrade bool) error {
 	out := cmd.OutOrStdout()
 	update.SetUserAgent("vortex/" + version)
 	ctx := cmd.Context()
@@ -60,10 +66,19 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 		fmt.Fprintf(out, "Already on latest version (%s). Nothing to do.\n", rel.Tag)
 		return nil
 	}
+	// Rollback protection (audit F-15): the release tag is unsigned, so an
+	// old signed release re-published (or re-marked latest) must not be
+	// installed over a newer binary. The extracted binary's own embedded
+	// version is checked against the tag below.
+	if !versionNewer(rel.Tag, version) && !allowDowngrade {
+		fmt.Fprintf(out, "Latest release %s is not newer than this binary (%s); not installing.\n", rel.Tag, version)
+		fmt.Fprintln(out, "Pass --allow-downgrade to install it anyway.")
+		return nil
+	}
 
 	if checkOnly {
 		fmt.Fprintf(out, "Update available: %s → %s\n", version, rel.Tag)
-		fmt.Fprintf(out, "Run 'vortex self-update' to install it.\n")
+		fmt.Fprintf(out, "Run 'gubern self-update' to install it.\n")
 		return nil
 	}
 
@@ -87,16 +102,12 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	// is what defeats a release that swaps both the binary and its checksum
 	// (production audit H4). In integrity-only mode (no pinned key) this is a
 	// no-op and only the SHA-256 check applies.
-	if verr := update.VerifyChecksumsSignature(ctx, rel); verr != nil {
-		fmt.Fprintf(cmd.OutOrStderr(), "error: release signature check failed: %v\n", verr)
-		fmt.Fprintln(cmd.OutOrStderr(), "refusing to install an unverified release")
-		return errSelfUpdate
-	}
-
-	// Fetch and parse checksums.txt for this asset.
-	sums, err := update.FetchChecksums(ctx, rel)
+	// The checksum map comes from the same bytes the signature covers: one
+	// download, verified, then parsed (audit F-12).
+	sums, err := update.VerifiedChecksums(ctx, rel)
 	if err != nil {
-		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+		fmt.Fprintf(cmd.OutOrStderr(), "error: release signature check failed: %v\n", err)
+		fmt.Fprintln(cmd.OutOrStderr(), "refusing to install an unverified release")
 		return errSelfUpdate
 	}
 	wantSHA, ok := sums[asset.Name]
@@ -122,13 +133,22 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 	}
 	fmt.Fprintln(out, " done")
 
-	binInArchive := "vortex"
-	if runtime.GOOS == "windows" {
-		binInArchive = "vortex.exe"
-	}
-	newBin, err := update.Extract(archivePath, extractDir, binInArchive)
+	newBin, err := extractBinary(archivePath, extractDir)
 	if err != nil {
 		fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)
+		return errSelfUpdate
+	}
+
+	// The archive is authenticated, so its binary's embedded version is
+	// signed data. It must be the release the tag names; an old signed
+	// release replayed under a newer tag reports its old version (F-15).
+	binVer, err := binaryVersion(ctx, newBin)
+	if err != nil {
+		fmt.Fprintf(cmd.OutOrStderr(), "error: checking the downloaded binary: %v\n", err)
+		return errSelfUpdate
+	}
+	if !sameVersion(binVer, rel.Tag) {
+		fmt.Fprintf(cmd.OutOrStderr(), "error: release %s contains a %s binary; refusing to install\n", rel.Tag, binVer)
 		return errSelfUpdate
 	}
 
@@ -143,6 +163,45 @@ func runSelfUpdate(cmd *cobra.Command, checkOnly, assumeYes bool) error {
 		return errSelfUpdate
 	}
 	return nil
+}
+
+// versionNewer reports whether candidate is a strictly newer semantic version
+// than current. A current version that is not valid semver (a dev build) is
+// treated as older than any release; an invalid candidate is never newer.
+func versionNewer(candidate, current string) bool {
+	c := "v" + strings.TrimPrefix(candidate, "v")
+	if !semver.IsValid(c) {
+		return false
+	}
+	cur := "v" + strings.TrimPrefix(current, "v")
+	if !semver.IsValid(cur) {
+		return true
+	}
+	return semver.Compare(c, cur) > 0
+}
+
+// binaryVersion runs `<bin> version` and returns the "Version:" field. Every
+// release has the version subcommand (swapBinary relies on it too).
+func binaryVersion(ctx context.Context, bin string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "version").Output()
+	if err != nil {
+		return "", fmt.Errorf("running %s version: %w", filepath.Base(bin), err)
+	}
+	return parseVersionOutput(string(out))
+}
+
+// parseVersionOutput extracts the version from `gubern version` output.
+func parseVersionOutput(out string) (string, error) {
+	for _, line := range strings.Split(out, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "Version:"); ok {
+			if v = strings.TrimSpace(v); v != "" {
+				return v, nil
+			}
+		}
+	}
+	return "", errors.New("binary did not report a version")
 }
 
 // sameVersion reports whether two version strings refer to the same release,

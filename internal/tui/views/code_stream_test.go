@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 func TestCodeStream_ChunksRenderLiveThenFinalize(t *testing.T) {

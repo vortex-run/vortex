@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // BuildConfig configures the build agent.
@@ -72,6 +74,9 @@ func (b *BuildAgent) Build(ctx context.Context) (BuildOutput, error) {
 	start := time.Now()
 	cmd := exec.CommandContext(cctx, command, args...)
 	cmd.Dir = b.cfg.SandboxDir
+	// The build runs generated code (Gradle build scripts, cgo), so it gets
+	// the scrubbed environment: no provider keys, tokens or master key.
+	cmd.Env = agents.BuildEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

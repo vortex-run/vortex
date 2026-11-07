@@ -31,8 +31,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: VORTEX version
-      description: Output of `vortex version` or the git commit.
+      label: Gubern version
+      description: Output of `gubern version` or the git commit.
     validations:
       required: true
   - type: dropdown

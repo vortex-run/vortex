@@ -1,4 +1,4 @@
-// Package auth implements VORTEX's authentication and authorization (build plan
+// Package auth implements Gubern's authentication and authorization (build plan
 // M3.5): a role-based access-control model (org → team → user), API-key issuance
 // and verification, OIDC/SSO login, and the HTTP middleware that ties them
 // together to protect the management API.

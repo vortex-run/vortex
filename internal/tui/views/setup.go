@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // SetupStep is a stage in the wizard.
@@ -169,7 +169,7 @@ func (m SetupModel) View() string {
 		return tui.TitleStyle.Render("Telegram alerts") + "\n\n" +
 			"Would you like to set up Telegram alerts? " + tui.SubtitleStyle.Render("[y/N]")
 	case StepCreatingKey:
-		return tui.SubtitleStyle.Render("⠸ Creating VORTEX API key…")
+		return tui.SubtitleStyle.Render("⠸ Creating Gubern API key…")
 	default:
 		return completeArt
 	}
@@ -234,14 +234,14 @@ func (m SetupModel) SelectedProvider() string { return m.provider }
 func (m SetupModel) EchoPassword() bool { return m.apiKey.EchoMode == textinput.EchoPassword }
 
 const welcomeArt = `╔══════════════════════════════════════╗
-║     VORTEX — First Time Setup        ║
+║     Gubern — First Time Setup        ║
 ║  One binary. Any server. Fully       ║
 ║  autonomous.                         ║
 ╚══════════════════════════════════════╝`
 
 const completeArt = `╔══════════════════════════════════════╗
-║  ✓ VORTEX configured successfully!   ║
+║  ✓ Gubern configured successfully!   ║
 ║                                      ║
-║  Run: vortex start                   ║
+║  Run: gubern start                   ║
 ║  Dashboard: localhost:9090/dashboard ║
 ╚══════════════════════════════════════╝`

@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/policy"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
-	"github.com/vortex-run/vortex/internal/tenancy"
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/policy"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -40,9 +40,10 @@ func freePort(t *testing.T) int {
 func newTestManager(t *testing.T, routes []config.Route) *Manager {
 	t.Helper()
 	m, err := NewManager(ManagerConfig{
-		Config:  &config.Config{Routes: routes},
-		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
-		Logger:  discardLogger(),
+		Config:   &config.Config{Routes: routes},
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
+		Logger:   discardLogger(),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -90,6 +91,7 @@ func TestManager_MTLSRouteUsesTLSConfig(t *testing.T) {
 				Backends: []config.Backend{{Host: "127.0.0.1", Port: freePort(t), Weight: 1}}, MTLS: true},
 		}},
 		TCPPool:    tcp.NewPool(tcp.PoolConfig{}),
+		BindHost:   "127.0.0.1",
 		MTLSConfig: mc,
 		Logger:     discardLogger(),
 	})
@@ -108,8 +110,9 @@ func TestManager_MTLSRouteWithoutConfigErrors(t *testing.T) {
 			{Name: "db", Protocol: "tcp", Listen: freePort(t),
 				Backends: []config.Backend{{Host: "127.0.0.1", Port: freePort(t), Weight: 1}}, MTLS: true},
 		}},
-		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
-		Logger:  discardLogger(),
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
+		Logger:   discardLogger(),
 	})
 	if err == nil {
 		t.Error("expected error for mtls:true route without MTLSConfig")
@@ -135,8 +138,9 @@ func TestManager_NilConfigError(t *testing.T) {
 
 func TestManager_UnknownProtocolError(t *testing.T) {
 	_, err := NewManager(ManagerConfig{
-		Config:  &config.Config{Routes: []config.Route{{Name: "bad", Protocol: "smtp"}}},
-		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
+		Config:   &config.Config{Routes: []config.Route{{Name: "bad", Protocol: "smtp"}}},
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
 	})
 	if err == nil {
 		t.Error("expected error for unknown protocol")
@@ -265,6 +269,7 @@ func TestManager_PolicyEngineEnforcedOnHTTPRoute(t *testing.T) {
 			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
 		}},
 		TCPPool:      tcp.NewPool(tcp.PoolConfig{}),
+		BindHost:     "127.0.0.1",
 		PolicyEngine: denyAllEngine(t),
 		Logger:       discardLogger(),
 	})
@@ -329,9 +334,10 @@ func TestManager_MetricsRecordedOnHTTPRoute(t *testing.T) {
 		Config: &config.Config{Routes: []config.Route{
 			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
 		}},
-		TCPPool: tcp.NewPool(tcp.PoolConfig{}),
-		Metrics: metrics,
-		Logger:  discardLogger(),
+		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
+		Metrics:  metrics,
+		Logger:   discardLogger(),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -377,6 +383,7 @@ func TestManager_NamespaceQuotaEnforced(t *testing.T) {
 			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}, NamespaceID: "ns-1"},
 		}},
 		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
 		Registry: reg, Enforcer: enf, Logger: discardLogger(),
 	})
 	if err != nil {
@@ -414,6 +421,7 @@ func TestManager_NoNamespaceNoEnforcement(t *testing.T) {
 			{Name: "web", Protocol: "http", Listen: port, Backends: []config.Backend{backendOf(t, be)}},
 		}},
 		TCPPool:  tcp.NewPool(tcp.PoolConfig{}),
+		BindHost: "127.0.0.1",
 		Registry: reg, Enforcer: enf, Logger: discardLogger(),
 	})
 	if err != nil {
@@ -506,6 +514,7 @@ func TestManager_MissingPluginIsWarningNotFatal(t *testing.T) {
 				Plugins:  []string{"request-logger"}},
 		}},
 		TCPPool:        tcp.NewPool(tcp.PoolConfig{}),
+		BindHost:       "127.0.0.1",
 		Runtime:        rt,
 		PluginRegistry: reg,
 		Logger:         slog.New(capH),
@@ -567,11 +576,30 @@ func TestManager_CorruptPluginStillErrors(t *testing.T) {
 				Plugins:  []string{"broken"}},
 		}},
 		TCPPool:        tcp.NewPool(tcp.PoolConfig{}),
+		BindHost:       "127.0.0.1",
 		Runtime:        rt,
 		PluginRegistry: reg,
 		Logger:         discardLogger(),
 	})
 	if err == nil {
 		t.Fatal("corrupt plugin should produce a fatal error, got nil")
+	}
+}
+
+func TestManager_ListenAddrBindHost(t *testing.T) {
+	all := &Manager{}
+	if got := all.listenAddr(8443); got != ":8443" {
+		t.Errorf("default bind = %q, want :8443 (all interfaces for a public edge)", got)
+	}
+	if got := all.listenAddr(0); got != ":0" {
+		t.Errorf("unset port = %q, want :0", got)
+	}
+	lo := &Manager{cfg: ManagerConfig{BindHost: "127.0.0.1"}}
+	if got := lo.listenAddr(8443); got != "127.0.0.1:8443" {
+		t.Errorf("loopback bind = %q, want 127.0.0.1:8443", got)
+	}
+	v6 := &Manager{cfg: ManagerConfig{BindHost: "::1"}}
+	if got := v6.listenAddr(8443); got != "[::1]:8443" {
+		t.Errorf("IPv6 bind = %q, want [::1]:8443", got)
 	}
 }

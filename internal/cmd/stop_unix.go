@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// requestStop sends SIGTERM to the process so VORTEX's lifecycle manager runs
+// requestStop sends SIGTERM to the process so Gubern's lifecycle manager runs
 // its graceful shutdown. apiPort is unused on Unix.
 func requestStop(pid int, _ int) error {
 	proc, err := os.FindProcess(pid)

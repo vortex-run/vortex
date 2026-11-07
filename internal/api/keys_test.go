@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
 )
 
 // newAuthedServer builds a Server with auth wired, returning the server and an
@@ -158,10 +158,29 @@ func TestAPI_InternalReloadLocalhostNoAuth(t *testing.T) {
 	s.SetReloadFunc(func() error { return nil })
 	// A loopback reload needs no key (control plane); the handler's own
 	// localhost check governs access.
-	req := httptest.NewRequest(http.MethodPost, "/internal/reload", nil)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/internal/reload", nil) // as `gubern reload` sends it
 	req.RemoteAddr = "127.0.0.1:5555"
 	rec := serve(s, req)
 	if rec.Code != http.StatusOK {
 		t.Errorf("loopback /internal/reload = %d, want 200", rec.Code)
+	}
+}
+
+// An admin-only route still must not decode an unbounded body: a valid but
+// huge request is refused and creates nothing.
+func TestAPI_CreateKeyRejectsOversizedBody(t *testing.T) {
+	s, adminSecret := newAuthedServer(t)
+	huge := `{"user_id":"ci","org_id":"default","roles":["operator"],"description":"` +
+		string(bytes.Repeat([]byte("a"), 100<<10)) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/keys", bytes.NewReader([]byte(huge)))
+	req.Header.Set("X-API-Key", adminSecret)
+	rec := serve(s, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized POST /api/keys = %d, want 400", rec.Code)
+	}
+	list := httptest.NewRequest(http.MethodGet, "/api/keys", nil)
+	list.Header.Set("X-API-Key", adminSecret)
+	if lrec := serve(s, list); bytes.Contains(lrec.Body.Bytes(), []byte(`"user_id":"ci"`)) {
+		t.Error("a key was issued from an oversized request")
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents/specialists"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents/specialists"
 )
 
 // TeamNotifier sends out-of-band notifications (Telegram et al). Defined here
@@ -66,11 +66,11 @@ func NewAgentTeam(cfg TeamConfig, gateway AIGateway, tools *ToolRegistry) *Agent
 	}
 
 	code := specialists.NewCodeAgent(specialists.NewBaseAgent(
-		mkCard(codeAgentID, "VORTEX Code Agent", "coder"), gateway, runTool, cfg.Client, cfg.WorkDir))
+		mkCard(codeAgentID, "Gubern Code Agent", "coder"), gateway, runTool, cfg.Client, cfg.WorkDir))
 	test := specialists.NewTestAgent(specialists.NewBaseAgent(
-		mkCard(testAgentID, "VORTEX Test Agent", "tester"), gateway, runTool, cfg.Client, cfg.WorkDir))
+		mkCard(testAgentID, "Gubern Test Agent", "tester"), gateway, runTool, cfg.Client, cfg.WorkDir))
 	review := specialists.NewReviewAgent(specialists.NewBaseAgent(
-		mkCard(reviewAgentID, "VORTEX Review Agent", "reviewer"), gateway, runTool, cfg.Client, cfg.WorkDir))
+		mkCard(reviewAgentID, "Gubern Review Agent", "reviewer"), gateway, runTool, cfg.Client, cfg.WorkDir))
 
 	t := &AgentTeam{config: cfg, code: code, test: test, review: review, runTool: runTool}
 	if cfg.Server != nil {
@@ -153,7 +153,7 @@ type TeamPlan struct {
 // mandates the full coder → tester → reviewer pipeline for any file-touching
 // task so checkpoints fire between steps (collapsing to one step would skip
 // them).
-const planSystemPrompt = `You are a task planner for VORTEX. Break EVERY coding request into exactly these three steps unless the request is trivially simple (e.g. "what is 2+2"):
+const planSystemPrompt = `You are a task planner for Gubern. Break EVERY coding request into exactly these three steps unless the request is trivially simple (e.g. "what is 2+2"):
 
 Step 1: coder — write the implementation
 Step 2: tester — run tests and verify it works
@@ -318,7 +318,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			res.Error = err.Error()
 			res.Duration = time.Since(start)
 			res.Files = mapKeys(fileSet)
-			t.notify("✗ VORTEX team task failed", res.Summary())
+			t.notify("✗ Gubern team task failed", res.Summary())
 			return res, nil
 		}
 		step.AgentRole = role
@@ -381,7 +381,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			res.Error = lastErr
 			res.Duration = time.Since(start)
 			res.Files = mapKeys(fileSet)
-			t.notify("✗ VORTEX team task failed", res.Summary())
+			t.notify("✗ Gubern team task failed", res.Summary())
 			return res, nil
 		}
 		step.Status = "done"
@@ -407,7 +407,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 			toID, _ := t.agentFor(toRole)
 			progress(fmt.Sprintf("[%s] ⏸ Checkpoint — awaiting your review", step.AgentRole))
 			outcome, cperr := t.config.Checkpoints.Create(ctx,
-				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(stepResult.Files))
+				plan.SessionID, fromID, toID, *stepResult, t.filePreviews(ctx, stepResult.Files))
 			if cperr != nil && outcome != nil && outcome.Status == a2a.CheckpointCancelled {
 				// The caller went away while waiting; nobody decided anything.
 				res.Success = false
@@ -425,7 +425,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 				res.Duration = time.Since(start)
 				res.Files = mapKeys(fileSet)
 				progress(fmt.Sprintf("[%s] ✗ REJECTED by user", step.AgentRole))
-				t.notify("✗ VORTEX team task rejected", res.Summary())
+				t.notify("✗ Gubern team task rejected", res.Summary())
 				return res, nil
 			}
 			switch outcome.Status {
@@ -451,7 +451,7 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 					res.Duration = time.Since(start)
 					res.Files = mapKeys(fileSet)
 					progress(fmt.Sprintf("[%s] ✗ %d of %d edited file(s) could not be written", step.AgentRole, len(failed), len(outcome.EditedFiles)))
-					t.notify("✗ VORTEX team task failed", res.Summary())
+					t.notify("✗ Gubern team task failed", res.Summary())
 					return res, nil
 				}
 				prevContext += "\n" + a2a.FileEditsAsContext(applied)
@@ -465,17 +465,17 @@ func (t *AgentTeam) Execute(ctx context.Context, plan *TeamPlan, progressFn func
 	res.Success = true
 	res.Files = mapKeys(fileSet)
 	res.Duration = time.Since(start)
-	t.notify("✓ VORTEX team task complete", res.Summary())
+	t.notify("✓ Gubern team task complete", res.Summary())
 	return res, nil
 }
 
 // filePreviews reads the modified files into checkpoint previews (best effort).
-func (t *AgentTeam) filePreviews(files []string) []a2a.FilePreview {
+func (t *AgentTeam) filePreviews(ctx context.Context, files []string) []a2a.FilePreview {
 	var out []a2a.FilePreview
 	for _, f := range files {
 		content := ""
 		if t.runTool != nil {
-			if res, err := t.runTool(contextTODO(), "read_file", map[string]any{"path": f}); err == nil {
+			if res, err := t.runTool(ctx, "read_file", map[string]any{"path": f}); err == nil {
 				content = specialists.ToolResultString(res)
 			}
 		}
@@ -523,9 +523,6 @@ func countLines(s string) int {
 	}
 	return strings.Count(s, "\n") + 1
 }
-
-// contextTODO returns a background context for the best-effort preview read.
-func contextTODO() context.Context { return context.Background() }
 
 // resolveStepRole returns the pipeline role for a step, using the capability
 // catalog when required_capabilities are set (no silent fallback).

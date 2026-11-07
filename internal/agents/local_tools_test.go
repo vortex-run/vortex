@@ -311,3 +311,33 @@ func TestIsProtectedPath_CrossPlatform(t *testing.T) {
 		}
 	}
 }
+
+// Audit F-05: the approval-free team tools must still gate writes that run as
+// code on a later action (.git config/hooks, hook dirs, gubern.cue), both with
+// and without a TrustedRoot, while ordinary files stay approval-free.
+func TestTrustedLocalTools_GateSensitivePaths(t *testing.T) {
+	for _, trusted := range []bool{false, true} {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".git", "hooks"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := LocalFSConfig{Root: dir}
+		if trusted {
+			cfg.TrustedRoot, cfg.AutoMode = dir, true
+		}
+		tools := map[string]Tool{}
+		for _, tl := range NewTrustedLocalTools(cfg) {
+			tools[tl.Name()] = tl
+		}
+		for _, p := range []string{".git/config", ".git/hooks/pre-commit", ".husky/pre-commit", "gubern.cue", "sub/.git/config"} {
+			_, err := tools["write_file"].Execute(context.Background(), map[string]any{"path": p, "content": "[core]\n\tfsmonitor = touch /tmp/pwned\n", "create_dirs": true})
+			var ae *ApprovalError
+			if !errors.As(err, &ae) {
+				t.Errorf("trusted=%v write_file %s without approval: err=%v", trusted, p, err)
+			}
+		}
+		if _, err := tools["write_file"].Execute(context.Background(), map[string]any{"path": "src/main.go", "content": "package main", "create_dirs": true}); err != nil {
+			t.Errorf("trusted=%v ordinary write must stay approval-free: %v", trusted, err)
+		}
+	}
+}

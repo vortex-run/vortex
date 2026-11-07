@@ -6,8 +6,8 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // checkpointEditor is the inline editor for a checkpoint file. Ctrl+S saves
@@ -79,7 +79,7 @@ func (m CodeModel) checkpointActionCmd(id, action string, edits []tui.Checkpoint
 		case "approve":
 			err = c.ApproveCheckpoint(id)
 		case "reject":
-			err = c.RejectCheckpoint(id, "rejected via vortex code")
+			err = c.RejectCheckpoint(id, "rejected via gubern code")
 		case "edit":
 			err = c.EditCheckpoint(id, edits)
 		}

@@ -11,7 +11,7 @@ import (
 // plan M20). It wraps bubbles/textarea and adds NORMAL/INSERT/VISUAL modes with
 // the common motions and operators. When VimEnabled is false it behaves as a
 // plain textarea (standard mode), so the same component serves both editor
-// preferences selected in `vortex setup`.
+// preferences selected in `gubern setup`.
 type EditorModel struct {
 	ta         textarea.Model
 	VimEnabled bool

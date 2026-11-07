@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // GeneratedFile is one file produced by the codegen agent.
@@ -39,7 +39,7 @@ func NewCodegenAgent(cfg CodegenConfig) *CodegenAgent {
 	return &CodegenAgent{cfg: cfg}
 }
 
-const codegenSystemPrompt = `You are VORTEX Forge's code generator. Generate complete, working application code. Respond with ONLY a JSON object: {"files":[{"path":"relative/path","content":"file contents"}]}. Paths must be relative (no leading / or ..). Return only the JSON.`
+const codegenSystemPrompt = `You are Gubern Forge's code generator. Generate complete, working application code. Respond with ONLY a JSON object: {"files":[{"path":"relative/path","content":"file contents"}]}. Paths must be relative (no leading / or ..). Return only the JSON.`
 
 // genResponse is the AI's JSON response shape.
 type genResponse struct {

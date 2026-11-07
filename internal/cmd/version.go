@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newVersionCommand builds the `vortex version` subcommand. It prints a
+// newVersionCommand builds the `gubern version` subcommand. It prints a
 // five-field table by default, or just the bare version string with --short.
 // All output goes through cmd.OutOrStdout so it is testable and redirectable.
 func newVersionCommand() *cobra.Command {

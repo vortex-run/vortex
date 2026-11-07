@@ -3,6 +3,7 @@
 package testutil
 
 import (
+	"os"
 	"syscall"
 	"testing"
 	"time"
@@ -33,3 +34,25 @@ func waitExit(t *testing.T, p *VortexProcess, d time.Duration) {
 		t.Fatalf("vortex did not exit within %s", d)
 	}
 }
+
+// dumpStacks asks a hung child for its goroutine stacks (the Go runtime
+// prints them to stderr on SIGQUIT, then exits), so a startup timeout shows
+// where it was stuck instead of an empty or truncated log.
+func dumpStacks(p *VortexProcess) {
+	if p.Cmd == nil || p.Cmd.Process == nil {
+		return
+	}
+	if err := p.Cmd.Process.Signal(syscall.SIGQUIT); err != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() { _ = p.Cmd.Wait(); close(done) }() // Cmd.Wait also drains the output copy
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
+	p.stopped = true // reaped here; the cleanup must not wait again
+}
+
+// quitForStacks makes a Go process print its goroutine stacks and exit.
+func quitForStacks(p *os.Process) error { return p.Signal(syscall.SIGQUIT) }

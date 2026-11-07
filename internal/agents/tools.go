@@ -12,12 +12,13 @@ import (
 	neturl "net/url"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/safedial"
+	"github.com/sandeepbollavaram/vortex/pkg/safedial"
 )
 
 // Tool is a single, declared, enumerable action an agent may perform. Every
@@ -105,12 +106,6 @@ func strParam(params map[string]any, key string) (string, error) {
 // loopback, link-local, or cloud-metadata address (SSRF prevention).
 var ErrSSRFBlocked = errors.New("agents: SSRF target blocked")
 
-// metadataIPs are well-known cloud instance-metadata service addresses.
-var metadataIPs = map[string]bool{
-	"169.254.169.254": true, // AWS / GCP / Azure (IMDS)
-	"fd00:ec2::254":   true, // AWS IPv6 metadata
-}
-
 // HTTPGetTool performs an HTTP(S) GET request with SSRF protection.
 type HTTPGetTool struct {
 	Client *http.Client
@@ -125,20 +120,10 @@ func (HTTPGetTool) Name() string { return "http_get" }
 // Description returns a human-readable summary.
 func (HTTPGetTool) Description() string { return "HTTP GET a http/https URL (SSRF-protected)" }
 
-// blockedIP reports whether ip is a loopback, link-local, private, or
-// metadata address that http_get must never reach.
-func blockedIP(ip net.IP) bool {
-	if ip == nil {
-		return true // unparseable → block
-	}
-	if metadataIPs[ip.String()] {
-		return true
-	}
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || // RFC1918 + IPv6 ULA (fc00::/7)
-		ip.IsUnspecified()
-}
+// blockedIP reports whether http_get must never reach ip. It is the shared
+// safedial blocklist, so the pre-flight check and the dialer agree (a separate
+// copy here missed CGNAT and NAT64 — audit F-11).
+func blockedIP(ip net.IP) bool { return safedial.IsBlockedIP(ip) }
 
 // isSSRFTarget resolves rawURL's host and returns ErrSSRFBlocked if the scheme
 // is not http/https, the host is in no allow-list, or any resolved IP is a
@@ -280,17 +265,12 @@ func sandboxResolve(sandboxDir, rel string) (string, error) {
 	}
 
 	// Step 3: the path does not exist yet (e.g. a new file to write). Resolve
-	// the parent directory's real path and ensure it is within the sandbox, so
-	// a symlinked parent cannot redirect the write outside.
-	parent := filepath.Dir(joined)
-	if _, lerr := os.Lstat(parent); lerr == nil {
-		realParent, rerr := filepath.EvalSymlinks(parent)
-		if rerr != nil {
-			return "", fmt.Errorf("agents: resolve parent: %w", rerr)
-		}
-		if !containedIn(realParent, realBase) {
-			return "", fmt.Errorf("%w: parent of %q resolves outside sandbox", ErrSandboxEscape, rel)
-		}
+	// the nearest existing ancestor's real path and ensure it is within the
+	// sandbox, so a symlinked directory cannot redirect the write outside.
+	// Checking only the immediate parent missed link/new/file.txt: "new"
+	// doesn't exist, the check was skipped, and MkdirAll followed "link".
+	if realAnc := resolveExistingPrefix(filepath.Dir(joined)); !containedIn(realAnc, realBase) {
+		return "", fmt.Errorf("%w: parent of %q resolves outside sandbox", ErrSandboxEscape, rel)
 	}
 	return joined, nil
 }
@@ -604,7 +584,7 @@ func (t RunCommandTool) Execute(ctx context.Context, params map[string]any) (any
 // safeEnvVars are the only environment variables agent-executed commands
 // inherit (production audit M5): enough for binaries to run, and none of the
 // process's secrets. Without this, every whitelisted or user-approved command
-// inherited the full server environment — VORTEX_* provider keys, AWS
+// inherited the full server environment — GUBERN_* provider keys, AWS
 // credentials, bot tokens, the master key — and could exfiltrate them.
 var safeEnvVars = map[string]bool{
 	// POSIX basics
@@ -619,14 +599,52 @@ var safeEnvVars = map[string]bool{
 	"NUMBER_OF_PROCESSORS": true, "PROCESSOR_ARCHITECTURE": true,
 }
 
+// buildEnvVars are the extra variables toolchain builds need on top of
+// safeEnvVars: where Go, Gradle, the Android SDK, Java and Flutter keep their
+// caches and SDKs, and how to reach module proxies. None of them hold
+// Gubern's own secrets.
+var buildEnvVars = map[string]bool{
+	"GOPATH": true, "GOCACHE": true, "GOMODCACHE": true, "GOPROXY": true,
+	"GOPRIVATE": true, "GONOPROXY": true, "GONOSUMDB": true, "GOSUMDB": true,
+	"GOTOOLCHAIN": true, "GOFLAGS": true, "CGO_ENABLED": true,
+	"ANDROID_HOME": true, "ANDROID_SDK_ROOT": true, "JAVA_HOME": true,
+	"FLUTTER_ROOT": true, "PUB_CACHE": true, "GRADLE_USER_HOME": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+}
+
+// gitEnvVars are the extra variables git needs on top of safeEnvVars: SSH
+// agent access, identity overrides, how to reach remotes, and where its
+// config lives (HOME is already allowed, so ~/.gitconfig works).
+var gitEnvVars = map[string]bool{
+	"SSH_AUTH_SOCK": true, "GIT_SSH": true, "GIT_SSH_COMMAND": true,
+	"GIT_ASKPASS": true, "SSH_ASKPASS": true, "XDG_CONFIG_HOME": true,
+	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
+	"GIT_COMMITTER_NAME": true, "GIT_COMMITTER_EMAIL": true,
+	"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+}
+
+// gitEnv is the environment for agent git commands. git runs repository
+// hooks (pre-commit, commit-msg, …), which can come from the project itself
+// (husky installs them from package.json), so they get no secrets either.
+func gitEnv() []string { return filterEnv(safeEnvVars, gitEnvVars) }
+
 // scrubbedEnv returns the minimal environment for agent-executed commands:
 // only the allowlisted variables above survive, by exact (case-insensitive)
 // name match.
-func scrubbedEnv() []string {
+func scrubbedEnv() []string { return filterEnv(safeEnvVars, nil) }
+
+// BuildEnv returns the environment for building and testing generated
+// projects (Forge): the scrubbed agent environment plus toolchain variables.
+// Generated build scripts and tests run with it, so it must not carry provider
+// keys, bot tokens or the master key either.
+func BuildEnv() []string { return filterEnv(safeEnvVars, buildEnvVars) }
+
+func filterEnv(allow, extra map[string]bool) []string {
 	var out []string
 	for _, kv := range os.Environ() {
 		name, _, _ := strings.Cut(kv, "=")
-		if safeEnvVars[strings.ToUpper(name)] {
+		up := strings.ToUpper(name)
+		if allow[up] || extra[up] {
 			out = append(out, kv)
 		}
 	}
@@ -665,7 +683,22 @@ var vortexAPIDeniedPaths = []string{
 	"/internal/reload",
 }
 
-// VortexAPITool calls the VORTEX management API. Only /api/* paths are allowed,
+// canonicalAPIPath refuses a path the server would route differently from how
+// it reads: percent-encoding (/api/%61gents/submit is decoded to the agent
+// endpoint), backslashes, and dot segments or doubled slashes (ServeMux
+// redirects those to the clean path) all slipped past the prefix checks.
+func canonicalAPIPath(raw string) error {
+	p, _, _ := strings.Cut(raw, "?")
+	if strings.ContainsAny(p, `%\#`) {
+		return fmt.Errorf("%w: encoded or unusual characters in path %q", ErrSandboxViolation, raw)
+	}
+	if clean := pathpkg.Clean(p); p != clean && p != clean+"/" {
+		return fmt.Errorf("%w: path %q is not in canonical form (use %q)", ErrSandboxViolation, raw, clean)
+	}
+	return nil
+}
+
+// VortexAPITool calls the Gubern management API. Only /api/* paths are allowed,
 // excluding the agent and control-plane paths in vortexAPIDeniedPaths.
 type VortexAPITool struct {
 	BaseURL string // e.g. http://127.0.0.1:9090
@@ -676,7 +709,7 @@ type VortexAPITool struct {
 func (VortexAPITool) Name() string { return "vortex_api" }
 
 // Description returns a human-readable summary.
-func (VortexAPITool) Description() string { return "Call the VORTEX management API (/api/*)" }
+func (VortexAPITool) Description() string { return "Call the Gubern management API (/api/*)" }
 
 // Execute issues an API request with method/path/body params.
 func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any, error) {
@@ -686,6 +719,9 @@ func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any,
 	}
 	path, err := strParam(params, "path")
 	if err != nil {
+		return nil, err
+	}
+	if err := canonicalAPIPath(path); err != nil {
 		return nil, err
 	}
 	if !strings.HasPrefix(path, "/api/") {
@@ -703,6 +739,10 @@ func (t VortexAPITool) Execute(ctx context.Context, params map[string]any) (any,
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
+	// Never follow a redirect: its target never went through the checks above.
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client = &noRedirect
 	req, err := http.NewRequestWithContext(ctx, method, t.BaseURL+path, strings.NewReader(body))
 	if err != nil {
 		return nil, err

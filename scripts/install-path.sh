@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# VORTEX PATH installer (Linux / macOS).
+# Gubern PATH installer (Linux / macOS).
 #
 # Appends the repo's bin/ directory to your shell rc so `vortex` (and
 # `vortex code`) work from any directory. Run once:
@@ -19,7 +19,7 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
   if grep -qF "$VORTEX_BIN" "$rc"; then
     echo "✓ Already in PATH via $rc"
   else
-    printf '\n# Added by VORTEX install-path.sh\n%s\n' "$LINE" >> "$rc"
+    printf '\n# Added by Gubern install-path.sh\n%s\n' "$LINE" >> "$rc"
     echo "✓ Added $VORTEX_BIN to PATH in $rc"
     added=1
   fi
@@ -31,7 +31,7 @@ if [ ! -f "$HOME/.zshrc" ] && [ ! -f "$HOME/.bashrc" ]; then
   if [ -f "$rc" ] && grep -qF "$VORTEX_BIN" "$rc"; then
     echo "✓ Already in PATH via $rc"
   else
-    printf '\n# Added by VORTEX install-path.sh\n%s\n' "$LINE" >> "$rc"
+    printf '\n# Added by Gubern install-path.sh\n%s\n' "$LINE" >> "$rc"
     echo "✓ Added $VORTEX_BIN to PATH in $rc"
     added=1
   fi

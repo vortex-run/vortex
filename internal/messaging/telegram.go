@@ -1,4 +1,4 @@
-// Package messaging implements VORTEX's messaging integration layer (build plan
+// Package messaging implements Gubern's messaging integration layer (build plan
 // M11): two-way bots over Telegram, WhatsApp, and Slack, plus a unified
 // notification router and an AI provider gateway. All platform APIs are reached
 // over the standard library's net/http — no SDKs.
@@ -19,14 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // TelegramConfig configures the Telegram bot. The token comes from the
-// environment (VORTEX_TELEGRAM_TOKEN), never from the config file.
+// environment (GUBERN_TELEGRAM_TOKEN), never from the config file.
 type TelegramConfig struct {
 	Token       string  // bot token (from env)
-	AllowedIDs  []int64 // allowed chat/user IDs; empty means allow none
+	AllowedIDs  []int64 // allowed chat/user IDs; empty means allow none. A group message needs BOTH the group and the sender listed.
 	WebhookURL  string  // public webhook URL (optional)
 	SecretToken string  // X-Telegram-Bot-Api-Secret-Token expected on webhooks
 	// BaseURL overrides the Telegram API base (for tests). When empty the real
@@ -63,6 +63,7 @@ func (t *TelegramBot) SetCommandHooks(h CommandHooks) { t.hooks = h }
 
 // TelegramBot is a Telegram Bot API client + webhook handler.
 type TelegramBot struct {
+	inflight sync.WaitGroup // webhook updates still being handled
 	cfg      TelegramConfig
 	baseURL  string
 	client   *http.Client
@@ -229,7 +230,7 @@ type botCommand struct {
 
 // botCommands is the menu shown in the Telegram client.
 var botCommands = []botCommand{
-	{"status", "Show VORTEX status"},
+	{"status", "Show Gubern status"},
 	{"routes", "List active routes"},
 	{"ls", "List files in the working directory"},
 	{"build", "Start a forge build"},
@@ -247,7 +248,7 @@ func (t *TelegramBot) SetCommands(ctx context.Context) error {
 // helpText is the /help reply.
 func helpText() string {
 	var b strings.Builder
-	b.WriteString("VORTEX commands:\n")
+	b.WriteString("Gubern commands:\n")
 	for _, c := range botCommands {
 		b.WriteString("/" + c.Command + " — " + c.Description + "\n")
 	}
@@ -313,7 +314,7 @@ func (t *TelegramBot) lastUpdateID(upd telegramUpdate) int64 { return upd.Update
 // webhook handler and polling mode.
 func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime, upd telegramUpdate) {
 	if upd.CallbackQuery != nil {
-		if !t.allowed(upd.CallbackQuery.From.ID) {
+		if _, ok := t.allowedCallback(upd.CallbackQuery); !ok {
 			return
 		}
 		// Clarify option buttons first, then the team (checkpoint) resolver,
@@ -332,43 +333,75 @@ func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime
 	if upd.Message == nil {
 		return
 	}
-	if !t.allowed(upd.Message.Chat.ID) {
+	if !t.allowedMessage(upd.Message) {
 		return
 	}
 	t.dispatch(ctx, runtime, upd.Message.Chat.ID, upd.Message.Text)
 }
 
+// allowedCallback reports whether a button press may act, and the chat to
+// answer in. The person who pressed it must be allowed, in polling and
+// webhook mode alike: the webhook used to check only the chat, so in an
+// allowed group chat any member could press Approve on the agent's commands.
+func (t *TelegramBot) allowedCallback(cq *telegramCallback) (chatID int64, ok bool) {
+	chatID = cq.Message.Chat.ID
+	if chatID == 0 {
+		chatID = cq.From.ID
+	}
+	return chatID, t.allowed(cq.From.ID)
+}
+
 // telegramUpdate is the subset of a Telegram Update we consume.
 type telegramUpdate struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
+	UpdateID      int64             `json:"update_id"`
+	Message       *telegramMessage  `json:"message"`
+	CallbackQuery *telegramCallback `json:"callback_query"`
+}
+
+// telegramMessage is the subset of a Telegram Message we consume.
+type telegramMessage struct {
+	Chat struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	From *struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Text string `json:"text"`
+}
+
+// allowedMessage reports whether a text message may act. Like a button press,
+// the SENDER must be allowed, not just the chat: in an allowed group chat any
+// member could otherwise /approve the agent's pending actions or run /ls on
+// host paths (audit F-08). In a private chat the chat ID is the user's ID, so
+// listing a user still covers their DMs. Messages with no sender (channel
+// posts) are refused.
+func (t *TelegramBot) allowedMessage(m *telegramMessage) bool {
+	return m.From != nil && t.allowed(m.Chat.ID) && t.allowed(m.From.ID)
+}
+
+// telegramCallback is an inline-button press.
+type telegramCallback struct {
+	ID   string `json:"id"`
+	Data string `json:"data"`
+	From struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Message struct {
 		Chat struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
-		Text string `json:"text"`
 	} `json:"message"`
-	CallbackQuery *struct {
-		ID   string `json:"id"`
-		Data string `json:"data"`
-		From struct {
-			ID int64 `json:"id"`
-		} `json:"from"`
-		Message struct {
-			Chat struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-		} `json:"message"`
-	} `json:"callback_query"`
 }
 
 // verifySecret checks the X-Telegram-Bot-Api-Secret-Token header against the
-// configured secret using a constant-time comparison. When no secret is
-// configured it returns false (fail closed) only if the header is present and
-// wrong; an unconfigured bot with no header is allowed for backward-compat in
-// tests, but production wiring always sets a secret.
+// configured secret using a constant-time comparison. With no secret it
+// refuses everything: the webhook is public and feeds the agent, and the
+// allow-list alone is no protection because anyone can forge an update that
+// claims an allowed chat ID (or an approval button press). It used to accept
+// every request when no secret was set, and production didn't always set one.
 func (t *TelegramBot) verifySecret(r *http.Request) bool {
 	if t.cfg.SecretToken == "" {
-		return true
+		return false
 	}
 	got := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
 	return subtle.ConstantTimeCompare([]byte(got), []byte(t.cfg.SecretToken)) == 1
@@ -392,8 +425,8 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 
 		switch {
 		case upd.CallbackQuery != nil:
-			chatID := upd.CallbackQuery.Message.Chat.ID
-			if !t.allowed(chatID) {
+			chatID, ok := t.allowedCallback(upd.CallbackQuery)
+			if !ok {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
@@ -410,22 +443,36 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			case t.resolver != nil && t.resolver.Resolve(upd.CallbackQuery.Data):
 				// consumed by the approval resolver
 			default:
-				t.dispatch(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
+				t.dispatchDetached(r.Context(), runtime, chatID, upd.CallbackQuery.Data)
 			}
 			w.WriteHeader(http.StatusOK)
 		case upd.Message != nil:
 			chatID := upd.Message.Chat.ID
-			if !t.allowed(chatID) {
+			if !t.allowedMessage(upd.Message) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
-			t.dispatch(r.Context(), runtime, chatID, upd.Message.Text)
+			t.dispatchDetached(r.Context(), runtime, chatID, upd.Message.Text)
 			w.WriteHeader(http.StatusOK)
 		default:
 			// Nothing actionable in this update.
 			w.WriteHeader(http.StatusOK)
 		}
 	})
+}
+
+// dispatchDetached handles a webhook update after the webhook is answered.
+// Telegram re-delivers an update whose webhook request is slow, so a long
+// reply (a chat answer, or an /agent run waiting on an approval) was submitted
+// twice; and since an /agent run stops when its caller goes away, a dropped
+// webhook connection would also stop the run. The reply goes out through
+// sendMessage either way; the runtime's own lifetime still bounds the work.
+func (t *TelegramBot) dispatchDetached(ctx context.Context, runtime *agents.Runtime, chatID int64, text string) {
+	t.inflight.Add(1)
+	go func() {
+		defer t.inflight.Done()
+		t.dispatch(context.WithoutCancel(ctx), runtime, chatID, text)
+	}()
 }
 
 // dispatch submits text to the runtime and sends the response back to chatID.
@@ -645,7 +692,7 @@ func (e *redactedError) Unwrap() error { return e.cause }
 // That is a credential-disclosure bug rather than cosmetic noise: logs get
 // pasted into issue reports, shipped to aggregators, and captured in screen
 // recordings. A leaked bot token lets anyone send messages as the bot and read
-// everything the bot receives, which for VORTEX is the agent approval channel.
+// everything the bot receives, which for Gubern is the agent approval channel.
 func (t *TelegramBot) redact(err error) error {
 	if err == nil {
 		return nil

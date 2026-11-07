@@ -11,7 +11,7 @@ import (
 	"cuelang.org/go/cue/cuecontext"
 	cueerrors "cuelang.org/go/cue/errors"
 
-	schema "github.com/vortex-run/vortex/config"
+	schema "github.com/sandeepbollavaram/vortex/config"
 )
 
 // schemaFile is the embedded schema's name, used in error messages.
@@ -74,9 +74,7 @@ func (es LoadErrors) Error() string {
 //
 // path may be "" to use DefaultPath.
 func Load(path string) (*Config, error) {
-	if path == "" {
-		path = DefaultPath
-	}
+	path = ResolvePath(path)
 
 	userSrc, err := os.ReadFile(path)
 	if err != nil {

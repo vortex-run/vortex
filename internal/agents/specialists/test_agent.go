@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // TestAgent runs a project's tests and reports pass/fail. It detects the
@@ -21,7 +21,7 @@ type TestAgent struct {
 }
 
 // testSystemPrompt is the Test Agent's focused role definition.
-const testSystemPrompt = `You are an expert QA engineer in VORTEX.
+const testSystemPrompt = `You are an expert QA engineer in Gubern.
 Your ONLY job is to test code written by other agents.
 
 Rules:

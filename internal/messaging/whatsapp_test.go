@@ -111,6 +111,7 @@ func TestWhatsApp_WebhookVerificationOK(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=verifyme&hub.challenge=CHAL", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK || rec.Body.String() != "CHAL" {
 		t.Errorf("verification: code=%d body=%q, want 200 CHAL", rec.Code, rec.Body.String())
@@ -126,6 +127,7 @@ func TestWhatsApp_WebhookVerificationWrongToken(t *testing.T) {
 		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=WRONG&hub.challenge=CHAL", nil)
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("wrong verify token code = %d, want 403", rec.Code)
@@ -140,7 +142,9 @@ func signWA(secret, body string) string {
 
 func TestWhatsApp_WebhookRoutesMessage(t *testing.T) {
 	f := newFakeWhatsApp(t)
-	bot := newTestWA(t, f, WhatsAppConfig{AppSecret: "appsecret"})
+	// The allow-list entry is written the way an operator might type it; it
+	// must still match the digits-only wa_id Meta sends.
+	bot := newTestWA(t, f, WhatsAppConfig{AppSecret: "appsecret", AllowedNumbers: []string{"+1 (555) 123-4567"}})
 	rt := startStubRuntime(t)
 
 	body := `{"entry":[{"changes":[{"value":{"messages":[{"from":"15551234567","text":{"body":"hello"}}]}}]}]}`
@@ -148,6 +152,7 @@ func TestWhatsApp_WebhookRoutesMessage(t *testing.T) {
 	req.Header.Set("X-Hub-Signature-256", signWA("appsecret", body))
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -168,9 +173,103 @@ func TestWhatsApp_WebhookRejectsBadSignature(t *testing.T) {
 	req.Header.Set("X-Hub-Signature-256", signWA("WRONGSECRET", body))
 	rec := httptest.NewRecorder()
 	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("bad signature code = %d, want 401", rec.Code)
+	}
+}
+
+// postWA sends a signed (or unsigned, when secret is "") inbound message.
+func postWA(t *testing.T, bot *WhatsAppBot, secret, from string) *httptest.ResponseRecorder {
+	t.Helper()
+	rt := startStubRuntime(t)
+	body := `{"entry":[{"changes":[{"value":{"messages":[{"from":"` + from + `","text":{"body":"hello"}}]}}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/webhook/whatsapp", strings.NewReader(body))
+	if secret != "" {
+		req.Header.Set("X-Hub-Signature-256", signWA(secret, body))
+	}
+	rec := httptest.NewRecorder()
+	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
+	return rec
+}
+
+func TestWhatsApp_NoAppSecretRejectsEverything(t *testing.T) {
+	f := newFakeWhatsApp(t)
+	bot := newTestWA(t, f, WhatsAppConfig{AllowedNumbers: []string{"15551234567"}})
+	if bot.InboundEnabled() {
+		t.Fatal("InboundEnabled() = true without an app secret")
+	}
+	// Unsigned, and signed with an arbitrary key: both must be refused.
+	for name, secret := range map[string]string{"unsigned": "", "signed with a guessed key": "x"} {
+		rec := postWA(t, bot, secret, "15551234567")
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401", name, rec.Code)
+		}
+	}
+	if f.lastPath != "" {
+		t.Errorf("runtime replied to an unauthenticated request (path %q)", f.lastPath)
+	}
+}
+
+func TestWhatsApp_SenderNotAllowedIsDropped(t *testing.T) {
+	f := newFakeWhatsApp(t)
+	bot := newTestWA(t, f, WhatsAppConfig{AppSecret: "appsecret", AllowedNumbers: []string{"15550000000"}})
+	rec := postWA(t, bot, "appsecret", "15551234567")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (Meta must not retry)", rec.Code)
+	}
+	if f.lastPath != "" {
+		t.Errorf("stranger got a reply (path %q); messages from unlisted senders must be dropped silently", f.lastPath)
+	}
+}
+
+func TestWhatsApp_EmptyAllowListAllowsNobody(t *testing.T) {
+	f := newFakeWhatsApp(t)
+	bot := newTestWA(t, f, WhatsAppConfig{AppSecret: "appsecret"})
+	postWA(t, bot, "appsecret", "15551234567")
+	if f.lastPath != "" {
+		t.Errorf("empty allow-list let a sender through (path %q)", f.lastPath)
+	}
+}
+
+func TestWhatsApp_VerificationEmptyTokenNeverMatches(t *testing.T) {
+	f := newFakeWhatsApp(t)
+	bot := newTestWA(t, f, WhatsAppConfig{}) // no VerifyToken configured
+	rt := startStubRuntime(t)
+	req := httptest.NewRequest(http.MethodGet,
+		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=&hub.challenge=CHAL", nil)
+	rec := httptest.NewRecorder()
+	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("empty token handshake: code = %d, want 403", rec.Code)
+	}
+}
+
+func TestWhatsApp_VerificationEchoIsPlainText(t *testing.T) {
+	f := newFakeWhatsApp(t)
+	bot := newTestWA(t, f, WhatsAppConfig{VerifyToken: "verifyme"})
+	rt := startStubRuntime(t)
+	req := httptest.NewRequest(http.MethodGet,
+		"/webhook/whatsapp?hub.mode=subscribe&hub.verify_token=verifyme&hub.challenge=%3Cscript%3Ealert(1)%3C%2Fscript%3E", nil)
+	rec := httptest.NewRecorder()
+	bot.HandleWebhook(rt).ServeHTTP(rec, req)
+	bot.inflight.Wait() // dispatch runs after the webhook is answered
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Errorf("Content-Type = %q, want text/plain (a sniffed text/html echo is reflected XSS)", ct)
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing X-Content-Type-Options: nosniff")
+	}
+}
+
+func TestNormalizeWhatsAppNumber(t *testing.T) {
+	for in, want := range map[string]string{"+1 (555) 010-0000": "15550100000", "15550100000": "15550100000", "": "", "abc": ""} {
+		if got := NormalizeWhatsAppNumber(in); got != want {
+			t.Errorf("NormalizeWhatsAppNumber(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

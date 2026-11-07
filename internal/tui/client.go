@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // ConnectionErrorMessage is the user-facing text returned (as the response
@@ -20,12 +22,12 @@ import (
 // response means the code view renders it inline like an agent message instead
 // of failing silently. ConnectionErrorPrefix lets callers detect it.
 const (
-	ConnectionErrorPrefix  = "✗ Cannot reach VORTEX server"
+	ConnectionErrorPrefix  = "✗ Cannot reach Gubern server"
 	ConnectionErrorMessage = ConnectionErrorPrefix + "\n\n" +
 		"Start the server first:\n" +
 		"  task start:team    (with agent team)\n" +
 		"  task start         (single agent mode)\n\n" +
-		"Then run: vortex code"
+		"Then run: gubern code"
 )
 
 // ClientConfig configures the TUI's API client.
@@ -35,7 +37,7 @@ type ClientConfig struct {
 	Timeout time.Duration // default 5s
 }
 
-// Client talks to a running VORTEX management server, returning typed data.
+// Client talks to a running Gubern management server, returning typed data.
 type Client struct {
 	cfg  ClientConfig
 	http *http.Client
@@ -425,6 +427,18 @@ func (c *Client) ForgeStatus(jobID string) (*ForgeJobData, error) {
 // much longer deadline than the fast read endpoints.
 const submitTimeout = 180 * time.Second
 
+// agentSubmitTimeout bounds a /agent submit: the server lets a run take up to
+// agents.AgentRunTimeout (10 minutes), plus a margin for the final answer.
+const agentSubmitTimeout = 11 * time.Minute
+
+// submitDeadline is how long the client waits for a reply to msg.
+func submitDeadline(msg string) time.Duration {
+	if strings.HasPrefix(strings.TrimSpace(msg), "/agent ") {
+		return agentSubmitTimeout
+	}
+	return submitTimeout
+}
+
 // forgeStatusTimeout bounds a forge status poll. Forge builds can run for
 // minutes; the status endpoint itself is fast, but we allow generous headroom.
 const forgeStatusTimeout = 300 * time.Second
@@ -434,14 +448,14 @@ const forgeStatusTimeout = 300 * time.Second
 // wait on a slow AI provider.
 func (c *Client) Submit(msg, sessionID string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
-	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitDeadline(msg))
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	submitClient := &http.Client{Timeout: submitTimeout}
+	submitClient := &http.Client{Timeout: submitDeadline(msg)}
 	resp, err := submitClient.Do(req)
 	if err != nil {
 		// Server unreachable (connection refused, DNS, timeout): surface a
@@ -471,7 +485,7 @@ func (c *Client) Submit(msg, sessionID string) (string, error) {
 // server rejected it.
 func (c *Client) SubmitStream(msg, sessionID string) (<-chan string, error) {
 	body, _ := json.Marshal(map[string]string{"message": msg, "session_id": sessionID})
-	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), submitDeadline(msg))
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/submit", bytes.NewReader(body))
 	if err != nil {
 		cancel()
@@ -545,7 +559,17 @@ func ssePayloads(body io.Reader, fn func(payload string) bool) {
 // returns the result transcript (the action executes server-side on approval,
 // which may call a slow tool, so this uses the long submit timeout).
 func (c *Client) Approve(sessionID string, approved bool) (string, error) {
-	body, _ := json.Marshal(map[string]any{"session_id": sessionID, "approved": approved})
+	return c.ApproveAction(sessionID, "", approved)
+}
+
+// ApproveAction is Approve bound to the action id shown on the approval line;
+// the server refuses (409) if a different action is now pending.
+func (c *Client) ApproveAction(sessionID, actionID string, approved bool) (string, error) {
+	payload := map[string]any{"session_id": sessionID, "approved": approved}
+	if actionID != "" {
+		payload["action_id"] = actionID
+	}
+	body, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer cancel()
 	req, err := c.newReq(ctx, http.MethodPost, "/api/agents/approve", bytes.NewReader(body))
@@ -768,24 +792,21 @@ func (c *Client) IsConnected() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// APIKeyFilePath returns the path where `vortex setup` persists the plaintext
+// APIKeyFilePath returns the path where `gubern setup` persists the plaintext
 // API key for the TUI to read back: <user-config>/vortex/tui-key. The apikeys
 // store only holds bcrypt hashes (the raw secret is unrecoverable from it), so
 // the setup wizard writes the secret here once for the local dashboard/TUI.
 func APIKeyFilePath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "vortex", "tui-key")
+	dir := userdir.Config()
+	return filepath.Join(userdir.App(dir), "tui-key")
 }
 
-// LoadAPIKey resolves an API key, checking in order: the VORTEX_API_KEY env
+// LoadAPIKey resolves an API key, checking in order: the GUBERN_API_KEY env
 // var, the setup/TUI key file under the user config dir (APIKeyFilePath), then
 // the same file under the user cache dir. It returns the first non-empty value,
 // or "" when none is found.
 func (c *Client) LoadAPIKey() string {
-	if k := os.Getenv("VORTEX_API_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_API_KEY"); k != "" {
 		return k
 	}
 	for _, path := range apiKeyFileCandidates() {
@@ -803,7 +824,7 @@ func (c *Client) LoadAPIKey() string {
 func apiKeyFileCandidates() []string {
 	paths := []string{APIKeyFilePath()}
 	if cache, err := os.UserCacheDir(); err == nil {
-		paths = append(paths, filepath.Join(cache, "vortex", "tui-key"))
+		paths = append(paths, filepath.Join(userdir.App(cache), "tui-key"))
 	}
 	return paths
 }

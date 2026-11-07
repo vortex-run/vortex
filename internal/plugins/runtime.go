@@ -1,4 +1,4 @@
-// Package plugins implements VORTEX's WebAssembly plugin system (build plan M6):
+// Package plugins implements Gubern's WebAssembly plugin system (build plan M6):
 // a sandboxed wazero runtime, a request/response hook chain, WASM-backed hooks,
 // and a plugin registry. Plugins run with no filesystem or network access and a
 // bounded memory and CPU-time budget, so untrusted modules cannot escape the
@@ -18,6 +18,9 @@ import (
 
 // wasmPageBytes is the size of one WebAssembly memory page (64 KiB).
 const wasmPageBytes = 64 * 1024
+
+// maxWasmPages is the wasm32 address-space limit in pages (4 GiB).
+const maxWasmPages = 65536
 
 // RuntimeConfig bounds plugin resource use.
 type RuntimeConfig struct {
@@ -53,7 +56,10 @@ func NewRuntime(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		cfg.MaxCPUTime = 100 * time.Millisecond
 	}
 
-	pages := uint32(cfg.MaxMemoryMB * 1024 * 1024 / wasmPageBytes)
+	// wasm32 addresses at most 65536 pages (4 GiB); clamp before converting
+	// so a huge setting can't wrap around to a tiny limit.
+	pages := uint32(min(cfg.MaxMemoryMB*1024*1024/wasmPageBytes, maxWasmPages)) //nolint:gosec // clamped above
+
 	rc := wazero.NewRuntimeConfig().
 		WithMemoryLimitPages(pages).
 		WithCloseOnContextDone(true) // honour ctx deadlines mid-execution

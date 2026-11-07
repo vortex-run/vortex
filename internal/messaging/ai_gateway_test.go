@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
 )
 
 func TestNewAIGateway_RequiresProvider(t *testing.T) {
@@ -284,7 +284,10 @@ func TestAIGateway_DeepSeekOpenAICompatible(t *testing.T) {
 func TestAIGateway_GeminiEndpointAndParse(t *testing.T) {
 	var gotKey, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotKey = r.URL.Query().Get("key")
+		gotKey = r.Header.Get("x-goog-api-key")
+		if r.URL.Query().Get("key") != "" {
+			t.Error("API key sent in the URL")
+		}
 		gotPath = r.URL.Path
 		_, _ = io.WriteString(w, `{"candidates":[{"content":{"parts":[{"text":"gemini reply"}]}}],"usageMetadata":{"totalTokenCount":12}}`)
 	}))
@@ -302,7 +305,7 @@ func TestAIGateway_GeminiEndpointAndParse(t *testing.T) {
 		t.Errorf("out = %q, want gemini reply", out)
 	}
 	if gotKey != "g-key" {
-		t.Errorf("query key = %q, want g-key", gotKey)
+		t.Errorf("x-goog-api-key = %q, want g-key", gotKey)
 	}
 	if !strings.Contains(gotPath, "gemini-1.5-flash:generateContent") {
 		t.Errorf("path = %q, want .../gemini-1.5-flash:generateContent", gotPath)
@@ -635,5 +638,23 @@ func TestAIGateway_CompleteWithSessionPreservesContext(t *testing.T) {
 	// The conversation was stored for handoff.
 	if gw.bridge.Get("sess-1") == nil {
 		t.Error("session should be stored in the bridge")
+	}
+}
+
+// TestGemini_KeyNotInTransportError: a connection failure's error text must
+// not carry the API key (it used to, via the ?key= URL).
+func TestGemini_KeyNotInTransportError(t *testing.T) {
+	g, err := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderGemini, APIKey: "very-secret-key", Endpoint: "http://127.0.0.1:1", Models: []string{"gemini-1.5-flash"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = g.Complete(context.Background(), "hi", "sys")
+	if err == nil {
+		t.Fatal("expected a connection error")
+	}
+	if strings.Contains(err.Error(), "very-secret-key") {
+		t.Errorf("error leaks the key: %v", err)
 	}
 }

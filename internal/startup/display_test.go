@@ -17,8 +17,8 @@ func TestBannerPrintsVortex(t *testing.T) {
 	d, buf := newTestDisplay(false)
 	d.Banner()
 	out := buf.String()
-	if !strings.Contains(out, "VORTEX") {
-		t.Errorf("banner missing VORTEX: %q", out)
+	if !strings.Contains(out, "Gubern") {
+		t.Errorf("banner missing Gubern: %q", out)
 	}
 	if !strings.Contains(out, "One binary. Any server. Fully autonomous.") {
 		t.Errorf("banner missing tagline: %q", out)
@@ -66,10 +66,10 @@ func TestReadyPrintsDashboardURL(t *testing.T) {
 	})
 	out := buf.String()
 	for _, want := range []string{
-		"VORTEX is running",
+		"Gubern is running",
 		"http://localhost:9090/dashboard",
-		"vortex ui",
-		"vortex code",
+		"gubern ui",
+		"gubern code",
 		"https://vortex.run/docs",
 		"cluster prod",
 		"AI deepseek",
@@ -111,7 +111,7 @@ func TestExplainMissingSecret(t *testing.T) {
 	if !strings.Contains(got, "Secret 'db_password' is not set") {
 		t.Errorf("Explain(secret) = %q", got)
 	}
-	if !strings.Contains(got, "vortex secret set db_password") {
+	if !strings.Contains(got, "gubern secret set db_password") {
 		t.Errorf("Explain(secret) missing fix command: %q", got)
 	}
 }

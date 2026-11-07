@@ -143,7 +143,7 @@ func echoHandler(cmd string) (string, string, int) {
 func connectedClient(t *testing.T, srv *testSSHServer) *SSHClient {
 	t.Helper()
 	host, port, _ := net.SplitHostPort(srv.addr)
-	c, err := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret", Timeout: 5 * time.Second})
+	c, err := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret", Timeout: 5 * time.Second, TOFUStore: filepath.Join(t.TempDir(), "tofu_known_hosts")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestSSH_CloseCleansUp(t *testing.T) {
 func TestSSH_TOFULogsNewHost(t *testing.T) {
 	srv := newTestSSHServer(t, echoHandler)
 	host, port, _ := net.SplitHostPort(srv.addr)
-	c, _ := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret"})
+	c, _ := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret", TOFUStore: filepath.Join(t.TempDir(), "tofu_known_hosts")})
 	var trusted string
 	c.SetTOFULogger(func(h, fp string) { trusted = h + " " + fp })
 	if err := c.Connect(context.Background()); err != nil {
@@ -325,5 +325,39 @@ func TestSSH_KnownHostsMissingFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("NewSSHClient should fail when known_hosts path is missing")
+	}
+}
+
+// Audit F-14: trust on first use must pin. The first key seen for a host is
+// recorded; the same key is accepted again; a different key for that host is
+// refused. Before the fix every key was accepted on every connection.
+func TestSSH_TOFUPinsAndRefusesChangedKey(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "ssh_known_hosts")
+	srvReal := newTestSSHServer(t, echoHandler)
+	host, port, _ := net.SplitHostPort(srvReal.addr)
+	connect := func() error {
+		c, err := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret",
+			Timeout: 5 * time.Second, TOFUStore: store})
+		if err != nil {
+			return err
+		}
+		if err := c.Connect(context.Background()); err != nil {
+			return err
+		}
+		return c.Close()
+	}
+	if err := connect(); err != nil {
+		t.Fatalf("first connect (pin): %v", err)
+	}
+	if err := connect(); err != nil {
+		t.Fatalf("second connect with the pinned key: %v", err)
+	}
+
+	// An impostor presenting a different key for the same host:port.
+	impostor := newTestSSHServer(t, echoHandler)
+	addr := &net.TCPAddr{IP: net.ParseIP(host), Port: atoi(port)}
+	if err := tofuVerify(store, net.JoinHostPort(host, port), addr, impostor.hostKey.PublicKey(), nil); err == nil ||
+		!strings.Contains(err.Error(), "changed") {
+		t.Fatalf("changed host key accepted: err=%v", err)
 	}
 }

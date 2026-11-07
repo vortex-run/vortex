@@ -1,6 +1,6 @@
-// Package dashboard serves the embedded VORTEX management dashboard (build plan
+// Package dashboard serves the embedded Gubern management dashboard (build plan
 // M7): a React single-page app, built by Vite and embedded into the binary, so
-// the management UI ships with VORTEX and needs no separate server. It is mounted
+// the management UI ships with Gubern and needs no separate server. It is mounted
 // at /dashboard/ by the management API.
 package dashboard
 
@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	dashboardui "github.com/vortex-run/vortex/web/dashboard"
+	dashboardui "github.com/sandeepbollavaram/vortex/web/dashboard"
 )
 
 // indexPath is the SPA entry document served for any non-asset route.
@@ -43,6 +43,14 @@ func spaHandler(root fs.FS, fileServer http.Handler) http.Handler {
 			return
 		}
 		if _, err := fs.Stat(root, reqPath); err != nil {
+			// A missing build asset is a 404, never index.html: pages load as
+			// separate chunks, and a tab opened before an upgrade asks for the
+			// old chunk names. HTML served as a script fails with a confusing
+			// MIME error; a 404 fails cleanly (and a reload fetches the new index).
+			if strings.HasPrefix(reqPath, "assets/") {
+				http.NotFound(w, r)
+				return
+			}
 			// Not a real file: SPA route, serve index.html.
 			serveIndex(w, r, root)
 			return

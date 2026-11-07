@@ -50,7 +50,7 @@ func TestCluster_LeaveRegisters(t *testing.T) {
 }
 
 func TestCluster_StatusSingleNode(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "vortex.cue")
+	cfgPath := filepath.Join(t.TempDir(), "gubern.cue")
 	if err := os.WriteFile(cfgPath, []byte(clusterTestConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ security: {}
 secrets: {}
 observability: {}
 `
-	cfgPath := filepath.Join(t.TempDir(), "vortex.cue")
+	cfgPath := filepath.Join(t.TempDir(), "gubern.cue")
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}

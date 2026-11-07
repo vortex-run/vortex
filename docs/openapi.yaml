@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: VORTEX Management API
+  title: Gubern Management API
   description: |
-    HTTP/JSON control and data plane for a self-hosted VORTEX node.
+    HTTP/JSON control and data plane for a self-hosted Gubern node.
     Default listen address is `:9090`. See docs/api.md for narrative detail.
   version: "0.2.0"
   license:

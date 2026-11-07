@@ -94,7 +94,7 @@ func TestReadURL_CSV(t *testing.T) {
 		_, _ = io.WriteString(w, "x,y\n1,2\n3,4\n")
 	}))
 	t.Cleanup(srv.Close)
-	ds, err := NewReader().ReadURL(context.Background(), srv.URL)
+	ds, err := newReader(true).ReadURL(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("ReadURL: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestReadURL_JSONByContentType(t *testing.T) {
 		_, _ = io.WriteString(w, `[{"a":1},{"a":2}]`)
 	}))
 	t.Cleanup(srv.Close)
-	ds, err := NewReader().ReadURL(context.Background(), srv.URL)
+	ds, err := newReader(true).ReadURL(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestReadURL_SniffsJSON(t *testing.T) {
 		_, _ = io.WriteString(w, `[{"a":1}]`)
 	}))
 	t.Cleanup(srv.Close)
-	ds, err := NewReader().ReadURL(context.Background(), srv.URL)
+	ds, err := newReader(true).ReadURL(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +155,25 @@ func TestCoerce(t *testing.T) {
 	}
 	if v := coerce(""); v != "" {
 		t.Errorf("coerce empty = %v", v)
+	}
+}
+
+// Sources come from API callers and the agent, and the body comes back as a
+// dataset, so the production reader must refuse internal targets.
+func TestReadURL_RefusesInternalTargets(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write([]byte("secret\nleaked\n"))
+	}))
+	defer srv.Close()
+	for _, u := range []string{
+		srv.URL, // loopback (control plane trusts it)
+		"http://169.254.169.254/latest/meta-data/", // cloud metadata
+		"http://10.0.0.1/data.csv",                 // private range
+		"http://[::1]:9090/api/status",             // IPv6 loopback
+	} {
+		if ds, err := NewReader().ReadURL(context.Background(), u); err == nil {
+			t.Errorf("ReadURL(%q) succeeded with %d rows; internal targets must be refused", u, len(ds.Rows))
+		}
 	}
 }

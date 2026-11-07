@@ -214,3 +214,33 @@ func TestAPIKey_ConcurrentIssueNoRace(t *testing.T) {
 		t.Errorf("issued %d keys, want 50", got)
 	}
 }
+
+// Audit F-03: revocation tombstones persist and block ImportRaw.
+func TestAPIKeyStore_RevocationTombstonePersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.json")
+	s := NewAPIKeyStore()
+	s.SetPath(path)
+	k, secret, err := s.Issue("u", "o", []Role{RoleAdmin}, "d", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Revoke(k.ID); err != nil {
+		t.Fatal(err)
+	}
+	s2 := NewAPIKeyStore()
+	if err := s2.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if !s2.IsRevoked(k.ID) || s2.Count() != 0 {
+		t.Fatalf("tombstone lost on reload: revoked=%v count=%d", s2.IsRevoked(k.ID), s2.Count())
+	}
+	if err := s2.ImportRaw(secret, "u", "o", []Role{RoleAdmin}, "d"); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("ImportRaw of a revoked key = %v, want ErrRevoked", err)
+	}
+	if _, err := s2.Verify(secret); err == nil {
+		t.Fatal("revoked key verifies")
+	}
+	if len(s2.List("o")) != 0 {
+		t.Error("tombstones must not appear in List")
+	}
+}

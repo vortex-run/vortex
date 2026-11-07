@@ -1,4 +1,4 @@
-// Package app is the root Bubble Tea application for the VORTEX terminal UI.
+// Package app is the root Bubble Tea application for the Gubern terminal UI.
 // It composes the top bar, sidebar, per-screen view models (internal/tui/views),
 // a context help bar, a ?-toggled help overlay, and a first-run tutorial. It
 // imports both tui and views; neither imports app (no cycle).
@@ -14,9 +14,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/tui/views"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/views"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // ViewID identifies a screen.
@@ -252,7 +253,7 @@ func (a *App) View() string {
 		return a.views[ViewSetup].View()
 	}
 	if a.tutorialStep >= 0 && a.tutorialStep < len(tutorialSteps) {
-		return a.overlayBox("Welcome to VORTEX", a.tutorialBody())
+		return a.overlayBox("Welcome to Gubern", a.tutorialBody())
 	}
 	if a.helpOpen {
 		return a.overlayBox("Help — "+viewName(a.activeView), a.helpBody())
@@ -286,7 +287,7 @@ func costPill(c *tui.AICostData) string {
 	return tui.Pill(fmt.Sprintf("%s $%.2f", brand.IconCost, c.TotalUSD), color)
 }
 
-// topBar renders: ▲ VORTEX  v1.0.0  ●cluster  uptime  💰cost  [Tab] views.
+// topBar renders: ▲ Gubern  v1.0.0  ●cluster  uptime  💰cost  [Tab] views.
 func (a *App) topBar() string {
 	parts := []string{brand.StyleTitle.Render(brand.LogoSmall)}
 	if a.health != nil {
@@ -466,7 +467,7 @@ func viewName(id ViewID) string {
 			return item.Label
 		}
 	}
-	return "VORTEX"
+	return "Gubern"
 }
 
 // --- help overlay -------------------------------------------------------
@@ -534,11 +535,8 @@ var tutorialSteps = []string{
 
 // tutorialDonePath is the first-run flag file.
 func tutorialDonePath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "vortex", "tutorial-done")
+	dir := userdir.Config()
+	return filepath.Join(userdir.App(dir), "tutorial-done")
 }
 
 // startTutorialIfFirstRun activates the tutorial when its done-flag is absent.

@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 func TestNewApp_Disconnected(t *testing.T) {
@@ -185,7 +185,7 @@ func TestApp_NavigationWorksWhenNotInputFocused(t *testing.T) {
 func TestApp_TopBarShowsVortexBrand(t *testing.T) {
 	a := connectedApp(t)
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if !strings.Contains(a.View(), "▲ VORTEX") {
+	if !strings.Contains(a.View(), "▲ Gubern") {
 		t.Errorf("top bar should show the brand mark:\n%s", a.View())
 	}
 }
@@ -261,7 +261,9 @@ func TestApp_HelpOverlayListsAgentCommands(t *testing.T) {
 }
 
 func TestApp_TutorialFirstRunAndFlag(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 
 	a := connectedApp(t)
@@ -292,7 +294,9 @@ func TestApp_TutorialFirstRunAndFlag(t *testing.T) {
 }
 
 func TestApp_TutorialEscSkipsAndWritesFlag(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 
 	a := connectedApp(t)

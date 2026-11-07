@@ -134,13 +134,26 @@ func (s *EpisodicStore) Store(ep Episode) error {
 // (importance / (1 + age/30d)): recency breaks ties between equally important
 // episodes, but an important week-old fact still outranks a trivial one from
 // today.
+//
+// Recall is unscoped: it searches every session's episodes. Conversation
+// paths must use RecallSession so one principal's facts never reach another
+// principal's prompt (audit F-04).
 func (s *EpisodicStore) Recall(query string, limit int) ([]Episode, error) {
-	return s.recall(query, "", limit)
+	return s.recall(query, "", "", limit)
 }
 
-// recall implements Recall with an optional exact-context filter (used by
-// ProjectMemory to scope recall to one project).
-func (s *EpisodicStore) recall(query, contextFilter string, limit int) ([]Episode, error) {
+// RecallSession is Recall restricted to episodes written by sessionID. An
+// empty sessionID recalls nothing (fail closed) rather than everything.
+func (s *EpisodicStore) RecallSession(sessionID, query string, limit int) ([]Episode, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	return s.recall(query, "", sessionID, limit)
+}
+
+// recall implements Recall with optional exact-context (used by ProjectMemory
+// to scope recall to one project) and exact-session filters.
+func (s *EpisodicStore) recall(query, contextFilter, sessionFilter string, limit int) ([]Episode, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, nil
@@ -159,6 +172,10 @@ func (s *EpisodicStore) recall(query, contextFilter string, limit int) ([]Episod
 	if contextFilter != "" {
 		where += ` AND e.context = ?`
 		args = append(args, contextFilter)
+	}
+	if sessionFilter != "" {
+		where += ` AND e.session_id = ?`
+		args = append(args, sessionFilter)
 	}
 	args = append(args, time.Now().UnixMilli(), limit)
 
@@ -255,5 +272,5 @@ func (p *ProjectMemory) Store(ep Episode) error {
 
 // Recall searches only this project's episodes.
 func (p *ProjectMemory) Recall(query string, limit int) ([]Episode, error) {
-	return p.store.recall(query, p.project, limit)
+	return p.store.recall(query, p.project, "", limit)
 }

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/safedial"
+	"github.com/sandeepbollavaram/vortex/pkg/safedial"
 )
 
 // maxFetchWords caps extracted content to keep summaries bounded.
@@ -120,23 +120,9 @@ func (f *Fetcher) FetchMultiple(ctx context.Context, urls []string) ([]*FetchRes
 
 // --- SSRF protection --------------------------------------------------------
 
-// metadataIPs are cloud metadata endpoints that must never be fetched.
-var metadataIPs = map[string]bool{
-	"169.254.169.254": true,
-	"fd00:ec2::254":   true,
-}
-
-// blockedIP reports whether ip is loopback, link-local, private, or metadata.
-func blockedIP(ip net.IP) bool {
-	if ip == nil {
-		return true
-	}
-	if metadataIPs[ip.String()] {
-		return true
-	}
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || ip.IsUnspecified()
-}
+// blockedIP reports whether the fetcher must never reach ip: the shared
+// safedial blocklist (audit F-11 found this copy missing CGNAT and NAT64).
+func blockedIP(ip net.IP) bool { return safedial.IsBlockedIP(ip) }
 
 // checkSSRF rejects non-http(s) schemes and private/loopback hosts. When
 // allowLoopback is true (tests only) loopback addresses are permitted.

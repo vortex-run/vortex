@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // isolateKeyPaths points the master key, audit log, and migration marker at a
@@ -15,14 +15,14 @@ import (
 func isolateKeyPaths(t *testing.T) (auditPath string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("VORTEX_MASTER_KEY_FILE", filepath.Join(dir, "master.key"))
-	t.Setenv("VORTEX_AUDIT_LOG", filepath.Join(dir, "audit.log"))
+	t.Setenv("GUBERN_MASTER_KEY_FILE", filepath.Join(dir, "master.key"))
+	t.Setenv("GUBERN_AUDIT_LOG", filepath.Join(dir, "audit.log"))
 	// Must be isolated too: migrateLegacyKeys probes the secret store as well,
 	// and pointing at the developer's real store made these tests depend on
 	// whatever happened to be on that machine.
-	t.Setenv("VORTEX_SECRET_STORE", filepath.Join(dir, "secrets"))
+	t.Setenv("GUBERN_SECRET_STORE", filepath.Join(dir, "secrets"))
 	// Ensure no inline key short-circuits migrateLegacyKeys.
-	t.Setenv("VORTEX_MASTER_KEY", "")
+	t.Setenv("GUBERN_MASTER_KEY", "")
 	return filepath.Join(dir, "audit.log")
 }
 

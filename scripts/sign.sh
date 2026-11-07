@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# VORTEX release signing helpers (build plan M20 / production audit H4).
+# Gubern release signing helpers (build plan M20 / production audit H4).
 #
-# VORTEX signs each release's checksums.txt with an Ed25519 key whose public
+# Gubern signs each release's checksums.txt with an Ed25519 key whose public
 # half is pinned into the binary (internal/update/signature.go,
 # ReleaseSigningPublicKey). `vortex self-update` verifies the signature before
 # installing, so a release that swaps both the binary AND its checksum still

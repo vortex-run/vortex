@@ -41,3 +41,22 @@ func SigningKey(secretKey, dateStamp, region, service string) []byte {
 func Sign(signingKey []byte, stringToSign string) string {
 	return hex.EncodeToString(HMACSHA256(signingKey, stringToSign))
 }
+
+// URIEncode percent-encodes s the way SigV4 requires: every byte except the
+// unreserved characters A-Z a-z 0-9 - _ . ~ becomes %XX (uppercase hex).
+// Unlike url.PathEscape it encodes ':' too, which matters for Bedrock model
+// IDs such as "anthropic.claude-3-5-sonnet-20240620-v1:0".
+func URIEncode(s string) string {
+	const hexDigits = "0123456789ABCDEF"
+	var b []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			b = append(b, c)
+			continue
+		}
+		b = append(b, '%', hexDigits[c>>4], hexDigits[c&15])
+	}
+	return string(b)
+}

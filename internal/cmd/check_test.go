@@ -19,7 +19,7 @@ observability: {}
 
 func writeCheckConfig(t *testing.T, body string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "vortex.cue")
+	p := filepath.Join(t.TempDir(), "gubern.cue")
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -84,7 +84,7 @@ observability: {}
 // a directory, and contain the work dir). check must apply the same rule.
 func TestCheckRejectsLocalToolsStartWouldRefuse(t *testing.T) {
 	work := t.TempDir()
-	t.Setenv("VORTEX_WORK_DIR", work)
+	t.Setenv("GUBERN_WORK_DIR", work)
 
 	// trusted_root points at a directory that does not exist.
 	body := checkValidConfig + "\nagents: {local_tools: {trusted_root: \"" +
@@ -121,7 +121,7 @@ func TestCheckAcceptsLocalToolsContainingWorkDir(t *testing.T) {
 	if err := os.Mkdir(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VORTEX_WORK_DIR", work)
+	t.Setenv("GUBERN_WORK_DIR", work)
 	body := checkValidConfig + "\nagents: {local_tools: {trusted_root: \"" +
 		strings.ReplaceAll(trusted, `\`, `\\`) + "\", auto_mode: true}}\n"
 	out, err := runCheck(t, writeCheckConfig(t, body))

@@ -7,14 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/cluster"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/cluster"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // errCluster signals a cluster-command failure whose detail was already printed.
 var errCluster = errors.New("cluster command failed")
 
-// newClusterCommand builds `vortex cluster` with status/join/leave subcommands.
+// newClusterCommand builds `gubern cluster` with status/join/leave subcommands.
 func newClusterCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "cluster",
@@ -29,7 +29,7 @@ func newClusterCommand() *cobra.Command {
 
 // clusterMode reports whether the loaded config describes a multi-node cluster.
 func clusterMode(cfg *config.Config) (multiNode bool) {
-	return len(cfg.Cluster.Nodes) > 1 || os.Getenv("VORTEX_BOOTSTRAP") == "true"
+	return len(cfg.Cluster.Nodes) > 1 || os.Getenv("GUBERN_BOOTSTRAP") == "true"
 }
 
 func newClusterStatusCommand() *cobra.Command {
@@ -78,7 +78,7 @@ func newClusterJoinCommand() *cobra.Command {
 			// to the node list and reload. (A live join RPC lands in a later
 			// milestone alongside the cluster control endpoint.)
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"To join %s: add it to cluster.nodes in vortex.cue and reload, or start this node with VORTEX_CLUSTER_BIND set and the peer in nodes.\n",
+				"To join %s: add it to cluster.nodes in vortex.cue and reload, or start this node with GUBERN_CLUSTER_BIND set and the peer in nodes.\n",
 				addr)
 			return nil
 		},
@@ -92,7 +92,7 @@ func newClusterLeaveCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(cmd.OutOrStdout(),
-				"To leave the cluster, stop this node with `vortex stop`; it broadcasts a graceful gossip leave on shutdown.\n")
+				"To leave the cluster, stop this node with `gubern stop`; it broadcasts a graceful gossip leave on shutdown.\n")
 			return nil
 		},
 	}

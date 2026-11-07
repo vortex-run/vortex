@@ -11,34 +11,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/internal/tui/views"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/views"
 )
 
-// errCodeNotRunning signals that `vortex code` found no running server; the
+// errCodeNotRunning signals that `gubern code` found no running server; the
 // helpful message was already printed, so Execute exits 1 quietly.
 var errCodeNotRunning = errors.New("code: vortex is not running")
 
-// newCodeCommand builds `vortex code` — the dedicated coding interface.
+// newCodeCommand builds `gubern code` — the dedicated coding interface.
 func newCodeCommand() *cobra.Command {
 	var dir, model, addr, key string
 	var noTeam, team, initMD bool
 	c := &cobra.Command{
 		Use:   "code",
-		Short: "Start VORTEX coding agent",
-		Long: `Open the VORTEX coding interface.
+		Short: "Start Gubern coding agent",
+		Long: `Open the Gubern coding interface.
 
 Like Claude Code, but self-hosted and free.
 Supports multiple AI providers and a specialist agent team.
 
 Examples:
-  vortex code
-  vortex code --team
-  vortex code --init
-  vortex code --dir ~/myproject
-  vortex code --model deepseek-chat`,
+  gubern code
+  gubern code --team
+  gubern code --init
+  gubern code --dir ~/myproject
+  gubern code --model deepseek-chat`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if initMD {
@@ -53,8 +53,8 @@ Examples:
 	c.Flags().BoolVar(&noTeam, "solo", false, "force single-agent mode (no specialist team)")
 	c.Flags().BoolVar(&noTeam, "no-team", false, "alias for --solo")
 	c.Flags().BoolVar(&initMD, "init", false, "generate AGENTS.md for the current project, then exit")
-	c.Flags().StringVar(&addr, "addr", "http://localhost:9090", "VORTEX API address")
-	c.Flags().StringVar(&key, "key", "", "API key (reads VORTEX_API_KEY if empty)")
+	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "Gubern API address (default from GUBERN_API_LISTEN)")
+	c.Flags().StringVar(&key, "key", "", "API key (reads GUBERN_API_KEY if empty)")
 	return c
 }
 
@@ -67,7 +67,7 @@ func runCodeInit(dir string) error {
 
 	gw := codeInitGateway()
 	if gw == nil {
-		fmt.Printf("%s No AI provider configured. Run: vortex setup\n", brand.IconError)
+		fmt.Printf("%s No AI provider configured. Run: gubern setup\n", brand.IconError)
 		return errCodeNotRunning
 	}
 	fmt.Printf("%s Generating AGENTS.md...\n", brand.IconSpinner)
@@ -79,7 +79,7 @@ func runCodeInit(dir string) error {
 		return errCodeNotRunning
 	}
 	fmt.Printf("%s AGENTS.md created\n\n", brand.IconSuccess)
-	fmt.Println("Your project is now configured for VORTEX:")
+	fmt.Println("Your project is now configured for Gubern:")
 	if md.Project != "" {
 		fmt.Printf("  Project: %s\n", md.Project)
 	}
@@ -89,7 +89,7 @@ func runCodeInit(dir string) error {
 	if md.TestCmd != "" {
 		fmt.Printf("  Test command: %s\n", md.TestCmd)
 	}
-	fmt.Println("\nRun: vortex code")
+	fmt.Println("\nRun: gubern code")
 	fmt.Println("To start coding with your agent team.")
 	return nil
 }
@@ -110,16 +110,16 @@ func codeInitGateway() agents.AIGateway {
 
 // runCode connects to the running server and opens the coding interface.
 func runCode(addr, key, dir, model string, team, noTeam bool) error {
-	fmt.Println(brand.StyleTitle.Render("▲ VORTEX CODE") + "  Starting...")
+	fmt.Println(brand.StyleTitle.Render("▲ Gubern CODE") + "  Starting...")
 
 	client := tui.NewClient(tui.ClientConfig{BaseURL: addr, APIKey: key})
 	if key == "" {
 		client = tui.NewClient(tui.ClientConfig{BaseURL: addr, APIKey: client.LoadAPIKey()})
 	}
 	if !client.IsConnected() {
-		fmt.Println("VORTEX is not running.")
-		fmt.Println("Start it first: vortex start")
-		fmt.Println("Or start with UI: vortex start --ui")
+		fmt.Println("Gubern is not running.")
+		fmt.Println("Start it first: gubern start")
+		fmt.Println("Or start with UI: gubern start --ui")
 		return errCodeNotRunning
 	}
 

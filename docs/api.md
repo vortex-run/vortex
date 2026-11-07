@@ -9,12 +9,12 @@ Machine-readable sketch: [openapi.yaml](openapi.yaml).
 ## Authentication
 
 Protected endpoints require an API key, sent as `Authorization: Bearer <key>`
-or `X-API-Key: <key>`. Issue keys with `POST /api/keys` (admin) or `vortex
+or `X-API-Key: <key>`. Issue keys with `POST /api/keys` (admin) or `gubern
 setup`.
 
 - **Public** (no auth): `/health`, `/ready`, `/dashboard/`.
 - **Control plane** (`/internal/*`, `/metrics`, `/api/status`, …): allowed from
-  loopback without a key by default; set `VORTEX_TRUST_LOOPBACK=false` to
+  loopback without a key by default; set `GUBERN_TRUST_LOOPBACK=false` to
   require a key even from loopback (recommended behind a same-host proxy).
 - **Data plane** (`/api/agents/*`, `/api/forge/*`, …): always require a key.
 
@@ -31,8 +31,11 @@ GET /ready
 → 200 {"ready":true}   or   503 {"ready":false,"reason":"agent queue saturated (…)"}
 ```
 
-`cluster_name` is included in `/health` only for trusted (loopback/authed)
-callers.
+`cluster_name` and `routes` (per-route name, protocol, listen address and
+active connections) are included in `/health` only for trusted loopback
+callers (the CLI, the local dashboard and TUI). Remote callers get status,
+version, config hash and uptime; route counts are in the authenticated
+`GET /api/status`.
 
 ## Status & metrics
 
@@ -51,12 +54,18 @@ POST /api/agents/submit
   else                       → {"response":"...","session_id":"..."}
 
 GET  /api/agents/status              → {active_agents, total_messages, queue_depth}
-POST /api/agents/approve             → {"session_id":"...","approved":true}
+POST /api/agents/approve             → {"session_id":"...","approved":true,"action_id":"optional"}
 GET  /api/agents/history             → list sessions (newest first)
 GET  /api/agents/history/{id}        → messages for a session
 ```
 
 `session_id` must match `^[A-Za-z0-9_.-]{1,64}$`. Responses are capped at 8 MB.
+
+Each approval line ends with `(action <id>)`, a 16-hex-digit digest of the
+tool, its parameters and the preview. Send that id as `action_id` and the
+decision applies only to that action: if a different one is pending the call
+returns `409` and nothing changes. Without `action_id` the call resolves
+whatever is pending for the session, as before; the TUI always sends it.
 
 SSE chunks stream **as the model generates them** (true token streaming):
 direct coordinator answers arrive line by line while the reply is being
@@ -67,12 +76,12 @@ non-streaming `response` text.
 ## OpenAI-compatible API
 
 Any OpenAI-speaking tool (Claude Code, Aider, Cline, Cursor, …) can use
-VORTEX as its AI backend — with provider routing, failover, budget, and cost
-tracking — by pointing `OPENAI_BASE_URL` at VORTEX:
+Gubern as its AI backend — with provider routing, failover, budget, and cost
+tracking — by pointing `OPENAI_BASE_URL` at Gubern:
 
 ```
 export OPENAI_BASE_URL=http://localhost:9090/v1
-export OPENAI_API_KEY=<your-vortex-key>
+export OPENAI_API_KEY=<your-gubern-key>
 ```
 
 ```
@@ -91,7 +100,7 @@ provider). Mid-stream provider errors are reported in-band as an SSE
 `{"error": …}` object, since the 200 status is already committed once
 streaming starts.
 
-## VORTEX Forge
+## Gubern Forge
 
 ```
 POST /api/forge/build       → start an app build
@@ -120,9 +129,9 @@ POST /api/audit/verify      → verify the hash chain
 CLI equivalents add reporting and archival:
 
 ```bash
-vortex audit verify
-vortex audit report --since 2026-01-01 --format markdown --output report.md
-vortex audit archive
+gubern audit verify
+gubern audit report --since 2026-01-01 --format markdown --output report.md
+gubern audit archive
 ```
 
 ## Other data endpoints
@@ -138,8 +147,8 @@ GET  /api/logs
 ## Control plane (Windows-safe SIGHUP/SIGTERM)
 
 ```
-POST /internal/reload       → re-read + re-validate config (vortex reload)
-POST /internal/shutdown     → graceful shutdown (vortex stop)
+POST /internal/reload       → re-read + re-validate config (gubern reload)
+POST /internal/shutdown     → graceful shutdown (gubern stop)
 ```
 
 Both honour loopback trust (see Authentication above).

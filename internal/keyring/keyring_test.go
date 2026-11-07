@@ -78,7 +78,7 @@ func TestLoadOrCreate_EnvOverrideBase64(t *testing.T) {
 func TestLoadOrCreate_RejectsBadEnvKey(t *testing.T) {
 	t.Setenv(EnvMasterKey, "not-a-valid-key")
 	if _, err := LoadOrCreate(filepath.Join(t.TempDir(), "master.key")); err == nil {
-		t.Error("expected error for malformed VORTEX_MASTER_KEY")
+		t.Error("expected error for malformed GUBERN_MASTER_KEY")
 	}
 }
 

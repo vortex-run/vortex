@@ -57,6 +57,26 @@ type Server struct {
 	errorReqs   atomic.Int64
 }
 
+// Chain composes the L7 middleware around next, inside-out: policy, then
+// observability, then the edge, so requests hit edge → obs → policy → next.
+// Security headers wrap the whole chain (M19) so every response — including
+// edge rejections and policy denials — is hardened and de-identified. Nil
+// middlewares are skipped. Every L7 transport (HTTP/1.1, HTTP/2, HTTP/3) must
+// use this one composition so no transport skips a control (audit F-02).
+func Chain(next http.Handler, edge, obs, policy func(http.Handler) http.Handler) http.Handler {
+	h := next
+	if policy != nil {
+		h = policy(h)
+	}
+	if obs != nil {
+		h = obs(h)
+	}
+	if edge != nil {
+		h = edge(h)
+	}
+	return SecurityHeadersMiddleware()(h)
+}
+
 // NewServer builds a Server from cfg (zero timeouts take defaults).
 func NewServer(cfg ServerConfig) *Server {
 	if cfg.ReadTimeout <= 0 {
@@ -69,22 +89,8 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.IdleTimeout = defaultIdleTimeout
 	}
 
-	// Build the middleware chain inside-out: router first, then policy, then
-	// observability, then the edge (so requests hit edge → obs → policy →
-	// router). Finally instrument the whole chain for connection/error stats.
-	var handler http.Handler = cfg.Router
-	if cfg.PolicyMiddleware != nil {
-		handler = cfg.PolicyMiddleware(handler)
-	}
-	if cfg.ObsMiddleware != nil {
-		handler = cfg.ObsMiddleware(handler)
-	}
-	if cfg.EdgeMiddleware != nil {
-		handler = cfg.EdgeMiddleware(handler)
-	}
-	// Security headers wrap the whole chain (M19) so every response — including
-	// edge rejections and policy denials — is hardened and de-identified.
-	handler = SecurityHeadersMiddleware()(handler)
+	// Finally instrument the whole chain for connection/error stats.
+	handler := Chain(cfg.Router, cfg.EdgeMiddleware, cfg.ObsMiddleware, cfg.PolicyMiddleware)
 
 	s := &Server{}
 	s.srv = &http.Server{

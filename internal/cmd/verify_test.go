@@ -22,7 +22,7 @@ func TestVerifyFlags(t *testing.T) {
 
 func TestHashFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f")
-	content := []byte("vortex verify test")
+	content := []byte("gubern verify test")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)
 	}

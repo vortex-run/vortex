@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestDevOps_ServersEndpointEmpty confirms the DevOps servers endpoint is wired

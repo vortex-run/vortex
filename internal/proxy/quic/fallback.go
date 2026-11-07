@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
 )
 
 // DualStackConfig configures a server that listens on both QUIC (UDP) and TCP.
@@ -19,6 +19,10 @@ type DualStackConfig struct {
 	TLSConfig *tls.Config
 	// Router handles requests on both transports.
 	Router *proxyhttp.Router
+	// Middleware wraps Router on BOTH transports (QUIC and the TCP fallback).
+	// It must carry the route's full L7 chain so neither transport skips the
+	// edge allowlist, rate limit, quota, policy or metrics (audit F-02).
+	Middleware func(http.Handler) http.Handler
 	// QUICConfig customizes the QUIC transport. Addr/TLSConfig/Router are
 	// filled from the DualStack fields if unset.
 	QUICConfig QUICConfig
@@ -72,6 +76,9 @@ func NewDualStack(cfg DualStackConfig) (*DualStack, error) {
 	if qcfg.Router == nil {
 		qcfg.Router = cfg.Router
 	}
+	if qcfg.Middleware == nil {
+		qcfg.Middleware = cfg.Middleware
+	}
 
 	quicTransport, err := NewTransport(qcfg)
 	if err != nil {
@@ -81,7 +88,11 @@ func NewDualStack(cfg DualStackConfig) (*DualStack, error) {
 	d := &DualStack{cfg: cfg, log: cfg.Logger, quic: quicTransport}
 
 	// The TCP server wraps the router to add Alt-Svc on every response.
-	tcpHandler := d.withAltSvc(cfg.Router)
+	var inner http.Handler = cfg.Router
+	if cfg.Middleware != nil {
+		inner = cfg.Middleware(inner)
+	}
+	tcpHandler := d.withAltSvc(inner)
 	tcpRouter := proxyhttp.NewRouter()
 	tcpRouter.Handle("/*", tcpHandler) // catch-all; per-route matching done by inner router
 	d.tcp = proxyhttp.NewServer(proxyhttp.ServerConfig{

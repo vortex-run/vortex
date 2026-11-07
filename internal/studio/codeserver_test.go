@@ -3,11 +3,16 @@ package studio
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewCodeServer_NotInstalled(t *testing.T) {
@@ -76,6 +81,106 @@ func TestCodeServer_ProxyHandlerWebSocketUpgrade(t *testing.T) {
 
 	if gotUpgrade != "websocket" {
 		t.Errorf("backend Upgrade header = %q, want websocket (proxy must preserve it)", gotUpgrade)
+	}
+}
+
+// TestCodeServer_ProxyOverUnixSocket: the proxy reaches code-server through
+// its private socket (no TCP listener) and keeps the client's Host header.
+func TestCodeServer_ProxyOverUnixSocket(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "cs.sock")
+	l, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("unix sockets unavailable: %v", err)
+	}
+	var gotHost string
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		_, _ = io.WriteString(w, "from socket:"+r.URL.Path)
+	}), ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = srv.Serve(l) }()
+	defer func() { _ = srv.Close() }()
+
+	cs := &CodeServer{log: discardLogger(), socket: sock}
+	if err := cs.waitReady(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://vortex.example/studio/editor", nil)
+	cs.ProxyHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "from socket:/studio/editor" {
+		t.Fatalf("proxy = %d %q, want 200 from the socket backend", rec.Code, rec.Body.String())
+	}
+	if gotHost != "vortex.example" {
+		t.Errorf("backend Host = %q, want the client's host (code-server checks Origin against it)", gotHost)
+	}
+}
+
+// TestCodeServer_ProxyStripsVortexCredentials: the caller's API key is not
+// forwarded to code-server.
+func TestCodeServer_ProxyStripsVortexCredentials(t *testing.T) {
+	var auth, key string
+	backend := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		auth, key = r.Header.Get("Authorization"), r.Header.Get("X-API-Key")
+	}))
+	defer backend.Close()
+
+	cs := newProxyOnlyCodeServer(t, backendHost(t, backend))
+	req := httptest.NewRequest(http.MethodGet, "/studio/", nil)
+	req.Header.Set("Authorization", "Bearer vx_secret")
+	req.Header.Set("X-API-Key", "vx_secret")
+	cs.ProxyHandler().ServeHTTP(httptest.NewRecorder(), req)
+	if auth != "" || key != "" {
+		t.Errorf("backend saw Authorization=%q X-API-Key=%q, want both stripped", auth, key)
+	}
+}
+
+// TestCodeServer_ListensOnPrivateSocket: off Windows, code-server gets a
+// socket in a 0700 directory and no TCP address.
+func TestCodeServer_ListensOnPrivateSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses a loopback port")
+	}
+	cs := &CodeServer{cfg: CodeServerConfig{WorkspaceDir: "/ws", DataDir: "/data"}, log: discardLogger()}
+	if err := cs.chooseListener(); err != nil {
+		t.Fatal(err)
+	}
+	defer cs.removeSocketDir()
+	dir := cs.socketDir
+	fi, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o700 {
+		t.Errorf("socket dir mode = %o, want 700", perm)
+	}
+	got := strings.Join(cs.args(), " ")
+	want := "--socket " + filepath.Join(dir, "code-server.sock") + " --auth none --user-data-dir /data /ws"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+	cs.removeSocketDir()
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("socket dir still exists after removeSocketDir: %v", err)
+	}
+}
+
+// TestCodeServer_WindowsPicksFreePort: on Windows the listener is loopback
+// TCP on a free port, not a fixed 8080 that a route backend might use.
+func TestCodeServer_WindowsPicksFreePort(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Unix uses a socket")
+	}
+	cs := &CodeServer{log: discardLogger()}
+	if err := cs.chooseListener(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cs.addr, "127.0.0.1:") || cs.addr == "127.0.0.1:8080" {
+		t.Errorf("addr = %q, want a free 127.0.0.1 port", cs.addr)
+	}
+	// A loopback port is reachable by every local account: password auth,
+	// never --auth none (audit NV-02).
+	if args := strings.Join(cs.args(), " "); !strings.HasPrefix(args, "--bind-addr "+cs.addr+" --auth password") || len(cs.password) != 64 {
+		t.Errorf("args = %q", args)
 	}
 }
 

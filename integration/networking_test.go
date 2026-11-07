@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // Networking tests each start a real vortex process, which requires compiling
@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	netBin = bin
+	testutil.SetSharedBinary(bin) // every BuildBinary(t) in this package reuses it
 
 	code := m.Run()
 	_ = os.RemoveAll(dir)
@@ -53,7 +54,7 @@ func getNetBinary(t *testing.T) string {
 	return netBin
 }
 
-// netConfig builds a vortex.cue with the given routes block. observability uses
+// netConfig builds a gubern.cue with the given routes block. observability uses
 // stderr logging so the started process does not need a log directory.
 func netConfig(routes string) string {
 	return `cluster: { name: "net-test" }

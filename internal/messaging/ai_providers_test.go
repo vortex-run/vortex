@@ -3,11 +3,13 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGroq_UsesOpenAIFormat(t *testing.T) {
@@ -58,8 +60,8 @@ func TestOpenRouter_SendsAttributionHeaders(t *testing.T) {
 	if !strings.Contains(referer, "vortex") {
 		t.Errorf("HTTP-Referer = %q, want a vortex URL", referer)
 	}
-	if title != "VORTEX" {
-		t.Errorf("X-Title = %q, want VORTEX", title)
+	if title != "Gubern" {
+		t.Errorf("X-Title = %q, want Gubern", title)
 	}
 	if auth != "Bearer sk-or-1" {
 		t.Errorf("Authorization = %q", auth)
@@ -171,4 +173,84 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	req.URL.Scheme = u.Scheme
 	req.URL.Host = u.Host
 	return rt.base.RoundTrip(req)
+}
+
+// TestBedrock_ModelIDEncodedInPathAndSignature: the ':' in a model ID is
+// sent as %3A and signed as %253A (SigV4 double-encodes non-S3 paths).
+func TestBedrock_ModelIDEncodedInPathAndSignature(t *testing.T) {
+	var rawURI string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawURI = r.RequestURI
+		_, _ = io.WriteString(w, `{"content":[{"text":"ok"}],"usage":{}}`)
+	}))
+	defer srv.Close()
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{
+			Name: ProviderBedrock, APIKey: "AKIA:secret", Endpoint: "us-east-1",
+			Models: []string{"anthropic.claude-3-5-sonnet-20240620-v1:0"},
+		}},
+	})
+	g.client = &http.Client{Transport: rewriteTransport{to: srv.URL, base: srv.Client().Transport}}
+	if _, err := g.Complete(context.Background(), "hi", "sys"); err != nil {
+		t.Fatal(err)
+	}
+	if rawURI != "/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/invoke" {
+		t.Errorf("request URI = %q", rawURI)
+	}
+	wire, canonical := bedrockModelPath("m-v1:0", "invoke")
+	if wire != "/model/m-v1%3A0/invoke" || canonical != "/model/m-v1%253A0/invoke" {
+		t.Errorf("wire=%q canonical=%q", wire, canonical)
+	}
+}
+
+// TestBedrockSignV4_MatchesAWSSDK: golden signature produced by the official
+// aws-sdk-go-v2 v4 signer (v1.47.6) for this exact request, so the hand-rolled
+// signer is checked against AWS's implementation, not just our reading of it.
+func TestBedrockSignV4_MatchesAWSSDK(t *testing.T) {
+	_, canonical := bedrockModelPath("anthropic.claude-3-5-sonnet-20240620-v1:0", "invoke")
+	h := map[string]string{}
+	bedrockSignV4(h, []byte(`{"x":1}`), "POST", "bedrock-runtime.us-east-1.amazonaws.com", canonical,
+		"AKIDEXAMPLE", "SECRET", "us-east-1", "bedrock", time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	const want = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261105/us-east-1/bedrock/aws4_request, " +
+		"SignedHeaders=content-type;host;x-amz-date, " +
+		"Signature=61a51f669f5ee956d13ed8eb6de82ed460c39b4aabe04ffb5ff922e61f4c94a4"
+	if h["Authorization"] != want {
+		t.Errorf("Authorization =\n%s\nwant\n%s", h["Authorization"], want)
+	}
+}
+
+// Audit F-13: a /v1 caller's model string must not reshape the
+// operator-credentialed provider URL (path traversal to another deployment,
+// query/fragment injection). Before the fix the Azure fixture received
+// /openai/deployments/x/../../../openai/deployments/other/... with api-key set.
+func TestCompleteForModel_RejectsURLShapingModelNames(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}`)
+	}))
+	defer srv.Close()
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderAzureOpenAI, APIKey: "az-key", Endpoint: srv.URL, Models: []string{"my-deployment"}}},
+		Client:    srv.Client(),
+	})
+	for _, m := range []string{
+		"x/../../../openai/deployments/other/images/generations",
+		"..", "dep?api-version=evil", "dep#frag", "dep%2F..", "a b",
+	} {
+		if _, _, err := g.CompleteForModel(context.Background(), m, "hi", "sys"); !errors.Is(err, ErrInvalidModel) {
+			t.Errorf("CompleteForModel(%q) err = %v, want ErrInvalidModel", m, err)
+		}
+		if _, _, err := g.CompleteStreamForModel(context.Background(), m, "hi", "sys", nil); !errors.Is(err, ErrInvalidModel) {
+			t.Errorf("CompleteStreamForModel(%q) err = %v, want ErrInvalidModel", m, err)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("provider was called %d times for rejected model names", hits)
+	}
+	for _, ok := range []string{"gpt-4o", "claude-3-5-sonnet-20241022", "gemini-1.5-flash", "llama3.1:8b", "my_deployment"} {
+		if !validModelName(ok) {
+			t.Errorf("validModelName(%q) = false, want true", ok)
+		}
+	}
 }

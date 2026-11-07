@@ -496,3 +496,42 @@ func TestBurstProtection_SweepRemovesExpiredBans(t *testing.T) {
 		t.Errorf("after sweep bans = %d, want 0", len(b.bans))
 	}
 }
+
+// TestRateLimit_SpoofedClientIPHeaderIgnored: without the edge in front, a
+// client rotating X-Vortex-Client-IP must still be limited by its real
+// address; with the edge, the edge's resolution is what counts.
+func TestRateLimit_SpoofedClientIPHeaderIgnored(t *testing.T) {
+	now, _ := fixedClock(time.Now())
+	r := NewHTTPRateLimiter(HTTPRateLimiterConfig{RPM: 60, Burst: 1, Enabled: true})
+	r.now = now
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	direct := r.Middleware()(ok)
+	codes := []int{}
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "9.9.9.9:1234"
+		req.Header.Set(clientIPHeader, "10.0.0."+string(rune('1'+i)))
+		direct.ServeHTTP(rec, req)
+		codes = append(codes, rec.Code)
+	}
+	if codes[0] != http.StatusOK || codes[1] != http.StatusTooManyRequests || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("rotating the header bypassed the limit: codes = %v", codes)
+	}
+
+	// Behind the edge, the edge-resolved address is used (and a header the
+	// client sent is overwritten by the edge).
+	r2 := NewHTTPRateLimiter(HTTPRateLimiterConfig{RPM: 60, Burst: 1, Enabled: true})
+	r2.now = now
+	behindEdge := NewEdge(EdgeConfig{}).Middleware()(r2.Middleware()(ok))
+	for i, want := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "8.8.8.8:1"
+		req.Header.Set(clientIPHeader, "10.9.9."+string(rune('1'+i)))
+		behindEdge.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("behind edge, request %d = %d, want %d", i, rec.Code, want)
+		}
+	}
+}

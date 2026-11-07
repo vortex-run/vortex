@@ -1,4 +1,4 @@
-// Package proxygateway implements VORTEX's protocol gateway (build plan M2.6):
+// Package proxygateway implements Gubern's protocol gateway (build plan M2.6):
 // it inspects each request and dispatches WebSocket upgrades, gRPC calls, and
 // plain HTTP to the appropriate handler. WebSocket connections are tunnelled
 // with M2.1's tcp.Tunnel; gRPC is proxied transparently over HTTP/2. Standard
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // IsWebSocketUpgrade reports whether req is a WebSocket upgrade handshake: an

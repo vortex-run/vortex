@@ -11,19 +11,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
 )
 
 // errSecret signals a secret-command failure whose detail was already printed;
 // Execute exits 1 without an extra generic log line.
 var errSecret = errors.New("secret command failed")
 
-// newSecretCommand builds `vortex secret` and its set/get/list/delete
+// newSecretCommand builds `gubern secret` and its set/get/list/delete
 // subcommands for managing the encrypted secret store.
 func newSecretCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "secret",
-		Short: "Manage VORTEX secrets (encrypted at rest)",
+		Short: "Manage Gubern secrets (encrypted at rest)",
 		Args:  cobra.NoArgs,
 	}
 	c.AddCommand(newSecretSetCommand())

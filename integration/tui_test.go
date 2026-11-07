@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
-	"github.com/vortex-run/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
 )
 
 // TestTUI_ClientConnects starts vortex and confirms the TUI client connects and
@@ -65,12 +65,12 @@ func TestTUI_LogsEndpoint(t *testing.T) {
 	}
 }
 
-// TestTUI_UICommandHelp confirms `vortex ui --help` works and lists the flags.
+// TestTUI_UICommandHelp confirms `gubern ui --help` works and lists the flags.
 func TestTUI_UICommandHelp(t *testing.T) {
 	bin := getNetBinary(t)
 	out, err := exec.Command(bin, "ui", "--help").CombinedOutput()
 	if err != nil {
-		t.Fatalf("vortex ui --help: %v\n%s", err, out)
+		t.Fatalf("gubern ui --help: %v\n%s", err, out)
 	}
 	s := string(out)
 	for _, flag := range []string{"--addr", "--key", "--start"} {

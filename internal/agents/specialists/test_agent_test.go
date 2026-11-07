@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 func testAgentWith(t *testing.T, gw AIGateway, tools *fakeTools, workDir string) *TestAgent {

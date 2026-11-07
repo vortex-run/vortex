@@ -1,17 +1,17 @@
 # Configuration
 
-VORTEX reads a single [CUE](https://cuelang.org) file (default
-`vortex.cue` / `/etc/vortex/vortex.cue`). CUE gives schema validation and
+Gubern reads a single [CUE](https://cuelang.org) file (default
+`gubern.cue` / `/etc/gubern/gubern.cue`). CUE gives schema validation and
 clear errors. Validate without starting:
 
 ```bash
-vortex check --config vortex.cue
+gubern check --config gubern.cue
 ```
 
 Reload a running server after editing (no restart, never drops connections):
 
 ```bash
-vortex reload
+gubern reload
 ```
 
 ## Top-level sections
@@ -67,7 +67,9 @@ routes: [
 ```
 
 Protocols: `http`, `https`, `tcp`, `udp`, `h3` (HTTP/3 over QUIC). Set
-`mtls: true` to require a client certificate from the cluster CA.
+`mtls: true` to require a client certificate from the cluster CA. It applies to
+`tcp`, `https` and `h3` routes; a plain `http` or `udp` route with `mtls: true`
+fails to start, as does any mTLS route when no cluster mTLS config is available.
 
 ### security
 
@@ -97,7 +99,7 @@ Only the backend **selection** lives in config. All credentials/endpoints come
 from the environment, never the config file. Set values with:
 
 ```bash
-vortex secret set db_password 's3cret' --expires-in 90d --rotate-every 30d
+gubern secret set db_password 's3cret' --expires-in 90d --rotate-every 30d
 ```
 
 ### observability
@@ -115,14 +117,29 @@ observability: {
 
 | Variable | Purpose |
 |---|---|
-| `VORTEX_MASTER_KEY` | Inline master key (hex/base64). Overrides the key file. |
-| `VORTEX_MASTER_KEY_FILE` | Path to the master key file. |
-| `VORTEX_TRUST_LOOPBACK` | `false` to require auth on the control plane even from loopback. |
-| `VORTEX_ANTHROPIC_KEY`, `VORTEX_OPENAI_KEY`, `VORTEX_DEEPSEEK_KEY`, `VORTEX_GEMINI_KEY`, `VORTEX_GROQ_KEY`, `VORTEX_OPENROUTER_KEY` | AI provider keys. |
-| `VORTEX_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
-| `VORTEX_AZURE_OPENAI_KEY` / `_ENDPOINT` / `_DEPLOYMENT` | Azure OpenAI. |
-| `VORTEX_TELEGRAM_TOKEN`, `VORTEX_TELEGRAM_DEFAULT_CHAT` | Telegram bot. |
-| `VORTEX_SECRET_STORE`, `VORTEX_AUDIT_LOG`, `VORTEX_MTLS_STORE` | Relocate on-disk state. |
+| `GUBERN_MASTER_KEY` | Inline master key (hex/base64). Overrides the key file. |
+| `GUBERN_MASTER_KEY_FILE` | Path to the master key file. |
+| `GUBERN_TRUST_LOOPBACK` | `false` to require auth on the control plane even from loopback. |
+| `GUBERN_API_LISTEN` | Management API address. Default `:9090` (all interfaces); `127.0.0.1:9090` keeps it local. `gubern stop`, `status`, `reload`, `ui` and `code` read it too, so set it in the shell you run them from (or pass `--api-port` / `--addr`). |
+| `GUBERN_EDGE_BIND_HOST` | Interface the edge listens on: route listeners and the ACME challenge server on :80. Default empty (all interfaces); set an address such as `10.0.0.5` or `127.0.0.1` to restrict it. |
+| `GUBERN_ANTHROPIC_KEY`, `GUBERN_OPENAI_KEY`, `GUBERN_DEEPSEEK_KEY`, `GUBERN_GEMINI_KEY`, `GUBERN_GROQ_KEY`, `GUBERN_OPENROUTER_KEY` | AI provider keys. |
+| `GUBERN_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
+| `GUBERN_AZURE_OPENAI_KEY` / `_ENDPOINT` / `_DEPLOYMENT` | Azure OpenAI. |
+| `GUBERN_TELEGRAM_TOKEN`, `GUBERN_TELEGRAM_DEFAULT_CHAT` | Telegram bot. |
+| `GUBERN_TELEGRAM_ALLOWED_IDS` | Comma-separated chat and user IDs allowed to command the bot. Empty allows nobody. The sender's own user ID must be listed for both messages and approval buttons; in a group chat, list the group ID **and** each member allowed to command the bot. |
+| `GUBERN_TELEGRAM_SECRET` | Secret Telegram sends with each webhook update (`secret_token`); `/webhook/telegram` refuses updates without it. Unset: a random one is generated per start and registered when Gubern sets the webhook itself (`GUBERN_PUBLIC_URL`). Set it if you register the webhook yourself. |
+| `GUBERN_WA_PHONE_ID`, `GUBERN_WA_TOKEN` | WhatsApp Cloud API (outbound messages and alerts). |
+| `GUBERN_WA_APP_SECRET` | Verifies `X-Hub-Signature-256` on inbound messages. **Required for `/webhook/whatsapp` to be mounted**; without it, WhatsApp is outbound-only. |
+| `GUBERN_WA_VERIFY_TOKEN` | Token for Meta's webhook verification handshake. An empty token never matches. |
+| `GUBERN_WA_ALLOWED_NUMBERS` | Comma-separated sender numbers allowed to drive the agent (any formatting; digits are compared). Empty allows nobody: a valid signature only proves Meta delivered the message. |
+| `GUBERN_SLACK_WEBHOOK` | Slack incoming webhook for outbound alerts. |
+| `GUBERN_SLACK_SIGNING_SECRET` | Verifies slash-command requests. **Required for `/webhook/slack` to be mounted**; without it, Slack is outbound-only. |
+| `GUBERN_SLACK_ALLOWED_USERS` | Registered Slack operators (comma-separated): full access, i.e. agent requests, `deploy`, `reload`. Each entry is a user ID (`U012AB`) or team-scoped (`T012AB:U012AB`). **Empty allows nobody**: unregistered people can only run `/vortex whoami`, which prints the IDs to register. |
+| `GUBERN_SLACK_READONLY_USERS` | Slack users who may run `status`, `logs` and `help` only. Same format. |
+| `GUBERN_SLACK_ALLOWED_TEAMS` | Optional: restrict all registered users to these workspace (team) IDs. |
+| `GUBERN_STUDIO_WORKSPACE` | Enables Studio under `/studio/` (browser terminal, git panel, DB console, and code-server if installed) for this directory. Off when unset. Admin API keys only: the terminal is a shell that bypasses the approval gate. code-server listens on a Unix socket in a private directory (Windows: a random loopback port protected by a random per-launch password that Gubern signs in with for you), never on a public or fixed port. |
+| `GUBERN_STUDIO_DB_READONLY` | Reserved. The Studio DB console lists mTLS TCP routes but ships no database driver, so it runs no queries yet; when one is added, this defaults to read-only. |
+| `GUBERN_SECRET_STORE`, `GUBERN_AUDIT_LOG`, `GUBERN_MTLS_STORE` | Relocate on-disk state. |
 
-Environment variables always take precedence over the saved `vortex setup`
+Environment variables always take precedence over the saved `gubern setup`
 config.

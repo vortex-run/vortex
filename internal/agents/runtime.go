@@ -231,6 +231,11 @@ func (r *Runtime) Approve(sessionID string, approved bool) (string, bool) {
 	return r.cfg.Coordinator.ApproveAction(sessionID, approved)
 }
 
+// ApproveAction is Approve bound to one action id (see Coordinator.ApproveActionID).
+func (r *Runtime) ApproveAction(sessionID, actionID string, approved bool) (string, bool, error) {
+	return r.cfg.Coordinator.ApproveActionID(sessionID, actionID, approved)
+}
+
 // Coordinator returns the runtime's coordinator (for wiring local-tool calls).
 func (r *Runtime) Coordinator() *Coordinator { return r.cfg.Coordinator }
 

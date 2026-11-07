@@ -34,6 +34,12 @@ type ManagerConfig struct {
 	StoreKey []byte
 	// MinVersion is "TLS1.2" (default) or "TLS1.3".
 	MinVersion string
+	// Hosts are the route hosts certificates may be served for (exact names
+	// and "*.suffix" wildcards). Empty means unrestricted, which is required
+	// when a TLS route has no host and so accepts any SNI. With hosts set,
+	// a handshake for any other name fails, and ACME orders only these
+	// names (audit F-16, NV-04).
+	Hosts []string
 }
 
 // Manager is the single TLS entry point. It wraps either a LocalCA (internal
@@ -45,6 +51,8 @@ type Manager struct {
 	localCA  *LocalCA
 	acme     *ACMEManager
 	minVer   uint16
+	allow    *hostAllowList // nil = unrestricted
+	ephem    leafCache      // internal CA leaves not persisted (unrestricted mode)
 
 	// issued tracks every *tls.Config handed out by TLSConfig so the ticket
 	// rotation loop started by StartBackground can re-key all of them.
@@ -61,7 +69,11 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		return nil, err
 	}
 
-	m := &Manager{provider: cfg.Provider, store: store, minVer: parseMinVersion(cfg.MinVersion)}
+	allow, err := newHostAllowList(cfg.Hosts)
+	if err != nil {
+		return nil, err
+	}
+	m := &Manager{provider: cfg.Provider, store: store, minVer: parseMinVersion(cfg.MinVersion), allow: allow}
 
 	switch cfg.Provider {
 	case "internal":
@@ -73,6 +85,14 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	case "letsencrypt", "zerossl":
 		acfg := cfg.ACME
 		acfg.Store = store
+		if allow != nil && acfg.HostPolicy == nil {
+			acfg.HostPolicy = func(_ context.Context, host string) error {
+				if c, err := canonicalHost(host); err != nil || !allow.allows(c) {
+					return fmt.Errorf("%w: %q", ErrHostNotConfigured, host)
+				}
+				return nil
+			}
+		}
 		if cfg.Provider == "zerossl" && acfg.DirectoryURL == "" && !acfg.Staging {
 			acfg.DirectoryURL = ZeroSSLDirectoryURL
 		}
@@ -88,19 +108,60 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 }
 
 // getCertificate routes the TLS handshake to the configured backend.
+//
+// The SNI is canonicalised once and checked against the configured hosts
+// before any store lookup, issuance or save, so an anonymous client cannot
+// create store files (or CA orders) for names no route serves (audit F-16).
 func (m *Manager) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	name, err := canonicalHost(hello.ServerName)
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case m.localCA != nil:
-		name := hello.ServerName
 		if name == "" {
 			name = "localhost"
 		}
-		return m.localCA.Issue(name)
+		if name != "localhost" && !m.allow.allows(name) {
+			return nil, fmt.Errorf("%w: %q", ErrHostNotConfigured, name)
+		}
+		return m.issueLocal(name)
 	case m.acme != nil:
-		return m.acme.GetCertificate(hello)
+		if name != "" && !m.allow.allows(name) {
+			return nil, fmt.Errorf("%w: %q", ErrHostNotConfigured, name)
+		}
+		h := *hello
+		h.ServerName = name
+		return m.acme.GetCertificate(&h)
 	default:
 		return nil, errors.New("vtls: no certificate provider configured")
 	}
+}
+
+// issueLocal returns an internal-CA leaf for a canonical, permitted name.
+// With a host allow-list every leaf is persisted (the set is bounded by the
+// config). Unrestricted, a name already in the store keeps being served from
+// it, and new names are persisted only while the store holds fewer than
+// maxPersistedLeaves; past that they get in-memory leaves.
+func (m *Manager) issueLocal(name string) (*tls.Certificate, error) {
+	if m.allow != nil {
+		return m.localCA.Issue(name)
+	}
+	if _, err := m.store.Load(name); err == nil {
+		return m.localCA.Issue(name)
+	}
+	if names, err := m.store.List(); err == nil && len(names) < maxPersistedLeaves {
+		return m.localCA.Issue(name)
+	}
+	if cert := m.ephem.get(name, leafRenewBefore); cert != nil {
+		return cert, nil
+	}
+	cert, err := m.localCA.issueEphemeral(name)
+	if err != nil {
+		return nil, err
+	}
+	m.ephem.put(name, cert)
+	return cert, nil
 }
 
 // TLSConfig returns a hardened *tls.Config: GetCertificate routes to the

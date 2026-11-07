@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/pkg/pidfile"
+	"github.com/sandeepbollavaram/vortex/pkg/pidfile"
 )
 
-// newStopCommand builds `vortex stop`, which signals a running server to shut
+// newStopCommand builds `gubern stop`, which signals a running server to shut
 // down gracefully and waits for it to exit. On Unix it sends SIGTERM to the PID
 // in the pidfile; on Windows (no SIGTERM) it calls the localhost-only
 // POST /internal/shutdown endpoint. It then polls IsRunning until the process
@@ -24,14 +24,14 @@ func newStopCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the running VORTEX server",
+		Short: "Stop the running Gubern server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
-			alive, pid, err := pidfile.IsRunning(pidfilePath)
+			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (!alive && err == nil) {
-				fmt.Fprintln(out, "VORTEX is not running")
+				fmt.Fprintln(out, "Gubern is not running")
 				return nil
 			}
 			if err != nil {
@@ -44,17 +44,17 @@ func newStopCommand() *cobra.Command {
 
 			deadline := time.Now().Add(timeout)
 			for time.Now().Before(deadline) {
-				if alive, _, _ := pidfile.IsRunning(pidfilePath); !alive {
-					fmt.Fprintln(out, "VORTEX stopped")
+				if alive, _, _ := pidfile.IsRunning(resolvePidfile(pidfilePath)); !alive {
+					fmt.Fprintln(out, "Gubern stopped")
 					return nil
 				}
 				time.Sleep(500 * time.Millisecond)
 			}
-			return fmt.Errorf("VORTEX did not stop within %s", timeout)
+			return fmt.Errorf("gubern did not stop within %s", timeout)
 		},
 	}
-	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().StringVar(&pidfilePath, "pidfile", defaultPidfile, "path to the PID file")
 	c.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "how long to wait for the server to stop")
-	c.Flags().IntVar(&apiPort, "api-port", 9090, "management API port (used for the Windows shutdown path)")
+	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port (used for the Windows shutdown path)")
 	return c
 }

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestPerf_TuneShowWorks runs `vortex tune show` against the real binary and
+// TestPerf_TuneShowWorks runs `gubern tune show` against the real binary and
 // checks it prints the recommendation header and a GOMAXPROCS line.
 func TestPerf_TuneShowWorks(t *testing.T) {
 	bin := getNetBinary(t)
@@ -25,7 +25,7 @@ func TestPerf_TuneShowWorks(t *testing.T) {
 	}
 }
 
-// TestPerf_BenchRuns runs `vortex tune bench` and asserts it exits 0 and
+// TestPerf_BenchRuns runs `gubern tune bench` and asserts it exits 0 and
 // reports throughput in MB/s for at least one benchmark.
 func TestPerf_BenchRuns(t *testing.T) {
 	bin := getNetBinary(t)

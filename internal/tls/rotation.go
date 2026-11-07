@@ -120,7 +120,7 @@ func (r *RotationManager) loadOrGenerateCA() error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "VORTEX Cluster CA", Organization: []string{r.cfg.ClusterName}},
+		Subject:               pkix.Name{CommonName: "Gubern Cluster CA", Organization: []string{r.cfg.ClusterName}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(clusterCAValidity),
 		IsCA:                  true,

@@ -14,8 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // ActivityEntry is one line/box in the code view's activity feed.
@@ -83,7 +83,7 @@ const codeSidebarWidth = 26
 var stepPattern = regexp.MustCompile(`(?i)step\s+(\d+)\s*(?:/|of)\s*(\d+)`)
 
 // CodeModel is the dedicated coding interface (brand redesign part 5) — the
-// full-screen "vortex code" experience: specialist-agent roster, memory stats,
+// full-screen "gubern code" experience: specialist-agent roster, memory stats,
 // task progress, and a live activity feed.
 type CodeModel struct {
 	client   *tui.Client
@@ -142,7 +142,7 @@ type CodeModel struct {
 	paused      bool
 	confirmStop bool
 	helpOpen    bool
-	standalone  bool // running as `vortex code` (q quits the program)
+	standalone  bool // running as `gubern code` (q quits the program)
 
 	// --- three-panel collaboration state (AG-UI) ---
 	comms         []CommsEntry  // middle panel: inter-agent messages
@@ -220,7 +220,7 @@ func WithProjectInfo(info *ProjectInfo) CodeOption {
 	return func(m *CodeModel) { m.projectInfo = info }
 }
 
-// Standalone marks the model as the root of its own program (`vortex code`):
+// Standalone marks the model as the root of its own program (`gubern code`):
 // q quits the program instead of being typed.
 func Standalone() CodeOption { return func(m *CodeModel) { m.standalone = true } }
 
@@ -396,7 +396,7 @@ func (m CodeModel) submit(text string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		if c == nil {
-			return codeReplyMsg{err: fmt.Errorf("not connected — run: vortex start")}
+			return codeReplyMsg{err: fmt.Errorf("not connected — run: gubern start")}
 		}
 		// Stream the reply (AGUI item C): fragments render live in the chat
 		// panel; the final codeReplyMsg with the full text follows at the end.
@@ -867,7 +867,7 @@ func (m CodeModel) forwardToTelegram() tea.Cmd {
 		if c == nil {
 			return codeReplyMsg{err: fmt.Errorf("not connected")}
 		}
-		if err := c.Notify("📊 Task update from VORTEX", summary); err != nil {
+		if err := c.Notify("📊 Task update from Gubern", summary); err != nil {
 			return codeReplyMsg{err: fmt.Errorf("telegram forward failed: %w", err)}
 		}
 		return codeReplyMsg{content: "→ Status forwarded to Telegram"}
@@ -967,13 +967,13 @@ func (m CodeModel) quitHint() string {
 	return ""
 }
 
-// renderHeader renders the top bar: VORTEX CODE, team/solo, project, cost.
+// renderHeader renders the top bar: Gubern CODE, team/solo, project, cost.
 func (m CodeModel) renderHeader() string {
 	// Amber flash + REVIEW NEEDED banner while a checkpoint is pending (and for
 	// 2s after it fires, to catch the eye).
 	if m.checkpoint != nil {
 		amber := lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorWarning)).Bold(true)
-		title := "▲ VORTEX CODE"
+		title := "▲ Gubern CODE"
 		if time.Now().Before(m.checkpointFlashUntil) {
 			title = amber.Render(title)
 		} else {
@@ -984,7 +984,7 @@ func (m CodeModel) renderHeader() string {
 		return lipgloss.JoinHorizontal(lipgloss.Left, title, "  ", banner)
 	}
 
-	parts := []string{brand.StyleTitle.Render("▲ VORTEX CODE")}
+	parts := []string{brand.StyleTitle.Render("▲ Gubern CODE")}
 	if m.team {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(brand.ColorPrimary)).Render("👥 Team"))
 	} else {
@@ -1127,7 +1127,7 @@ func (m CodeModel) renderStopConfirm() string {
 // renderHelp renders the ?-overlay.
 func (m CodeModel) renderHelp() string {
 	var b strings.Builder
-	b.WriteString(brand.StyleTitle.Render("Help — VORTEX Code") + "\n\n")
+	b.WriteString(brand.StyleTitle.Render("Help — Gubern Code") + "\n\n")
 	b.WriteString(brand.StyleTitle.Render("Keyboard shortcuts") + "\n")
 	for _, it := range [][2]string{
 		{"Enter", "Send task / instruction"},

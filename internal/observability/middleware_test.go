@@ -10,7 +10,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // tracingSetup returns a metrics object, a tracer, and the in-memory span

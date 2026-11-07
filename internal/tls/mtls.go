@@ -44,13 +44,16 @@ func (m *MTLSConfig) ServerTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: m.MinVersion,
 		// RequestAnyClientCert + manual verification: we authorize peers by
-		// their SPIFFE identity (not hostname), so we run our own chain check in
-		// VerifyPeerCertificate rather than relying on the default verifier.
+		// their SPIFFE identity (not hostname), so we run our own chain check
+		// rather than relying on the default verifier. It is in
+		// VerifyConnection, not VerifyPeerCertificate, because the latter is
+		// skipped on resumed sessions: a peer whose cert had since expired or
+		// stopped chaining to the CA could keep resuming without a check.
 		ClientAuth: tls.RequireAnyClientCert,
 		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 			return m.RotationMgr.Current(), nil
 		},
-		VerifyPeerCertificate: m.verifyPeer,
+		VerifyConnection: m.verifyConn,
 	}
 }
 
@@ -65,26 +68,23 @@ func (m *MTLSConfig) ClientTLSConfig() *tls.Config {
 		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return m.RotationMgr.Current(), nil
 		},
-		VerifyPeerCertificate: m.verifyPeer,
+		VerifyConnection: m.verifyConn, // runs on resumed sessions too
 	}
 }
 
-// verifyPeer manually verifies the peer's certificate chain against the cluster
-// CA and confirms its SPIFFE identity is in our trust domain. It is used in
-// place of the default verifier so peers are authorized by SPIFFE identity
-// rather than DNS name.
-func (m *MTLSConfig) verifyPeer(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	if len(rawCerts) == 0 {
-		return errors.New("vtls mtls: peer presented no certificate")
-	}
+// verifyConn is the tls.Config.VerifyConnection hook: it verifies the peer
+// on every handshake, full or resumed.
+func (m *MTLSConfig) verifyConn(cs tls.ConnectionState) error {
+	return m.verifyCerts(cs.PeerCertificates)
+}
 
-	certs := make([]*x509.Certificate, 0, len(rawCerts))
-	for _, der := range rawCerts {
-		c, err := x509.ParseCertificate(der)
-		if err != nil {
-			return fmt.Errorf("vtls mtls: parsing peer cert: %w", err)
-		}
-		certs = append(certs, c)
+// verifyCerts verifies the peer's certificate chain against the cluster CA and
+// confirms its SPIFFE identity is in our trust domain. It is used in place of
+// the default verifier so peers are authorized by SPIFFE identity rather than
+// DNS name.
+func (m *MTLSConfig) verifyCerts(certs []*x509.Certificate) error {
+	if len(certs) == 0 {
+		return errors.New("vtls mtls: peer presented no certificate")
 	}
 	leaf := certs[0]
 

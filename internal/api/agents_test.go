@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -13,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // stubRuntime is a fake AgentRuntime for API tests.
@@ -52,7 +53,7 @@ func (s stubRuntime) SessionHistory(string) []SessionMessage {
 func newAgentTestServer(t *testing.T, rt AgentRuntime) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "vortex.cue")
+	path := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(path, []byte(sampleConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -362,5 +363,40 @@ func TestAgentSubmit_AllowsEmptySessionID(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("empty session_id should be allowed (server generates one), got %d", resp.StatusCode)
+	}
+}
+
+// boundRuntime adds action-bound approval to the stub.
+type boundRuntime struct {
+	stubRuntime
+	want string
+}
+
+func (b boundRuntime) ApproveAction(_ string, actionID string, _ bool) (string, bool, error) {
+	if actionID != b.want {
+		return "", true, errors.New("mismatch")
+	}
+	return "✓ bound", true, nil
+}
+
+func TestAgentApprove_ActionID(t *testing.T) {
+	cases := []struct {
+		name string
+		rt   AgentRuntime
+		body string
+		code int
+	}{
+		{"match", boundRuntime{stubRuntime{approveMatch: true}, "abc"}, `{"session_id":"s1","approved":true,"action_id":"abc"}`, http.StatusOK},
+		{"mismatch", boundRuntime{stubRuntime{approveMatch: true}, "abc"}, `{"session_id":"s1","approved":true,"action_id":"zzz"}`, http.StatusConflict},
+		{"unsupported", stubRuntime{approveMatch: true}, `{"session_id":"s1","approved":true,"action_id":"abc"}`, http.StatusNotImplemented},
+		{"unbound still works", boundRuntime{stubRuntime{approveMatch: true}, "abc"}, `{"session_id":"s1","approved":true}`, http.StatusOK},
+	}
+	for _, tc := range cases {
+		s, secret := newAuthedAgentServer(t, tc.rt)
+		req := httptest.NewRequest(http.MethodPost, "/api/agents/approve", strings.NewReader(tc.body))
+		req.Header.Set("X-API-Key", secret)
+		if rec := serve(s, req); rec.Code != tc.code {
+			t.Errorf("%s: code = %d, want %d (%s)", tc.name, rec.Code, tc.code, rec.Body)
+		}
 	}
 }

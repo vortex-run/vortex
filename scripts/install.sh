@@ -1,21 +1,43 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
-# VORTEX one-line installer (build plan M1.4 / M1.7).
+# Gubern (formerly VORTEX) one-line installer (build plan M1.4 / M1.7).
 #
 #   curl -fsSL https://get.vortex.run | sh
 #
 # Detects OS and architecture, downloads the matching release from GitHub,
 # verifies its SHA-256 checksum against checksums.txt, installs the binary, and
-# seeds /etc/vortex/vortex.cue. The script is idempotent — re-running it upgrades
+# seeds /etc/gubern/gubern.cue. The script is idempotent — re-running it upgrades
 # the binary, skips when already at the target version, and never clobbers an
 # existing config.
-set -euo pipefail
+#
+# Hosts installed before the rename keep working: an existing /etc/vortex (and
+# vortex.cue in it) keeps being used, and an existing `vortex` binary in the
+# install dir becomes a link to `gubern`, so scripts and service units that run
+# `vortex` keep working.
+#
+# POSIX sh, not bash: the documented `curl ... | sh` runs dash on Debian and
+# Ubuntu and BusyBox ash on Alpine, which rejected the old `set -o pipefail`
+# and aborted before doing anything. `local` is not strictly POSIX but every
+# sh we target (dash, ash, bash, macOS /bin/sh) supports it.
+# shellcheck disable=SC3043
+set -eu
 
-REPO="vortex-run/vortex"
-INSTALL_DIR="${VORTEX_INSTALL_DIR:-/usr/local/bin}"
-CONFIG_DIR="${VORTEX_CONFIG_DIR:-/etc/vortex}"
-BIN_NAME="vortex"
+REPO="sandeepbollavaram/vortex"
+# GUBERN_* settings; the pre-rename VORTEX_* names still work.
+INSTALL_DIR="${GUBERN_INSTALL_DIR:-${VORTEX_INSTALL_DIR:-/usr/local/bin}}"
+if [ -n "${GUBERN_CONFIG_DIR:-${VORTEX_CONFIG_DIR:-}}" ]; then
+  CONFIG_DIR="${GUBERN_CONFIG_DIR:-$VORTEX_CONFIG_DIR}"
+elif [ ! -d /etc/gubern ] && [ -d /etc/vortex ]; then
+  CONFIG_DIR="/etc/vortex" # pre-rename install: keep its config where it is
+else
+  CONFIG_DIR="/etc/gubern"
+fi
+BIN_NAME="gubern"
+LEGACY_BIN_NAME="vortex"
 DOCS_URL="https://docs.vortex.run/install"
+# Ed25519 key that signs each release's checksums.txt. Must equal
+# ReleaseSigningPublicKey in internal/update/signature.go (a Go test checks).
+RELEASE_PUBKEY="YdFLEJG5dwdsibXFlQjjfpHIws49P1xPWtTxH1LTdhk="
 
 # Flags (resolved in parse_args).
 FLAG_VERSION=""
@@ -35,15 +57,17 @@ usage() {
 Usage: install.sh [--version vX.Y.Z] [--install-dir DIR] [--no-service] [--help]
 
 Options:
-  --version vX.Y.Z   install a specific version (overrides VORTEX_VERSION)
+  --version vX.Y.Z   install a specific version (overrides GUBERN_VERSION)
   --install-dir DIR  install the binary to DIR instead of /usr/local/bin
   --no-service       skip the service-installation preview step
   --help             print this help and exit
 
 Environment:
-  VORTEX_VERSION     overrides the version to install (flag takes precedence)
-  VORTEX_INSTALL_DIR overrides the install directory
-  VORTEX_CONFIG_DIR  overrides the config directory (default /etc/vortex)
+  GUBERN_VERSION     overrides the version to install (flag takes precedence)
+  GUBERN_INSTALL_DIR overrides the install directory
+  GUBERN_CONFIG_DIR  overrides the config directory (default /etc/gubern, or an
+                     existing /etc/vortex)
+  (the older VORTEX_* names are still accepted)
 EOF
 }
 
@@ -129,7 +153,16 @@ download_file() {
 
 # --- resolve latest version ------------------------------------------------
 latest_version() {
-  local api="https://api.github.com/repos/${REPO}/releases/latest" tmp tag
+  local api="https://api.github.com/repos/${REPO}/releases/latest" tmp tag url
+  # The releases/latest page redirects to .../releases/tag/<tag>. Following it
+  # needs no API call: unauthenticated API calls are limited to 60 an hour
+  # per IP, which users behind a shared NAT, VPN or proxy run out of.
+  if command -v curl >/dev/null 2>&1; then
+    url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+    case "$url" in
+      */releases/tag/*) echo "${url##*/}"; return 0 ;;
+    esac
+  fi
   tmp="$(mktemp)"
   download_quiet "$api" "$tmp" || err "could not reach the GitHub releases API"
   tag="$(grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$tmp" | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/')"
@@ -151,11 +184,75 @@ verify_sha256() {
   elif command -v shasum >/dev/null 2>&1; then
     actual="$(shasum -a 256 "$file" | awk '{print $1}')"
   else
-    warn "no sha256 tool found; skipping checksum verification"
-    return 0
+    # Fail closed: installing an unverified binary as root is worse than
+    # asking the user to install sha256sum (coreutils) or shasum.
+    err "no sha256sum or shasum found; install one so the download can be verified"
   fi
   [ "$expected" = "$actual" ] || err "checksum mismatch for ${base}: expected ${expected}, got ${actual}"
   log "checksum verified"
+}
+
+# sudo_for prints "sudo" when the nearest existing directory at or above
+# path isn't writable by this user (and we aren't root), else nothing.
+sudo_for() {
+  local dir="$1"
+  while [ ! -d "$dir" ]; do
+    dir="$(dirname "$dir")"
+  done
+  if [ -w "$dir" ]; then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1 || err "need root (or sudo) to write ${1}"
+  echo sudo
+}
+
+# --- verify the release signature ------------------------------------------
+# checksums.txt comes from the same place as the archive, so the SHA-256
+# check alone catches corruption but not a tampered release. Verify the
+# Ed25519 signature over checksums.txt (as `gubern self-update` does) before
+# trusting any line in it. This needs OpenSSL 3 (pkeyutl -rawin): present on
+# current Debian, Ubuntu, Fedora and Alpine, not on macOS (LibreSSL).
+
+# unverified_signature warns, or refuses when GUBERN_REQUIRE_SIGNATURE=1.
+unverified_signature() {
+  if [ "${GUBERN_REQUIRE_SIGNATURE:-${VORTEX_REQUIRE_SIGNATURE:-0}}" = "1" ]; then
+    err "$1; refusing to install (GUBERN_REQUIRE_SIGNATURE=1)"
+  fi
+  warn "$1; the checksum is verified but the release signature is NOT"
+}
+
+# openssl_can_verify_ed25519 reports whether openssl can check a raw Ed25519
+# signature (OpenSSL 3; LibreSSL and OpenSSL 1.1 can't).
+openssl_can_verify_ed25519() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  case "$(openssl version 2>/dev/null)" in
+    OpenSSL\ [3-9]*) return 0 ;;
+  esac
+  return 1
+}
+
+# verify_signature <checksums.txt> <checksums.txt.sig>; the .sig may be absent.
+verify_signature() {
+  local sums="$1" sig="$2" dir
+  if [ ! -s "$sig" ]; then
+    unverified_signature "this release has no checksums.txt.sig (releases up to v0.3.0 are unsigned)"
+    return 0
+  fi
+  if ! openssl_can_verify_ed25519; then
+    unverified_signature "OpenSSL 3 is not available to check the release signature"
+    return 0
+  fi
+  dir="$(dirname "$sums")"
+  # SubjectPublicKeyInfo DER prefix for an Ed25519 key, then the raw 32 bytes.
+  { printf '\060\052\060\005\006\003\053\145\160\003\041\000'
+    printf '%s' "$RELEASE_PUBKEY" | openssl base64 -d -A
+  } > "${dir}/release-pub.der"
+  tr -d '\r\n' < "$sig" | openssl base64 -d -A > "${dir}/checksums.sig.bin"
+  if ! openssl pkeyutl -verify -pubin -keyform DER -inkey "${dir}/release-pub.der" \
+      -rawin -in "$sums" -sigfile "${dir}/checksums.sig.bin" >/dev/null 2>&1; then
+    err "release signature does not verify: checksums.txt was not signed by the Gubern release key. Do not install this download."
+  fi
+  log "release signature verified"
 }
 
 main() {
@@ -165,22 +262,23 @@ main() {
   os="$(detect_os)"
   arch="$(detect_arch)"
 
-  # Version resolution order: --version flag, then VORTEX_VERSION, then latest.
+  # Version resolution order: --version flag, then GUBERN_VERSION (or the
+  # older VORTEX_VERSION), then latest.
   if [ -n "$FLAG_VERSION" ]; then
     version="$FLAG_VERSION"
-  elif [ -n "${VORTEX_VERSION:-}" ]; then
-    version="$VORTEX_VERSION"
+  elif [ -n "${GUBERN_VERSION:-${VORTEX_VERSION:-}}" ]; then
+    version="${GUBERN_VERSION:-$VORTEX_VERSION}"
   else
     version="$(latest_version)"
   fi
 
   if [ "$os" = "windows" ]; then
     cat <<EOF
-VORTEX on Windows is best installed manually:
-  1. Download vortex_windows_${arch}.zip from
-     https://github.com/${REPO}/releases/download/${version}/vortex_windows_${arch}.zip
-  2. Extract vortex.exe to "C:\\Program Files\\vortex\\vortex.exe"
-  3. Install as a service:  vortex service install
+Gubern on Windows is best installed manually:
+  1. Download gubern_windows_${arch}.zip from
+     https://github.com/${REPO}/releases/download/${version}/gubern_windows_${arch}.zip
+  2. Extract gubern.exe to "C:\\Program Files\\gubern\\gubern.exe"
+  3. Install as a service:  gubern service install
 EOF
     exit 0
   fi
@@ -191,77 +289,119 @@ EOF
     local installed
     installed="$("$target_bin" version --short 2>/dev/null || echo "")"
     if [ -n "$installed" ] && [ "$installed" = "$version" ]; then
-      log "VORTEX ${version} is already installed. Nothing to do."
+      log "Gubern ${version} is already installed. Nothing to do."
       exit 0
     fi
   fi
 
-  log "installing VORTEX ${version} for ${os}/${arch}"
+  log "installing Gubern ${version} for ${os}/${arch}"
 
-  local base url sumurl workdir tarball
-  base="vortex_${os}_${arch}.tar.gz"
+  local base url sumurl tarball archive_bin
+  base="gubern_${os}_${arch}.tar.gz"
+  archive_bin="$BIN_NAME"
   url="https://github.com/${REPO}/releases/download/${version}/${base}"
   sumurl="https://github.com/${REPO}/releases/download/${version}/checksums.txt"
+  # Global, not local: the EXIT trap runs after main returns, when a local is
+  # gone (set -u then aborted the cleanup and left the download behind).
   workdir="$(mktemp -d)"
   trap 'rm -rf "$workdir"' EXIT
   tarball="${workdir}/${base}"
 
   log "downloading ${url}"
-  download_file "$url" "$tarball" || err "failed to download ${base}"
+  if ! download_file "$url" "$tarball" 2>/dev/null; then
+    # Releases from before the rename only publish vortex_* archives.
+    base="vortex_${os}_${arch}.tar.gz"
+    archive_bin="$LEGACY_BIN_NAME"
+    url="https://github.com/${REPO}/releases/download/${version}/${base}"
+    tarball="${workdir}/${base}"
+    log "no gubern archive in ${version}; downloading ${url}"
+    download_file "$url" "$tarball" || err "failed to download ${base}"
+  fi
   download_quiet "$sumurl" "${workdir}/checksums.txt" || err "failed to download checksums.txt"
+  download_quiet "${sumurl}.sig" "${workdir}/checksums.txt.sig" 2>/dev/null || rm -f "${workdir}/checksums.txt.sig"
+  verify_signature "${workdir}/checksums.txt" "${workdir}/checksums.txt.sig"
   verify_sha256 "$tarball" "${workdir}/checksums.txt" "$base"
 
   log "extracting"
   tar -xzf "$tarball" -C "$workdir" || err "failed to extract ${base}"
-  [ -f "${workdir}/${BIN_NAME}" ] || err "binary ${BIN_NAME} not found in archive"
+  [ -f "${workdir}/${archive_bin}" ] || err "binary ${archive_bin} not found in archive"
 
-  # Use sudo for privileged paths when not already root.
-  local SUDO=""
-  if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo"
-    else
-      err "must run as root (or have sudo) to install into ${INSTALL_DIR}"
-    fi
-  fi
+  # sudo only for a path this user can't write: --install-dir "$HOME/.local/bin"
+  # must not leave a root-owned binary in the user's home.
+  local BIN_SUDO CFG_SUDO
+  BIN_SUDO="$(sudo_for "$INSTALL_DIR")"
+  CFG_SUDO="$(sudo_for "$CONFIG_DIR")"
 
   log "installing binary to ${target_bin}"
-  $SUDO install -m 0755 "${workdir}/${BIN_NAME}" "$target_bin" || err "failed to install binary to ${target_bin}"
+  $BIN_SUDO mkdir -p "$INSTALL_DIR" || err "failed to create ${INSTALL_DIR}"
+  $BIN_SUDO install -m 0755 "${workdir}/${archive_bin}" "$target_bin" || err "failed to install binary to ${target_bin}"
 
   # Post-install verification: a download that passed SHA-256 can still be the
   # wrong arch or corrupt in a way the checksum was computed over; running it is
   # the definitive check.
   if ! "$target_bin" version >/dev/null 2>&1; then
-    $SUDO rm -f "$target_bin"
+    $BIN_SUDO rm -f "$target_bin"
     err "installed binary failed to run; removed it (corrupt or wrong platform?)"
   fi
 
+  # Pre-rename hosts: point an existing `vortex` at the new binary so service
+  # units and scripts that run it keep working (and stop running the old one).
+  local legacy_bin="${INSTALL_DIR}/${LEGACY_BIN_NAME}"
+  if [ -e "$legacy_bin" ] && [ ! -L "$legacy_bin" ]; then
+    $BIN_SUDO ln -sf "$target_bin" "$legacy_bin" || warn "could not replace ${legacy_bin}; remove it by hand"
+    log "${legacy_bin} now links to ${target_bin}"
+  fi
+
   log "ensuring config directory ${CONFIG_DIR}"
-  $SUDO mkdir -p "$CONFIG_DIR"
-  if [ ! -f "${CONFIG_DIR}/vortex.cue" ]; then
-    if [ -f "${workdir}/vortex.cue" ]; then
-      $SUDO cp "${workdir}/vortex.cue" "${CONFIG_DIR}/vortex.cue"
-      log "seeded example config at ${CONFIG_DIR}/vortex.cue"
+  $CFG_SUDO mkdir -p "$CONFIG_DIR"
+  # An existing pre-rename vortex.cue stays the config file.
+  local cfg_file="${CONFIG_DIR}/gubern.cue"
+  if [ ! -f "$cfg_file" ] && [ -f "${CONFIG_DIR}/vortex.cue" ]; then
+    cfg_file="${CONFIG_DIR}/vortex.cue"
+  fi
+  if [ ! -f "$cfg_file" ]; then
+    local example=""
+    for f in gubern.cue vortex.cue; do
+      if [ -f "${workdir}/${f}" ]; then example="${workdir}/${f}"; break; fi
+    done
+    if [ -n "$example" ]; then
+      $CFG_SUDO cp "$example" "$cfg_file"
+      log "seeded example config at ${cfg_file}"
     else
-      warn "no example vortex.cue in archive; create ${CONFIG_DIR}/vortex.cue manually"
+      warn "no example config in archive; create ${cfg_file} manually"
     fi
   else
-    log "existing config preserved at ${CONFIG_DIR}/vortex.cue"
+    log "existing config preserved at ${cfg_file}"
+  fi
+
+  # The service keeps its pre-rename name on hosts that already have it.
+  local svc="gubern"
+  if [ -f /etc/systemd/system/vortex.service ] || [ -f /etc/init.d/vortex ]; then
+    svc="vortex"
+  fi
+  # macOS has no `gubern service install` (launchd) yet; say how to run it
+  # instead of suggesting systemctl.
+  local start_hint="sudo ${BIN_NAME} service install && sudo systemctl start ${svc}   (systemd; OpenRC: rc-service ${svc} start)"
+  if [ "$os" = "darwin" ]; then
+    NO_SERVICE=1
+    start_hint="${BIN_NAME} start --config ${cfg_file}   (no launchd service yet)"
   fi
 
   if [ "$NO_SERVICE" -eq 0 ]; then
     log "previewing service installation (dry-run)"
     "$target_bin" service install \
-      --config-path "${CONFIG_DIR}/vortex.cue" --dry-run || true
+      --config-path "$cfg_file" --dry-run || true
   fi
 
   cat <<EOF
 
-VORTEX ${version} installed to ${target_bin}
-Config: ${CONFIG_DIR}/vortex.cue — edit this file before starting
-Start:  sudo systemctl start vortex   (or appropriate for your init system)
+Gubern ${version} installed to ${target_bin}
+Config: ${cfg_file} — edit this file before starting
+Start:  ${start_hint}
 Docs:   https://docs.vortex.run
 EOF
 }
 
-main "$@"
+# GUBERN_INSTALL_LIB=1 (or VORTEX_INSTALL_LIB=1) loads the functions without
+# running (for tests).
+[ "${GUBERN_INSTALL_LIB:-${VORTEX_INSTALL_LIB:-}}" = "1" ] || main "$@"

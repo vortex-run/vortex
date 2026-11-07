@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // AgentRouter dispatches a task to a specialized agent by type, returning its
@@ -279,7 +279,7 @@ func (a *OrchestrationAgent) notify(ctx context.Context, goal string, result *Ru
 	}
 	body := fmt.Sprintf("🤖 Orchestration complete: %s\n%d completed, %d failed",
 		goal, result.Completed, result.Failed)
-	_ = a.notifier.Notify(ctx, "VORTEX Orchestration", body)
+	_ = a.notifier.Notify(ctx, "Gubern Orchestration", body)
 }
 
 // truncate caps a string to n runes.

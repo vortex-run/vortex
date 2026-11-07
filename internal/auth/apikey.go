@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/vortex-run/vortex/pkg/atomicfile"
+	"github.com/sandeepbollavaram/vortex/pkg/atomicfile"
 )
 
 // bcryptCost is the work factor used when hashing API-key secrets.
@@ -25,6 +25,9 @@ var (
 	ErrNotFound = errors.New("auth: api key not found")
 	// ErrExpired is returned when a matching key has passed its ExpiresAt.
 	ErrExpired = errors.New("auth: api key expired")
+	// ErrRevoked is returned by ImportRaw for a key ID that was deliberately
+	// revoked: a revocation must survive restarts (audit F-03).
+	ErrRevoked = errors.New("auth: api key was revoked")
 )
 
 // APIKey is an issued credential. The plaintext secret is never stored; only its
@@ -38,6 +41,10 @@ type APIKey struct {
 	CreatedAt   time.Time `json:"created_at"`
 	ExpiresAt   time.Time `json:"expires_at"` // zero = never expires
 	Description string    `json:"description"`
+	// RevokedAt marks a persisted tombstone: the ID was revoked and must never
+	// be re-admitted. Tombstones carry no hash, so even a binary that predates
+	// them can never verify one.
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
 }
 
 // APIKeyStore holds issued API keys in memory, with optional JSON persistence.
@@ -45,14 +52,15 @@ type APIKey struct {
 // (SetPath), Issue and Revoke flush to disk immediately so an unclean exit
 // does not lose keys issued since boot (production audit M3).
 type APIKeyStore struct {
-	mu   sync.RWMutex
-	keys map[string]APIKey // keyed by APIKey.ID
-	path string            // persistence path; empty disables auto-save
+	mu      sync.RWMutex
+	keys    map[string]APIKey    // keyed by APIKey.ID
+	revoked map[string]time.Time // revoked IDs (persisted tombstones)
+	path    string               // persistence path; empty disables auto-save
 }
 
 // NewAPIKeyStore returns an empty store.
 func NewAPIKeyStore() *APIKeyStore {
-	return &APIKeyStore{keys: make(map[string]APIKey)}
+	return &APIKeyStore{keys: make(map[string]APIKey), revoked: make(map[string]time.Time)}
 }
 
 // SetPath enables immediate persistence to path: subsequent Issue/Revoke
@@ -117,13 +125,17 @@ func (s *APIKeyStore) Issue(userID, orgID string, roles []Role, desc string, ttl
 // ImportRaw registers an already-issued raw secret (of the form "<id>.<random>")
 // as a valid key, hashing it the same way Issue does. It is used to re-admit a
 // key that exists outside the store (e.g. the tui-key file written by
-// `vortex setup`) when the persisted hash store is empty or out of sync. It
-// returns an error when the raw key is malformed. When a persistence path is
-// set the new key is flushed to disk immediately.
+// `gubern setup`) when the persisted hash store is empty or out of sync. It
+// returns an error when the raw key is malformed, and ErrRevoked when the ID
+// was revoked. When a persistence path is set the new key is flushed to disk
+// immediately.
 func (s *APIKeyStore) ImportRaw(rawKey, userID, orgID string, roles []Role, desc string) error {
 	id, ok := keyIDFromSecret(rawKey)
 	if !ok {
 		return fmt.Errorf("auth: import: malformed raw key (want \"<id>.<secret>\")")
+	}
+	if s.IsRevoked(id) {
+		return ErrRevoked
 	}
 	hash, err := bcrypt.GenerateFromPassword(prehash(rawKey), bcryptCost)
 	if err != nil {
@@ -139,6 +151,10 @@ func (s *APIKeyStore) ImportRaw(rawKey, userID, orgID string, roles []Role, desc
 		Description: desc,
 	}
 	s.mu.Lock()
+	if _, gone := s.revoked[id]; gone { // revoked while we were hashing
+		s.mu.Unlock()
+		return ErrRevoked
+	}
 	s.keys[id] = key
 	path := s.path
 	s.mu.Unlock()
@@ -183,17 +199,34 @@ func (s *APIKeyStore) Verify(secret string) (APIKey, error) {
 	return key, nil
 }
 
-// Revoke removes the key with the given ID. It is idempotent. When a
-// persistence path is set the change is flushed to disk immediately.
+// Revoke removes the key with the given ID and records a tombstone so the ID
+// can never be re-imported (ImportRaw returns ErrRevoked). It is idempotent.
+// When a persistence path is set the change is flushed to disk immediately.
 func (s *APIKeyStore) Revoke(id string) error {
 	s.mu.Lock()
 	delete(s.keys, id)
+	if id != "" {
+		if s.revoked == nil {
+			s.revoked = make(map[string]time.Time)
+		}
+		if _, ok := s.revoked[id]; !ok {
+			s.revoked[id] = time.Now().UTC()
+		}
+	}
 	path := s.path
 	s.mu.Unlock()
 	if path != "" {
 		return s.Save(path)
 	}
 	return nil
+}
+
+// IsRevoked reports whether id was revoked.
+func (s *APIKeyStore) IsRevoked(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.revoked[id]
+	return ok
 }
 
 // List returns all keys for orgID with their hashes redacted (the public view).
@@ -214,9 +247,12 @@ func (s *APIKeyStore) List(orgID string) []APIKey {
 // Save persists the store to path as JSON (hashes only, never secrets).
 func (s *APIKeyStore) Save(path string) error {
 	s.mu.RLock()
-	keys := make([]APIKey, 0, len(s.keys))
+	keys := make([]APIKey, 0, len(s.keys)+len(s.revoked))
 	for _, k := range s.keys {
 		keys = append(keys, k)
+	}
+	for id, at := range s.revoked {
+		keys = append(keys, APIKey{ID: id, RevokedAt: at})
 	}
 	s.mu.RUnlock()
 
@@ -245,11 +281,20 @@ func (s *APIKeyStore) Load(path string) error {
 		return fmt.Errorf("auth: decoding key store: %w", err)
 	}
 	m := make(map[string]APIKey, len(keys))
+	rv := make(map[string]time.Time)
 	for _, k := range keys {
+		if !k.RevokedAt.IsZero() {
+			rv[k.ID] = k.RevokedAt
+			continue
+		}
 		m[k.ID] = k
+	}
+	for id := range rv { // a tombstone always wins over a stale live entry
+		delete(m, id)
 	}
 	s.mu.Lock()
 	s.keys = m
+	s.revoked = rv
 	s.mu.Unlock()
 	return nil
 }

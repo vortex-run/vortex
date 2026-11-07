@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestResearch_ReportsEndpoint confirms the report list endpoint is wired and

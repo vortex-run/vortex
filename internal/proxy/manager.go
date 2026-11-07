@@ -1,4 +1,4 @@
-// Package proxy wires VORTEX's config into running data-plane listeners (the
+// Package proxy wires Gubern's config into running data-plane listeners (the
 // end-of-M2 integration step): for each configured route it starts the matching
 // TCP tunnel, UDP tunnel, HTTP/HTTPS reverse proxy, or QUIC/HTTP3 dual-stack
 // listener, runs them under one lifecycle, and aggregates their stats.
@@ -6,26 +6,28 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/policy"
-	proxygateway "github.com/vortex-run/vortex/internal/proxy/gateway"
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
-	proxyquic "github.com/vortex-run/vortex/internal/proxy/quic"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
-	proxyudp "github.com/vortex-run/vortex/internal/proxy/udp"
-	"github.com/vortex-run/vortex/internal/security"
-	"github.com/vortex-run/vortex/internal/tenancy"
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/policy"
+	proxygateway "github.com/sandeepbollavaram/vortex/internal/proxy/gateway"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
+	proxyquic "github.com/sandeepbollavaram/vortex/internal/proxy/quic"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
+	proxyudp "github.com/sandeepbollavaram/vortex/internal/proxy/udp"
+	"github.com/sandeepbollavaram/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -34,7 +36,7 @@ const stopTimeout = 30 * time.Second
 
 // ManagerConfig configures a proxy Manager.
 type ManagerConfig struct {
-	// Config is the validated VORTEX configuration. Required.
+	// Config is the validated Gubern configuration. Required.
 	Config *config.Config
 	// TLS supplies certificates for https/h3 routes. May be nil when no route
 	// needs TLS.
@@ -64,6 +66,10 @@ type ManagerConfig struct {
 	Enforcer *tenancy.Enforcer
 	// Logger receives route lifecycle events; defaults to slog.Default.
 	Logger *slog.Logger
+	// BindHost is the interface every route listens on. Empty (the default)
+	// means all interfaces, which is what a public edge needs; tests set
+	// "127.0.0.1" so they don't open ports to the network.
+	BindHost string
 }
 
 // RouteStats is a per-route runtime snapshot.
@@ -142,7 +148,7 @@ func (m *Manager) buildRoute(rc config.Route) (*route, error) {
 
 func (m *Manager) buildTCP(rc config.Route) (*route, error) {
 	lc := tcp.ListenerConfig{
-		ListenAddr:     listenAddr(rc.Listen),
+		ListenAddr:     m.listenAddr(rc.Listen),
 		Backends:       routeToTCPBackends(rc.Backends),
 		Pool:           m.cfg.TCPPool,
 		MaxConnections: 0,
@@ -161,7 +167,7 @@ func (m *Manager) buildTCP(rc config.Route) (*route, error) {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "tcp", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "tcp", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ln.Listen,
 		stats: func() (int64, int64) {
 			s := ln.Stats()
@@ -174,8 +180,11 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 	if len(rc.Backends) == 0 {
 		return nil, errors.New("udp route requires a backend")
 	}
+	if rc.MTLS {
+		return nil, fmt.Errorf("route %q: mtls:true is not supported on udp routes", rc.Name)
+	}
 	ln, err := proxyudp.NewListener(proxyudp.UDPListenerConfig{
-		ListenAddr:  listenAddr(rc.Listen),
+		ListenAddr:  m.listenAddr(rc.Listen),
 		BackendAddr: backendHostPort(rc.Backends[0]),
 		RateLimit:   rateLimitRPS(rc.RateLimit),
 		Logger:      m.log,
@@ -184,7 +193,7 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "udp", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "udp", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ln.Listen,
 		stats: func() (int64, int64) {
 			s := ln.Stats()
@@ -216,6 +225,7 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 		TCPPool:     m.cfg.TCPPool,
 		Sticky:      proxygateway.NewStickySession(),
 		WSBackends:  routeToHTTPBackends(rc.Backends),
+		PreUpgrade:  handler.AllowUpgrade,
 	})
 	if err != nil {
 		return nil, err
@@ -224,7 +234,7 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 	router := proxyhttp.NewRouter()
 	router.Handle(routePattern(rc), gw)
 
-	srvCfg := proxyhttp.ServerConfig{Addr: listenAddr(rc.Listen), Router: router}
+	srvCfg := proxyhttp.ServerConfig{Addr: m.listenAddr(rc.Listen), Router: router}
 	if m.cfg.PolicyEngine != nil {
 		srvCfg.PolicyMiddleware = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
 	}
@@ -238,7 +248,13 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 		if m.cfg.TLS == nil {
 			return nil, errors.New("https route requires a TLS manager")
 		}
-		srvCfg.TLSConfig = m.cfg.TLS.TLSConfig()
+		tc, err := m.l7TLSConfig(rc)
+		if err != nil {
+			return nil, err
+		}
+		srvCfg.TLSConfig = tc
+	} else if rc.MTLS {
+		return nil, fmt.Errorf("route %q: mtls:true needs protocol https, h3 or tcp (plain http cannot verify client certificates)", rc.Name)
 	}
 	srv := proxyhttp.NewServer(srvCfg)
 
@@ -254,6 +270,24 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 			return s.ActiveConns, s.TotalReqs
 		},
 	}, nil
+}
+
+// l7TLSConfig returns the edge TLS config for an https/h3 route. With
+// mtls:true it also requires and verifies a cluster client certificate, the
+// same check a tcp route applies; before audit F-10 the flag was silently
+// ignored on L7 routes. VerifyConnection runs on resumed sessions too.
+func (m *Manager) l7TLSConfig(rc config.Route) (*tls.Config, error) {
+	cfg := m.cfg.TLS.TLSConfig()
+	if !rc.MTLS {
+		return cfg, nil
+	}
+	if m.cfg.MTLSConfig == nil {
+		return nil, fmt.Errorf("route %q has mtls:true but no mTLS config was provided", rc.Name)
+	}
+	mt := m.cfg.MTLSConfig.ServerTLSConfig()
+	cfg.ClientAuth = mt.ClientAuth
+	cfg.VerifyConnection = mt.VerifyConnection
+	return cfg, nil
 }
 
 // buildHookChain loads the plugins declared on rc from the registry into the
@@ -361,11 +395,17 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	if m.cfg.TLS == nil {
 		return nil, errors.New("h3 route requires a TLS manager")
 	}
+	hookChain, err := m.buildHookChain(rc)
+	if err != nil {
+		return nil, err
+	}
 	handler, err := proxyhttp.NewHandler(proxyhttp.HandlerConfig{
 		Backends:     routeToHTTPBackends(rc.Backends),
 		Balancer:     "round-robin",
 		RoundTripper: proxyhttp.NewRoundTripper(proxyhttp.RoundTripperConfig{Pool: m.cfg.TCPPool}),
 		Timeout:      parseTimeout(rc.Timeout),
+		HookChain:    hookChain,
+		RouteName:    rc.Name,
 	})
 	if err != nil {
 		return nil, err
@@ -373,17 +413,34 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	router := proxyhttp.NewRouter()
 	router.Handle(routePattern(rc), handler)
 
+	// The same L7 chain buildHTTP gives an https route (edge allowlist / Tor /
+	// quota / rate limit, metrics, OPA policy) — on both QUIC and the TCP
+	// fallback. Before audit F-02 an h3 route skipped all of it.
+	edge, obs, pol := m.edgeMiddleware(rc), (func(http.Handler) http.Handler)(nil), (func(http.Handler) http.Handler)(nil)
+	if m.cfg.Metrics != nil {
+		obs = m.obsMiddleware(rc.Name)
+	}
+	if m.cfg.PolicyEngine != nil {
+		pol = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
+	}
+	tlsCfg, err := m.l7TLSConfig(rc)
+	if err != nil {
+		return nil, err
+	}
 	ds, err := proxyquic.NewDualStack(proxyquic.DualStackConfig{
-		Addr:      listenAddr(rc.Listen),
-		TLSConfig: m.cfg.TLS.TLSConfig(),
+		Addr:      m.listenAddr(rc.Listen),
+		TLSConfig: tlsCfg,
 		Router:    router,
-		Logger:    m.log,
+		Middleware: func(next http.Handler) http.Handler {
+			return proxyhttp.Chain(next, edge, obs, pol)
+		},
+		Logger: m.log,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &route{
-		cfg: rc, protocol: "h3", listen: listenAddr(rc.Listen), backends: len(rc.Backends),
+		cfg: rc, protocol: "h3", listen: m.listenAddr(rc.Listen), backends: len(rc.Backends),
 		run: ds.ListenAndServe,
 		stats: func() (int64, int64) {
 			s := ds.Stats()
@@ -467,13 +524,14 @@ func (m *Manager) Stats() []RouteStats {
 
 // --- conversion helpers ----------------------------------------------------
 
-// listenAddr returns ":<port>" for an L4 route, or ":0" if unset (L7 routes
-// bind their own address; this is the fallback bind).
-func listenAddr(port int) string {
-	if port <= 0 {
-		return ":0"
+// listenAddr returns the bind address for a route's port: "<BindHost>:<port>",
+// with an empty BindHost (the default) meaning all interfaces, and port 0 when
+// unset.
+func (m *Manager) listenAddr(port int) string {
+	if port < 0 {
+		port = 0
 	}
-	return ":" + strconv.Itoa(port)
+	return net.JoinHostPort(m.cfg.BindHost, strconv.Itoa(port))
 }
 
 func backendHostPort(b config.Backend) string {

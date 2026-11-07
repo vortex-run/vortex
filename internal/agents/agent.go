@@ -1,4 +1,4 @@
-// Package agents implements the VORTEX agent runtime (build plan M10): a
+// Package agents implements the Gubern agent runtime (build plan M10): a
 // supervised, message-passing system of autonomous sub-agents coordinated by a
 // single user-facing coordinator. This file defines the core types — agent
 // state machine, configuration, inter-agent message envelope, the Agent

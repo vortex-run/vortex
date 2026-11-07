@@ -94,6 +94,10 @@ type LocalFSConfig struct {
 	AutoMode bool
 	// RequireApproval gates mutating tools (default true via NewLocalTools).
 	RequireApproval bool
+	// GateSensitive keeps an approval prompt on sensitive paths (.git, hook
+	// dirs, gubern.cue) even when RequireApproval is off. NewTrustedLocalTools
+	// sets it for the team specialists (audit F-05).
+	GateSensitive bool
 }
 
 // resolveLocal resolves p to an absolute path. Relative paths resolve against
@@ -227,7 +231,7 @@ func (t WriteLocalFileTool) Execute(_ context.Context, params map[string]any) (a
 	if isProtectedPath(abs) || isProtectedPath(p) {
 		return nil, fmt.Errorf("%w: %q is a protected system path", ErrDangerousAction, abs)
 	}
-	needApproval := t.RequireApproval && !t.cfg.waivesApproval(abs)
+	needApproval := t.cfg.needsApproval(t.RequireApproval, abs)
 	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
@@ -298,7 +302,7 @@ func (t EditFileTool) Execute(_ context.Context, params map[string]any) (any, er
 	if !strings.Contains(string(data), oldStr) {
 		return nil, fmt.Errorf("agents: old_str not found in %s", abs)
 	}
-	needApproval := t.RequireApproval && !t.cfg.waivesApproval(abs)
+	needApproval := t.cfg.needsApproval(t.RequireApproval, abs)
 	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
@@ -485,7 +489,7 @@ func (t CreateProjectTool) Execute(_ context.Context, params map[string]any) (an
 	}
 	files := projectFiles(name, typ, description)
 
-	needApproval := t.RequireApproval && !t.cfg.waivesApproval(dir)
+	needApproval := t.cfg.needsApproval(t.RequireApproval, dir)
 	if needApproval {
 		return nil, &ApprovalError{Request: ApprovalRequest{
 			Tool:        t.Name(),
@@ -585,6 +589,7 @@ func NewLocalTools(cfg LocalFSConfig) []Tool {
 // even mid-task. git_commit also keeps approval (it mutates history).
 func NewTrustedLocalTools(cfg LocalFSConfig) []Tool {
 	cfg.RequireApproval = false
+	cfg.GateSensitive = true
 	tools := []Tool{
 		ListDirectoryTool{cfg: cfg},
 		ReadLocalFileTool{cfg: cfg},

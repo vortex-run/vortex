@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // newCollab builds a teamCollab over a real bus + checkpoint manager (no agents
@@ -134,7 +134,7 @@ func TestPrimaryTelegramChatID(t *testing.T) {
 		{"notanumber", 0, false},
 	}
 	for _, tc := range cases {
-		t.Setenv("VORTEX_TELEGRAM_ALLOWED_IDS", tc.env)
+		t.Setenv("GUBERN_TELEGRAM_ALLOWED_IDS", tc.env)
 		got, ok := primaryTelegramChatID()
 		if ok != tc.ok || got != tc.want {
 			t.Errorf("primaryTelegramChatID(%q) = (%d,%v), want (%d,%v)", tc.env, got, ok, tc.want, tc.ok)

@@ -3,10 +3,11 @@ package messaging
 import (
 	"context"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/pkg/awsigv4"
+	"github.com/sandeepbollavaram/vortex/pkg/awsigv4"
 )
 
 // (context is used by the call* methods' ctx parameters.)
@@ -17,7 +18,7 @@ import (
 // Anthropic-on-Bedrock invoke API signed with AWS Signature V4.
 
 // callGroq calls Groq's OpenAI-compatible chat completions API. Groq is very
-// fast and offers a free tier (env VORTEX_GROQ_KEY).
+// fast and offers a free tier (env GUBERN_GROQ_KEY).
 func (g *AIGateway) callGroq(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	if p.Endpoint == "" {
 		p.Endpoint = "https://api.groq.com/openai"
@@ -34,7 +35,7 @@ func (g *AIGateway) callGroq(ctx context.Context, p AIProvider, prompt, systemPr
 
 // callOpenRouter calls OpenRouter's OpenAI-compatible API, which fronts 75+
 // models. It adds the HTTP-Referer and X-Title headers OpenRouter uses for
-// app attribution (env VORTEX_OPENROUTER_KEY).
+// app attribution (env GUBERN_OPENROUTER_KEY).
 func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	base := p.Endpoint
 	if base == "" {
@@ -57,8 +58,8 @@ func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, sy
 	_, err := g.doJSON(ctx, base+"/v1/chat/completions",
 		map[string]string{
 			"Authorization": "Bearer " + p.APIKey,
-			"HTTP-Referer":  "https://github.com/vortex-run/vortex",
-			"X-Title":       "VORTEX",
+			"HTTP-Referer":  "https://github.com/sandeepbollavaram/vortex",
+			"X-Title":       "Gubern",
 		},
 		map[string]any{
 			"model": model,
@@ -80,7 +81,7 @@ func (g *AIGateway) callOpenRouter(ctx context.Context, p AIProvider, prompt, sy
 // callAzureOpenAI calls an Azure OpenAI deployment. The request/response shape
 // is OpenAI's, but the URL embeds the deployment and an api-version query
 // parameter, and the API key is sent in the api-key header. The deployment is
-// taken from p.Models[0] (env VORTEX_AZURE_OPENAI_DEPLOYMENT); p.Endpoint is
+// taken from p.Models[0] (env GUBERN_AZURE_OPENAI_DEPLOYMENT); p.Endpoint is
 // the resource base (e.g. https://<resource>.openai.azure.com).
 func (g *AIGateway) callAzureOpenAI(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	if p.Endpoint == "" {
@@ -91,7 +92,7 @@ func (g *AIGateway) callAzureOpenAI(ctx context.Context, p AIProvider, prompt, s
 		return "", 0, fmt.Errorf("azure-openai: deployment name required")
 	}
 	url := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=2024-02-01",
-		strings.TrimRight(p.Endpoint, "/"), deployment)
+		strings.TrimRight(p.Endpoint, "/"), neturl.PathEscape(deployment))
 
 	var out struct {
 		Choices []struct {
@@ -139,7 +140,8 @@ func (g *AIGateway) callBedrock(ctx context.Context, p AIProvider, prompt, syste
 		model = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 	}
 	host := fmt.Sprintf("bedrock-runtime.%s.amazonaws.com", region)
-	url := fmt.Sprintf("https://%s/model/%s/invoke", host, model)
+	wirePath, canonicalPath := bedrockModelPath(model, "invoke")
+	url := "https://" + host + wirePath
 
 	payload := map[string]any{
 		"anthropic_version": "bedrock-2023-05-31",
@@ -158,7 +160,7 @@ func (g *AIGateway) callBedrock(ctx context.Context, p AIProvider, prompt, syste
 		} `json:"usage"`
 	}
 	signer := func(headers map[string]string, body []byte) {
-		bedrockSignV4(headers, body, "POST", host, "/model/"+model+"/invoke",
+		bedrockSignV4(headers, body, "POST", host, canonicalPath,
 			accessKey, secretKey, region, "bedrock", g.now())
 	}
 	_, err := g.doSignedJSON(ctx, url, signer, payload, &out)
@@ -187,6 +189,16 @@ func splitBedrockKey(key string) (access, secret string, ok bool) {
 // SigV4-signed request. It mirrors the signer in internal/secrets/awsssm.go;
 // kept here to avoid exporting cross-package internals. headers is mutated in
 // place; the caller has already set Host/Content-Type.
+// bedrockModelPath returns the request path for a model action and the
+// canonical URI to sign. Model IDs contain ':' ("...-v1:0"), which must be
+// percent-encoded on the wire, and SigV4 for non-S3 services encodes each
+// path segment again in the canonical request (":" → "%3A" → "%253A"), as the
+// AWS SDKs do. Signing the raw ':' path doesn't match what AWS computes.
+func bedrockModelPath(model, action string) (wire, canonical string) {
+	enc := awsigv4.URIEncode(model)
+	return "/model/" + enc + "/" + action, "/model/" + awsigv4.URIEncode(enc) + "/" + action
+}
+
 func bedrockSignV4(headers map[string]string, payload []byte, method, host, path, accessKey, secretKey, region, service string, now time.Time) {
 	amzDate := now.UTC().Format("20060102T150405Z")
 	dateStamp := now.UTC().Format("20060102")

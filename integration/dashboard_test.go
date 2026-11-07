@@ -9,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
-// isolatedAuditLog points VORTEX_AUDIT_LOG at a fresh per-test file so the
+// isolatedAuditLog points GUBERN_AUDIT_LOG at a fresh per-test file so the
 // chain is written and verified with one cluster key (the shared default cache
 // path can accumulate entries from prior runs under different keys).
 func isolatedAuditLog(t *testing.T) {
 	t.Helper()
-	t.Setenv("VORTEX_AUDIT_LOG", filepath.Join(t.TempDir(), "audit.log"))
+	t.Setenv("GUBERN_AUDIT_LOG", filepath.Join(t.TempDir(), "audit.log"))
 }
 
 func TestDashboard_Serves(t *testing.T) {
@@ -38,8 +38,8 @@ func TestDashboard_Serves(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "VORTEX") {
-		t.Errorf("dashboard HTML should contain VORTEX title:\n%s", body)
+	if !strings.Contains(string(body), "Gubern") {
+		t.Errorf("dashboard HTML should contain Gubern title:\n%s", body)
 	}
 }
 

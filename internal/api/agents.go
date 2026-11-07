@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/internal/security"
 )
 
 // ErrAgentBusy signals the agent runtime's concurrency cap is reached; the
@@ -202,6 +202,16 @@ func (s *Server) streamAgentSSE(w http.ResponseWriter, r *http.Request, ch <-cha
 type agentApproveRequest struct {
 	SessionID string `json:"session_id"`
 	Approved  bool   `json:"approved"`
+	// ActionID, when set, binds the decision to the action with that id
+	// (shown as "(action <id>)" on the approval line). A mismatch is a 409
+	// and leaves the pending action alone.
+	ActionID string `json:"action_id,omitempty"`
+}
+
+// actionBoundApprover is implemented by runtimes that can bind an approval
+// to a specific pending action.
+type actionBoundApprover interface {
+	ApproveAction(sessionID, actionID string, approved bool) (transcript string, matched bool, err error)
 }
 
 // handleAgentApprove resolves a pending tool-action approval for a session.
@@ -221,7 +231,23 @@ func (s *Server) handleAgentApprove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session_id is required", http.StatusBadRequest)
 		return
 	}
-	transcript, matched := s.agentRuntime.Approve(req.SessionID, req.Approved)
+	var transcript string
+	var matched bool
+	if req.ActionID != "" {
+		bound, ok := s.agentRuntime.(actionBoundApprover)
+		if !ok {
+			http.Error(w, "action_id is not supported by this runtime", http.StatusNotImplemented)
+			return
+		}
+		var err error
+		transcript, matched, err = bound.ApproveAction(req.SessionID, req.ActionID, req.Approved)
+		if err != nil {
+			http.Error(w, "action_id does not match the pending action", http.StatusConflict)
+			return
+		}
+	} else {
+		transcript, matched = s.agentRuntime.Approve(req.SessionID, req.Approved)
+	}
 	if !matched {
 		http.Error(w, "no pending approval for session", http.StatusNotFound)
 		return

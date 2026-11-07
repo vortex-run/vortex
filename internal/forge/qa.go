@@ -158,7 +158,9 @@ func (q *QAAgent) scanSecrets(dir string) []string {
 		return warns
 	}
 	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, _ error) error {
-		if d == nil || d.IsDir() || !isSourceFile(path) {
+		// Regular files only: a symlink (or a FIFO, which would block the read)
+		// in the generated project is not source to scan.
+		if d == nil || !d.Type().IsRegular() || !isSourceFile(path) {
 			return nil
 		}
 		data, err := os.ReadFile(path) //nolint:gosec // scanning sandboxed generated files

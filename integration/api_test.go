@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 func TestAPI_HealthEndpoint(t *testing.T) {

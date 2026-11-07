@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
 )
 
 // BackendAddr is the HTTP-layer backend descriptor (host:port + weight).

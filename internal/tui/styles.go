@@ -1,8 +1,8 @@
-// Package tui implements VORTEX's full-screen terminal UI (a Bubble Tea
+// Package tui implements Gubern's full-screen terminal UI (a Bubble Tea
 // application). This file re-exports the shared palette, styles, and render
-// helpers from the brand package (the single source of truth for VORTEX's
+// helpers from the brand package (the single source of truth for Gubern's
 // visual identity) under the names the views were built against. Note: unlike
-// the rest of VORTEX (stdlib-only), the TUI depends on the Charm ecosystem
+// the rest of Gubern (stdlib-only), the TUI depends on the Charm ecosystem
 // (bubbletea/lipgloss/bubbles) — an approved, deliberate departure.
 package tui
 
@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // Color palette — aliases of the brand palette. Change brand, not these.

@@ -1,4 +1,4 @@
-// Package pidfile manages VORTEX's PID file: a small text file holding the
+// Package pidfile manages Gubern's PID file: a small text file holding the
 // running server's process ID. It is used to coordinate the start/stop/status/
 // reload CLI commands and to prevent two servers from running against the same
 // pidfile.
@@ -32,42 +32,41 @@ func Write(path string) error {
 		}
 	}
 
-	if err := writeExcl(path); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrExist) {
-		return err
-	}
-
-	// The file exists. Deciding whether it is a live owner or a stale leftover
-	// is a read-modify-write that must be serialized: take the exclusive lock so
-	// concurrent writers (goroutines or processes) cannot both clean up and
-	// rewrite. If the lock is contended, another writer is acting now — treat
+	// Take the exclusive lock before anything else, so concurrent writers
+	// (goroutines or processes) are fully serialized: claim, content and stale
+	// cleanup happen one writer at a time. The first create used to run
+	// unlocked; a second writer could then find the winner's marker still empty
+	// (before its PID was renamed in), wait out the 50 ms grace below, delete it
+	// as stale and write its own, and both reported success (seen under -race
+	// on Linux). If the lock is contended, another writer is acting now; treat
 	// this as "someone else owns it".
 	lock, lerr := Lock(path)
 	if lerr != nil {
-		if pid, rerr := Read(path); rerr == nil {
-			return fmt.Errorf("vortex is already running (pid %d)", pid)
-		}
-		return fmt.Errorf("pidfile %s is contended: %w", path, lerr)
+		// Don't read the pidfile to name the holder: on Windows an open handle
+		// makes the holder's rename of its PID into place fail, so both lose.
+		return fmt.Errorf("vortex is already starting or running (pidfile %s is locked): %w", path, lerr)
 	}
 	defer func() { _ = lock.Unlock() }()
+	return writeHoldingLock(path)
+}
 
-	// Re-attempt the atomic create under the lock: the previous holder may have
-	// already finished and released, or the file may now be stale.
+// writeHoldingLock is Write's body; the caller holds the pidfile lock.
+func writeHoldingLock(path string) error {
 	if err := writeExcl(path); err == nil {
 		return nil
 	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
 
-	// A racing winner may have created the exclusive marker but not yet renamed
-	// the PID content into place; a parse failure here can be transient, so give
-	// the content a brief moment to appear before concluding the file is stale.
+	// Under the lock no other writer is mid-claim, but a writer that doesn't use
+	// this package (or one that crashed between create and rename) can leave
+	// the file empty for a moment; give the content a brief chance to appear
+	// before concluding it is stale.
 	for attempt := 0; attempt < 50; attempt++ {
 		alive, pid, rerr := IsRunning(path)
 		if rerr == nil {
 			if alive {
-				return fmt.Errorf("vortex is already running (pid %d)", pid)
+				return fmt.Errorf("gubern is already running (pid %d)", pid)
 			}
 			break // readable and dead → genuinely stale
 		}
@@ -160,7 +159,7 @@ func IsRunning(path string) (bool, int, error) {
 }
 
 // FileLock is an advisory exclusive lock held on a lock file adjacent to the
-// pidfile. It prevents two `vortex start` processes from racing to claim the
+// pidfile. It prevents two `gubern start` processes from racing to claim the
 // same pidfile. Release it with Unlock. (Named FileLock rather than Lock so the
 // Lock acquisition function can keep that name.)
 type FileLock struct {
@@ -206,11 +205,16 @@ func (l *FileLock) Unlock() error {
 // returned Lock must be released by the caller (typically with defer
 // lock.Unlock()) when the server shuts down.
 func WriteLocked(path string) (*FileLock, error) {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating pidfile directory: %w", err)
+		}
+	}
 	lock, err := Lock(path)
 	if err != nil {
 		return nil, err
 	}
-	if err := Write(path); err != nil {
+	if err := writeHoldingLock(path); err != nil {
 		_ = lock.Unlock()
 		return nil, err
 	}

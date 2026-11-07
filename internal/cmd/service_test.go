@@ -37,7 +37,7 @@ func runGenerate(t *testing.T, args ...string) string {
 	// Provide explicit paths so output does not depend on global flag state.
 	c.SetArgs(append([]string{
 		"--exec-path", "/usr/local/bin/vortex",
-		"--config-path", "/etc/vortex/vortex.cue",
+		"--config-path", "/etc/vortex/gubern.cue",
 	}, args...))
 	if err := c.Execute(); err != nil {
 		t.Fatalf("generate failed: %v", err)

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // plannerSystemPrompt instructs the model to decompose a goal into a task DAG.

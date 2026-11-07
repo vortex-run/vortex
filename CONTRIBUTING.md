@@ -1,6 +1,6 @@
-# Contributing to VORTEX
+# Contributing to Gubern
 
-Thanks for helping. VORTEX is a single-binary Go platform with an embedded
+Thanks for helping. Gubern is a single-binary Go platform with an embedded
 React dashboard — keep changes focused, tested, and free of secrets.
 
 **New contributors and AI agents:** start with
@@ -16,7 +16,7 @@ rules from scratch.
 ## Build & test
 
 ```bash
-task build          # → bin/vortex
+task build          # → bin/gubern
 task test           # unit suite (merge gate)
 task test:race      # race detector (CI)
 task lint           # golangci-lint
@@ -36,7 +36,7 @@ npm run build       # refresh committed dist/ (embedded into the binary)
 
 | Path | Role |
 |------|------|
-| `cmd/vortex` | Binary entrypoint |
+| `cmd/gubern` | Binary entrypoint |
 | `internal/` | Product logic (API, agents, proxy, config, …) |
 | `pkg/` | Small shared libraries |
 | `config/` | Embedded CUE schema |
@@ -57,8 +57,8 @@ Prefer the package path in reviews to avoid mixing them.
 
 ## Config & secrets
 
-- Product config is CUE (`vortex.cue` + embedded schema). Env overrides use
-  `VORTEX_<SECTION>_<FIELD>` for scalars only.
+- Product config is CUE (`gubern.cue` + embedded schema). Env overrides use
+  `GUBERN_<SECTION>_<FIELD>` for scalars only.
 - Never commit API keys, master keys, or `VORTEX_SIGNING_KEY`. Local signing
   material belongs in `.secrets/` (gitignored).
 

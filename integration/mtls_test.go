@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/keyring"
-	"github.com/vortex-run/vortex/internal/testutil"
-	vtls "github.com/vortex-run/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/keyring"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
 )
 
 // testMasterKey is a fixed 32-byte master key (hex) shared between the vortex
@@ -33,7 +33,7 @@ func mtlsStoreKey(t *testing.T) []byte {
 	return kr.Subkey("mtls-store")
 }
 
-// mtlsConfig renders a vortex.cue with a single mtls:true tcp route.
+// mtlsConfig renders a gubern.cue with a single mtls:true tcp route.
 func mtlsConfig(listen, bePort int, cluster string) string {
 	return `cluster: { name: "` + cluster + `" }
 tls: { acme_email: "a@b.com", provider: "internal", min_version: "TLS1.2" }
@@ -51,10 +51,10 @@ observability: { log_level: "info", log_sink: "stderr" }
 func startMTLSVortex(t *testing.T, cluster string) (addr, storeDir string) {
 	t.Helper()
 	storeDir = t.TempDir()
-	t.Setenv("VORTEX_MTLS_STORE", storeDir)
+	t.Setenv("GUBERN_MTLS_STORE", storeDir)
 	// Pin the master key so the vortex process and the test client derive the
 	// same mTLS-store key (C1 master-key change).
-	t.Setenv("VORTEX_MASTER_KEY", testMasterKey)
+	t.Setenv("GUBERN_MASTER_KEY", testMasterKey)
 
 	bin := getNetBinary(t)
 	bePort := tcpEcho(t)

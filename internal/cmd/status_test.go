@@ -17,7 +17,7 @@ func TestStatusCommandRegisters(t *testing.T) {
 func TestStatusFlagDefaults(t *testing.T) {
 	c := newStatusCommand()
 	cases := map[string]string{
-		"pidfile":  "vortex.pid",
+		"pidfile":  "gubern.pid",
 		"api-port": "9090",
 		"json":     "false",
 	}
@@ -38,7 +38,7 @@ func TestStatusNotRunningExitsError(t *testing.T) {
 	var buf bytes.Buffer
 	c.SetOut(&buf)
 	c.SetErr(&buf)
-	missing := filepath.Join(t.TempDir(), "vortex.pid")
+	missing := filepath.Join(t.TempDir(), "gubern.pid")
 	c.SetArgs([]string{"--pidfile", missing})
 
 	err := c.Execute()

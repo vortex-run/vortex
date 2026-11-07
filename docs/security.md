@@ -1,6 +1,6 @@
 # Security Model
 
-VORTEX is designed to run an internet-facing edge and an autonomous agent on
+Gubern is designed to run an internet-facing edge and an autonomous agent on
 the same box. This document explains the controls that make that safe.
 
 ## Key management
@@ -9,15 +9,15 @@ All at-rest encryption keys — the secret store, the TLS cert store, the mTLS
 cluster CA, and the audit-log HMAC — are derived from a single random **master
 key** via HKDF-SHA256 with a per-purpose label. The master key comes from:
 
-1. `VORTEX_MASTER_KEY` (hex/base64, 32 bytes), or
-2. a `0600` key file at `<config>/vortex/master.key`, generated with
+1. `GUBERN_MASTER_KEY` (hex/base64, 32 bytes), or
+2. a `0600` key file at `<config>/gubern/master.key` (or `<config>/vortex/` on installs from before the rename), generated with
    `crypto/rand` on first run.
 
 The cluster name (which appears in `/health` and the dashboard) is **never**
 used to derive a key. On upgrade, a one-time migration re-keys any legacy
 cluster-name-keyed secret store and audit log onto the master key.
 
-> **Rotate the master key** by setting `VORTEX_MASTER_KEY` to a new value and
+> **Rotate the master key** by setting `GUBERN_MASTER_KEY` to a new value and
 > re-encrypting stores (a migration runs automatically when the old data is
 > still decryptable). Back up the key file — losing it makes encrypted secrets
 > unrecoverable.
@@ -26,12 +26,12 @@ cluster-name-keyed secret store and audit log onto the master key.
 
 Secrets are encrypted at rest with XChaCha20-Poly1305 (24-byte nonce). Only
 set/unset state is ever exposed via the API; values are returned only to the
-explicit `vortex secret get --reveal`. Secrets support expiry and rotation
+explicit `gubern secret get --reveal`. Secrets support expiry and rotation
 metadata, with startup alerts (and Telegram notifications) for expired or
 rotation-due secrets:
 
 ```bash
-vortex secret set jwt_secret '...' --expires-in 90d --rotate-every 30d
+gubern secret set jwt_secret '...' --expires-in 90d --rotate-every 30d
 ```
 
 ## API keys & RBAC
@@ -39,11 +39,13 @@ vortex secret set jwt_secret '...' --expires-in 90d --rotate-every 30d
 API keys are bcrypt-hashed (with a SHA-256 prehash to fit bcrypt's 72-byte
 limit); plaintext is shown once and never stored. The store is written
 atomically on every issue/revoke. Keys carry RBAC roles (`admin`, `operator`,
-`viewer`, `readonly`), but today only admin-only routes (`/api/keys`) check a
-role. Every other authenticated route accepts any valid key, so a `viewer` or
+`viewer`, `readonly`), but today only admin-only routes check a role:
+`/api/keys`, and Studio (`/studio/`, enabled by `GUBERN_STUDIO_WORKSPACE`),
+whose terminal is a shell that doesn't go through the approval gate. Every
+other authenticated route accepts any valid key, so a `viewer` or
 `readonly` key can still run agents, approve checkpoints, and write files
 through them. Do not issue non-admin keys to anyone you would not trust with
-those actions. This is tracked as N6 in `VORTEX_PRODUCTION_AUDIT.md`.
+those actions. This is tracked as N6 in `GUBERN_PRODUCTION_AUDIT.md`.
 
 **Data-plane vs control-plane:** Agent runtime routes (`/api/agents/*`,
 including `GET /api/agents/catalog`), Forge, orchestration (`POST /api/orchestrate`,
@@ -51,15 +53,40 @@ including `GET /api/agents/catalog`), Forge, orchestration (`POST /api/orchestra
 `requireAPIKey` — they need a valid key even from loopback when auth is
 configured. Control-plane routes (`/internal/reload`, dashboard data under
 `/api/status`, etc.) may allow loopback without a key unless
-`VORTEX_TRUST_LOOPBACK=false`.
+`GUBERN_TRUST_LOOPBACK=false`.
 
 ## Audit log
 
-A tamper-proof, append-only log HMAC-chains every security-relevant event: each
-entry's hash covers the previous entry's hash, so deleting, reordering, or
-modifying any entry breaks the chain. `vortex audit verify` detects tampering;
-`vortex audit report` produces compliance reports (markdown/JSON/CSV); the log
-auto-archives to gzip at 100 MB and prunes archives after two years.
+A tamper-evident, append-only log HMAC-chains every security-relevant event:
+each entry's hash covers the previous entry's hash, so deleting, reordering,
+or modifying any entry breaks the chain. `gubern audit verify` detects
+tampering; `gubern audit report` produces compliance reports
+(markdown/JSON/CSV); the log auto-archives to gzip at 100 MB and prunes
+archives after two years.
+
+Agent actions that need approval are recorded in three steps:
+`agent.approval.requested` (tool, risk, the action shown), `agent.approval.decided`
+(approved or rejected, and whether by the configured approver or the API) and
+`agent.action.executed` (success or the error). The entry doesn't name the
+person who approved: any valid API key can approve today (N6).
+
+Each request carries an action id, a digest of the tool, its parameters and
+the preview, which is shown on the approval line and recorded in the audit
+entry. An approve call that sends `action_id` only applies to that exact
+action: if anything else is pending it gets `409` and nothing runs. The TUI
+always sends it; API clients should too. Pending approvals expire after 15
+minutes. In `/agent` runs the model can also be stopped by its budgets (20
+turns, 250k tokens, at most 16 tool calls per turn). Each run ends with one
+`agent.run.finished` entry: the task, why it stopped, turns, tokens, tool-call
+outcomes, and whether its `--check` passed.
+
+Each entry's hash covers its sequence number, timestamp, actor, action,
+resource and (for entries marked `"v":2`) its `detail`: tool outcomes and
+errors, Studio SQL queries, issued key owners, config hashes. Entries written
+before v2 have no `v` field; their `detail` isn't covered, though everything
+else is, and they keep verifying alongside newer entries. The chain detects
+changes by anyone without the HMAC key; it doesn't stop someone from deleting
+the whole file, so ship the log off the host if you need that.
 
 ## Transport security
 
@@ -82,21 +109,59 @@ auto-archives to gzip at 100 MB and prunes archives after two years.
 ## Control-plane trust
 
 `/internal/reload` and `/internal/shutdown` (the SIGHUP/SIGTERM equivalents
-used by `vortex reload`/`stop`) are allowed from loopback without a key by
-default. **Behind a same-host reverse proxy, set `VORTEX_TRUST_LOOPBACK=false`**
+used by `gubern reload`/`stop`) are allowed from loopback without a key by
+default. **Behind a same-host reverse proxy, set `GUBERN_TRUST_LOOPBACK=false`**
 so every request presenting a loopback address must still carry a credential.
+
+A browser on the same machine also connects from loopback, on behalf of
+whatever site it has open, so loopback trust also requires the request to
+name a loopback host (`127.0.0.1`, `::1`, `localhost`) and not be a
+cross-site browser request (foreign `Origin`, or `Sec-Fetch-Site` other than
+`same-origin`/`none`). A web page therefore can't stop or reload Gubern, and
+a DNS-rebinding page can't read the audit log. The CLI and the dashboard
+opened at `http://localhost:9090/dashboard/` are unaffected; open the
+dashboard by another name and its control-plane reads need a key.
+
+## Messaging webhooks
+
+`/webhook/telegram`, `/webhook/whatsapp` and `/webhook/slack` are public (no
+API key, per-IP rate limited) and pass messages to the agent runtime, so each
+authenticates the platform itself and fails closed:
+
+- **Telegram:** updates must carry the webhook secret (`GUBERN_TELEGRAM_SECRET`,
+  or a random one Gubern generates and registers itself); without it the route
+  refuses everything, since a chat ID alone is easy to forge. Approval buttons
+  count only when the user who pressed them is allowed. Beyond that, only chat
+  IDs in `GUBERN_TELEGRAM_ALLOWED_IDS` are served;
+  empty allows nobody.
+- **WhatsApp:** requests must carry a valid `X-Hub-Signature-256` for
+  `GUBERN_WA_APP_SECRET`. The route isn't mounted without the secret. Only
+  senders in `GUBERN_WA_ALLOWED_NUMBERS` reach the agent (empty allows
+  nobody), because a valid signature proves Meta delivered a message, not
+  that its sender may drive your agent.
+- **Slack:** requests must carry a valid, fresh (±5 min) signature for
+  `GUBERN_SLACK_SIGNING_SECRET`. The route isn't mounted without the secret.
+  A valid signature proves Slack sent the request, not that the person may
+  drive your agent, so access is per registered user and denied by default:
+  `GUBERN_SLACK_ALLOWED_USERS` (operators) and `GUBERN_SLACK_READONLY_USERS`
+  (status/logs), optionally pinned to `GUBERN_SLACK_ALLOWED_TEAMS`. Anyone
+  else gets only `/vortex whoami`. Each user has their own agent session.
+
+Command approval prompts go to the operator's configured Telegram chat, not
+back to whoever sent the message, so a webhook sender can't approve their own
+commands.
 
 ## Agent sandbox
 
 - Sandbox filesystem tools confine writes to a sandbox dir (lexical + symlink
   escape checks).
-- Local FS/terminal tools: set `agents.local_tools.trusted_root` in `vortex.cue`
-  (or `VORTEX_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`) to confine paths to that
+- Local FS/terminal tools: set `agents.local_tools.trusted_root` in `gubern.cue`
+  (or `GUBERN_AGENTS_LOCAL_TOOLS_TRUSTED_ROOT`) to confine paths to that
   workspace (lexical + symlink checks). When unset, absolute paths are allowed
   after approval (approval remains the primary control). `auto_mode` may waive
   repeated approval only for routine in-scope file mutations — never for shell,
   and never outside the trusted root. Defaults keep Auto Mode off globally.
-  `agents.local_tools` is applied at process startup only; SIGHUP / `vortex reload`
+  `agents.local_tools` is applied at process startup only; SIGHUP / `gubern reload`
   does not rebuild the local tool registry — restart after changing trust settings.
   Startup validation requires the coordinator working directory to be inside
   `trusted_root` (work dir ⊆ trusted_root) so the default shell cwd is not left
@@ -105,7 +170,28 @@ so every request presenting a loopback address must still carry a credential.
   (approved shell is still not a full OS jail).
 - The **approval gate** is the primary control for machine-touching actions —
   keep it enabled for unattended runs.
-- `http_get` and the research fetcher use an **SSRF-safe dialer** that resolves
+- **Skills** (`SKILL.md` files in the workspace) are read as instructions for
+  the model, never as permissions: loading one runs nothing, and actions a
+  skill suggests go through the same approval gate. A skill in a repository
+  you clone is third-party text, like any other file the model reads.
+  When `/agent` reads a skill, the audit log records `agent.skill.read` with
+  the skill name and the SHA-256 of the `SKILL.md` it catalogued.
+- **Provider keys** are sent in request headers, never in URLs, so they can't
+  appear in transport errors or logs (Gemini's key used to be a `?key=`
+  parameter; fixed). The Telegram bot token is part of the API URL by
+  Telegram's design, so its errors are redacted instead.
+- **Forge** (app builds you request) is the exception: it compiles the
+  generated project without a per-command prompt. `go build` doesn't run
+  project code; `flutter build apk` runs the project's Gradle scripts, which
+  the AI wrote. Builds run in a temporary directory with the same scrubbed
+  environment as agent tools plus toolchain settings (Go/Gradle/Android/Java/
+  Flutter paths and proxies), with no provider keys, tokens or master key. They
+  are not sandboxed.
+- DevOps package names, domains and upstreams are validated before they are
+  shown for approval or sent to a host (no shell or nginx injection, no path
+  traversal).
+- The research fetcher, data pipeline and `http_get` tool (not yet reachable
+  from chat) use an **SSRF-safe dialer** that resolves
   once, validates every candidate IP (blocking loopback/RFC1918/link-local/
   metadata), dials the pinned IP, and re-validates every redirect hop —
   defeating DNS rebinding.
@@ -114,7 +200,7 @@ so every request presenting a loopback address must still carry a credential.
 
 ## Supply chain
 
-- Releases ship `checksums.txt` plus an **Ed25519 signature**; `vortex
+- Releases ship `checksums.txt` plus an **Ed25519 signature**; `gubern
   self-update` verifies the signature against a public key pinned in the binary
   before swapping — a compromised release that forges both the binary and its
   checksum still cannot be installed.
@@ -143,14 +229,17 @@ for production releases.
 
 ## Host keys (DevOps SSH)
 
-When a server entry sets `known_hosts`, VORTEX verifies the remote host key
+When a server entry sets `known_hosts`, Gubern verifies the remote host key
 against that OpenSSH known_hosts file. With no file configured, connections
-use trust-on-first-use (TOFU) and log the fingerprint when a logger is set —
-prefer an explicit known_hosts file for production fleets.
+use trust-on-first-use (TOFU): the first key seen for a host is pinned in
+`<config dir>/gubern/ssh_known_hosts`, and a later connection that presents a
+different key is refused as a possible man-in-the-middle (remove the host's line
+from that file after a legitimate rebuild). Prefer an explicit known_hosts file
+for production fleets.
 
 ## Multi-node & containment (honest boundaries)
 
-VORTEX is **production-ready for single-node** deployments. Cluster gossip/raft
+Gubern is **production-ready for single-node** deployments. Cluster gossip/raft
 exist for discovery experiments, but keys, audit, and quota state remain
 node-local — do not treat multi-node as HA yet. Agent tools use allow-lists,
 approval gates, and environment scrubbing; they are **not** container- or

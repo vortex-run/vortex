@@ -1,4 +1,4 @@
-// Package brand is the single source of truth for VORTEX's visual identity:
+// Package brand is the single source of truth for Gubern's visual identity:
 // logo, tagline, color palette, icons, risk levels, and the Lip Gloss styles
 // built from them. Every TUI surface (and the CLI banners) renders through
 // these constants, so one change here restyles the whole product.
@@ -14,15 +14,15 @@ import (
 
 // Logo is the full ASCII wordmark shown on setup and splash screens.
 const Logo = `
- ██╗   ██╗ ██████╗ ██████╗ ████████╗███████╗██╗  ██╗
- ██║   ██║██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝
- ██║   ██║██║   ██║██████╔╝   ██║   █████╗   ╚███╔╝
- ╚██╗ ██╔╝██║   ██║██╔══██╗   ██║   ██╔══╝   ██╔██╗
-  ╚████╔╝ ╚██████╔╝██║  ██║   ██║   ███████╗██╔╝ ██╗
-   ╚═══╝   ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝`
+  ██████╗ ██╗   ██╗██████╗ ███████╗██████╗ ███╗   ██╗
+ ██╔════╝ ██║   ██║██╔══██╗██╔════╝██╔══██╗████╗  ██║
+ ██║  ███╗██║   ██║██████╔╝█████╗  ██████╔╝██╔██╗ ██║
+ ██║   ██║██║   ██║██╔══██╗██╔══╝  ██╔══██╗██║╚██╗██║
+ ╚██████╔╝╚██████╔╝██████╔╝███████╗██║  ██║██║ ╚████║
+  ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝`
 
 // LogoSmall is the compact mark for top bars and one-line banners.
-const LogoSmall = `▲ VORTEX`
+const LogoSmall = `▲ Gubern`
 
 // Tagline is the product one-liner shown beneath the logo.
 const Tagline = "One binary. Any server. Fully autonomous."

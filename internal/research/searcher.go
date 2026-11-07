@@ -1,4 +1,4 @@
-// Package research implements VORTEX's research agent (build plan M15): web
+// Package research implements Gubern's research agent (build plan M15): web
 // search, content fetching, AI summarization, and report generation. It is
 // stdlib-only — searches scrape the DuckDuckGo HTML interface (no API key) and
 // all HTTP uses net/http.
@@ -18,7 +18,7 @@ import (
 )
 
 // ddgUserAgent is sent on search requests.
-const ddgUserAgent = "VORTEX Research Agent/1.0"
+const ddgUserAgent = "Gubern Research Agent/1.0"
 
 // ddgHTMLEndpoint is the DuckDuckGo HTML (no-JS) search endpoint.
 const ddgHTMLEndpoint = "https://html.duckduckgo.com/html/"

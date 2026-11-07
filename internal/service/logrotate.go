@@ -6,7 +6,7 @@ import (
 )
 
 // LogrotateConfig holds the values rendered into a logrotate(8) config, used on
-// distributions where VORTEX logs to a file (OpenRC) rather than journald.
+// distributions where Gubern logs to a file (OpenRC) rather than journald.
 type LogrotateConfig struct {
 	LogPath    string // path of the log file to rotate
 	MaxSize    string // rotate when the file reaches this size (e.g. "100M")
@@ -24,7 +24,7 @@ func DefaultLogrotateConfig() LogrotateConfig {
 		Rotate:     7,
 		Compress:   true,
 		DateExt:    true,
-		PostRotate: "rc-service vortex reload",
+		PostRotate: "rc-service gubern reload",
 	}
 }
 

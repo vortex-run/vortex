@@ -10,23 +10,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errPlugin signals a plugin-command failure whose detail was already printed.
 var errPlugin = errors.New("plugin command failed")
 
 // pluginStorePath returns the on-disk plugin registry path, honouring
-// VORTEX_PLUGIN_DIR and otherwise defaulting to <user-cache>/vortex/plugins.
+// GUBERN_PLUGIN_DIR and otherwise defaulting to <user-cache>/vortex/plugins.
 func pluginStorePath() string {
-	if override := os.Getenv("VORTEX_PLUGIN_DIR"); override != "" {
+	if override := os.Getenv("GUBERN_PLUGIN_DIR"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	return filepath.Join(cacheDir, "vortex", "plugins")
+	cacheDir := userdir.Cache()
+	return filepath.Join(userdir.App(cacheDir), "plugins")
 }
 
 // openRegistry opens the plugin registry.
@@ -34,7 +32,7 @@ func openRegistry() (*plugins.Registry, error) {
 	return plugins.NewRegistry(pluginStorePath())
 }
 
-// newPluginCommand builds `vortex plugin` with list/install/remove/info.
+// newPluginCommand builds `gubern plugin` with list/install/remove/info.
 func newPluginCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "plugin",
@@ -109,7 +107,7 @@ func newPluginInstallCommand() *cobra.Command {
 			}
 			manifest := plugins.PluginManifest{
 				Name: name, Version: version, Checksum: reg.Checksum(wasm),
-				Description: "installed via vortex plugin install",
+				Description: "installed via gubern plugin install",
 			}
 			if err := reg.Install(manifest, wasm); err != nil {
 				fmt.Fprintf(cmd.OutOrStderr(), "error: %v\n", err)

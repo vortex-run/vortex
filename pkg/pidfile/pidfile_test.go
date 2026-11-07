@@ -13,7 +13,7 @@ import (
 
 func tmpPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "vortex.pid")
+	return filepath.Join(t.TempDir(), "gubern.pid")
 }
 
 func TestWriteCreatesFileWithCurrentPID(t *testing.T) {
@@ -32,7 +32,7 @@ func TestWriteCreatesFileWithCurrentPID(t *testing.T) {
 }
 
 func TestWriteCreatesParentDirs(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "nested", "dir", "vortex.pid")
+	p := filepath.Join(t.TempDir(), "nested", "dir", "gubern.pid")
 	if err := Write(p); err != nil {
 		t.Fatalf("Write into nested dir: %v", err)
 	}

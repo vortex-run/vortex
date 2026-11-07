@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestAgents_SubmitGeneralQuestion starts a real vortex process and submits a
@@ -17,7 +17,7 @@ import (
 // auth), asserting a 200 with a non-empty response. The coordinator uses the
 // stub AI gateway (no real provider in M10), so the reply is the canned stub.
 func TestAgents_SubmitGeneralQuestion(t *testing.T) {
-	secret := seedAdminKey(t) // sets VORTEX_APIKEY_STORE before StartVortex
+	secret := seedAdminKey(t) // sets GUBERN_APIKEY_STORE before StartVortex
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, netConfig(""))
 	p := testutil.StartVortex(t, bin, cfg)

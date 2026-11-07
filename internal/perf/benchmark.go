@@ -1,4 +1,4 @@
-// Package perf implements VORTEX's performance harness (build plan M9): a
+// Package perf implements Gubern's performance harness (build plan M9): a
 // benchmark suite for continuous throughput/latency tracking with regression
 // detection, OS-level tuning recommendations, and horizontal autoscale triggers.
 // Standard library only.

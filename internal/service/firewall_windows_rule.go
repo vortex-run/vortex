@@ -11,20 +11,20 @@ import (
 // interactive "Do you want to allow..." dialog and blocks inbound traffic
 // until someone answers it. On a server — a VPS left running for hours, or a
 // machine administered over RDP that nobody is watching — there is no one to
-// click it, so VORTEX would start, appear healthy, and silently refuse inbound
+// click it, so Gubern would start, appear healthy, and silently refuse inbound
 // connections. Creating the rule at install time removes the dialog entirely,
 // because a program with an explicit rule is never prompted for.
 //
 // The rule is deliberately narrow. It authorises the vortex executable only,
 // and only on the private and domain profiles: a VPS's public profile is the
-// hostile side, and an operator who genuinely wants VORTEX reachable from the
+// hostile side, and an operator who genuinely wants Gubern reachable from the
 // internet should say so explicitly rather than inherit it from an installer.
 // FirewallProfiles overrides that when they do.
 
-// firewallRuleName is the Windows Firewall rule VORTEX manages. Install
+// firewallRuleName is the Windows Firewall rule Gubern manages. Install
 // creates it and Uninstall deletes it by this exact name, so re-running the
 // installer replaces the rule rather than accumulating duplicates.
-const firewallRuleName = "VORTEX"
+const firewallRuleName = "Gubern"
 
 // defaultFirewallProfiles are the netsh profiles the rule applies to. Public
 // is excluded on purpose — see the note above.
@@ -44,7 +44,7 @@ func firewallAddArgs(execPath, profiles string) []string {
 		"program=" + execPath,
 		"enable=yes",
 		"profile=" + profiles,
-		"description=Allows inbound connections to the VORTEX server. Created by 'vortex service install'.",
+		"description=Allows inbound connections to the Gubern server. Created by 'gubern service install'.",
 	}
 }
 
@@ -77,7 +77,7 @@ func addFirewallRule(execPath, profiles string, dryRun bool, out io.Writer) {
 	}
 	fmt.Fprintf(out, "Created Windows Firewall rule %q for %s (profiles: %s).\n",
 		firewallRuleName, execPath, profilesOrDefault(profiles))
-	fmt.Fprintln(out, "VORTEX will not prompt to allow network access, so it can start unattended.")
+	fmt.Fprintln(out, "Gubern will not prompt to allow network access, so it can start unattended.")
 }
 
 // removeFirewallRule deletes the rule created by addFirewallRule. Like the

@@ -1,4 +1,4 @@
-// Package update implements VORTEX's self-update machinery: querying the GitHub
+// Package update implements Gubern's self-update machinery: querying the GitHub
 // releases API, downloading and verifying release archives, and atomically
 // hot-swapping the running binary. It is split from the CLI command so the
 // logic is testable without a terminal and reusable by future agents (e.g. the
@@ -63,7 +63,7 @@ type ghAsset struct {
 	Size        int64  `json:"size"`
 }
 
-// httpGet issues a GET with the VORTEX User-Agent under ctx.
+// httpGet issues a GET with the Gubern User-Agent under ctx.
 func httpGet(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -74,7 +74,7 @@ func httpGet(ctx context.Context, url string) (*http.Response, error) {
 }
 
 // FetchLatestRelease returns the latest published release for repo (e.g.
-// "vortex-run/vortex"). It applies a 30s timeout derived from ctx.
+// "sandeepbollavaram/vortex"). It applies a 30s timeout derived from ctx.
 func FetchLatestRelease(ctx context.Context, repo string) (*Release, error) {
 	return fetchRelease(ctx, apiBaseURL+"/repos/"+repo+"/releases/latest")
 }
@@ -119,30 +119,11 @@ func fetchRelease(ctx context.Context, url string) (*Release, error) {
 	return rel, nil
 }
 
-// FetchChecksums downloads and parses the release's checksums.txt, returning a
-// map of filename → SHA-256 hex.
+// FetchChecksums returns the release's checksums, signature-verified when a
+// key is pinned. It is VerifiedChecksums: there is deliberately no way to get
+// an unverified checksum map for an install or verify decision (audit F-12).
 func FetchChecksums(ctx context.Context, release *Release) (map[string]string, error) {
-	asset := findAsset(release, "checksums.txt")
-	if asset == nil {
-		return nil, errors.New("release has no checksums.txt asset")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	resp, err := httpGet(ctx, asset.DownloadURL)
-	if err != nil {
-		return nil, fmt.Errorf("downloading checksums.txt: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("checksums.txt download returned %s", resp.Status)
-	}
-	// Bounded: fetched before verification is possible (see limits.go).
-	b, err := readLimited(resp.Body, maxMetadataBytes, "checksums.txt")
-	if err != nil {
-		return nil, err
-	}
-	return ParseChecksums(string(b)), nil
+	return VerifiedChecksums(ctx, release)
 }
 
 // ParseChecksums turns "<hex>  <filename>" lines into a filename→hash map.
@@ -165,16 +146,36 @@ func AssetForPlatform(release *Release, goos, goarch string) (*Asset, error) {
 	if a := findAsset(release, name); a != nil {
 		return a, nil
 	}
+	// Releases from before the VORTEX → Gubern rename only have vortex_*.
+	if a := findAsset(release, LegacyAssetName(goos, goarch)); a != nil {
+		return a, nil
+	}
 	return nil, fmt.Errorf("no release asset %q for %s/%s", name, goos, goarch)
 }
 
 // AssetName returns the archive filename for a platform.
-func AssetName(goos, goarch string) string {
+func AssetName(goos, goarch string) string { return assetName("gubern", goos, goarch) }
+
+// LegacyAssetName is the pre-rename archive name. Releases keep publishing it
+// (holding the same program as a binary named vortex) so installs from before
+// the rename can still self-update.
+func LegacyAssetName(goos, goarch string) string { return assetName("vortex", goos, goarch) }
+
+func assetName(prefix, goos, goarch string) string {
 	ext := "tar.gz"
 	if goos == "windows" {
 		ext = "zip"
 	}
-	return fmt.Sprintf("vortex_%s_%s.%s", goos, goarch, ext)
+	return fmt.Sprintf("%s_%s_%s.%s", prefix, goos, goarch, ext)
+}
+
+// BinaryNames lists the executable names to look for in a release archive,
+// newest first: gubern, then the pre-rename vortex.
+func BinaryNames(goos string) []string {
+	if goos == "windows" {
+		return []string{"gubern.exe", "vortex.exe"}
+	}
+	return []string{"gubern", "vortex"}
 }
 
 // CurrentPlatformAsset is a convenience wrapper for the running platform.

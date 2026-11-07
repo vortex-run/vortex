@@ -24,7 +24,7 @@ func (s *Server) handleCreateNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var ni NamespaceInfo
-	if err := json.NewDecoder(r.Body).Decode(&ni); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&ni); err != nil {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}

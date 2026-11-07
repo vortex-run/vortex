@@ -44,6 +44,22 @@ func (t SearchFilesTool) Execute(_ context.Context, params map[string]any) (any,
 		needle = strings.ToLower(pattern)
 	}
 
+	// Open files through an os.Root on the search directory. WalkDir doesn't
+	// descend into symlinked directories, but a symlinked file is an ordinary
+	// entry and os.Open follows it, so a repo containing
+	// "notes.txt -> ~/.ssh/id_rsa" let this read-only, unapproved tool read
+	// outside the trusted root and hand the matches to the model. os.Root
+	// refuses any path that resolves outside base, symlinks included.
+	base := root
+	if info, serr := os.Stat(root); serr == nil && !info.IsDir() {
+		base = filepath.Dir(root)
+	}
+	rt, err := os.OpenRoot(base)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rt.Close() }()
+
 	var results []map[string]any
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
 		if werr != nil || d.IsDir() {
@@ -55,7 +71,11 @@ func (t SearchFilesTool) Execute(_ context.Context, params map[string]any) (any,
 		if ext != "" && !strings.EqualFold(strings.TrimPrefix(filepath.Ext(path), "."), ext) {
 			return nil
 		}
-		f, oerr := os.Open(path) //nolint:gosec // user-approved local read
+		rel, rerr := filepath.Rel(base, path)
+		if rerr != nil {
+			return nil
+		}
+		f, oerr := rt.Open(rel)
 		if oerr != nil {
 			return nil
 		}

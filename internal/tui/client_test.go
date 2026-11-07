@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // fakeVortex builds an httptest server emulating the management API. It records
@@ -245,7 +247,7 @@ func TestClient_SendsAPIKey(t *testing.T) {
 }
 
 func TestClient_LoadAPIKeyFromEnv(t *testing.T) {
-	t.Setenv("VORTEX_API_KEY", "env-key")
+	t.Setenv("GUBERN_API_KEY", "env-key")
 	c := NewClient(ClientConfig{})
 	if c.LoadAPIKey() != "env-key" {
 		t.Errorf("LoadAPIKey = %q, want env-key", c.LoadAPIKey())
@@ -292,11 +294,12 @@ func TestClient_StreamCommsErrorWhenDown(t *testing.T) {
 
 func TestClient_LoadAPIKeyFromCacheDir(t *testing.T) {
 	// No env var, no config-dir file: LoadAPIKey must fall back to the cache-dir
-	// tui-key (where `vortex start` auto-creates it).
-	t.Setenv("VORTEX_API_KEY", "")
+	// tui-key (where `gubern start` auto-creates it).
+	t.Setenv("GUBERN_API_KEY", "")
 	home := t.TempDir()
 	// Push both config and cache dirs into the temp home; only write the cache one.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("HOME", filepath.Join(home, "config")) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("APPDATA", filepath.Join(home, "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
@@ -343,8 +346,9 @@ func TestParsePrometheus(t *testing.T) {
 
 func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 	// No env var; key only in the persisted setup file.
-	t.Setenv("VORTEX_API_KEY", "")
+	t.Setenv("GUBERN_API_KEY", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir (Linux)
+	t.Setenv("HOME", t.TempDir())            // redirect on macOS ($HOME/Library)
 	t.Setenv("AppData", t.TempDir())         // redirect on Windows
 
 	path := APIKeyFilePath()
@@ -362,13 +366,15 @@ func TestClient_LoadAPIKeyFromFile(t *testing.T) {
 }
 
 func TestClient_LoadAPIKeyEnvBeatsFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 	path := APIKeyFilePath()
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.WriteFile(path, []byte("file-key"), 0o600)
 
-	t.Setenv("VORTEX_API_KEY", "env-key")
+	t.Setenv("GUBERN_API_KEY", "env-key")
 	c := NewClient(ClientConfig{})
 	if got := c.LoadAPIKey(); got != "env-key" {
 		t.Errorf("env var should win over file: got %q", got)
@@ -418,5 +424,16 @@ func TestClient_HealthStillUsesShortTimeout(t *testing.T) {
 	c := NewClient(ClientConfig{BaseURL: srv.URL, Timeout: 500 * time.Millisecond})
 	if _, err := c.Health(); err == nil {
 		t.Error("Health should honour the short client timeout and fail on a 2s handler")
+	}
+}
+
+// TestSubmitDeadline_AgentRuns: the client must outwait the server-side run
+// limit, or a long /agent run is cut off by the TUI instead.
+func TestSubmitDeadline_AgentRuns(t *testing.T) {
+	if d := submitDeadline("/agent fix the build"); d <= agents.AgentRunTimeout {
+		t.Errorf("/agent deadline %v <= server run limit %v", d, agents.AgentRunTimeout)
+	}
+	if d := submitDeadline("hello"); d != submitTimeout {
+		t.Errorf("chat deadline = %v", d)
 	}
 }

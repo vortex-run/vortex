@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
 )
 
 // hookBodyLimit caps how much request body is passed to plugins (first 64KB).
@@ -111,6 +111,40 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	}, nil
 }
 
+// preRequest runs the route's pre-request plugin hooks. On a deny or hook
+// error it writes the response and returns ok=false; otherwise it returns the
+// hook's header modifications.
+func (h *Handler) preRequest(ctx context.Context, w http.ResponseWriter, req *http.Request) (map[string][]string, bool) {
+	if h.hooks == nil || h.hooks.Len() == 0 {
+		return nil, true
+	}
+	out, err := h.hooks.Execute(ctx, h.hookInput(req, plugins.HookPreRequest))
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "plugin hook error")
+		return nil, false
+	}
+	if !out.Allow {
+		status := out.Status
+		if status == 0 {
+			status = http.StatusForbidden
+		}
+		writeJSONError(w, status, "denied by plugin")
+		return nil, false
+	}
+	return out.Headers, true
+}
+
+// AllowUpgrade runs the route's pre-request plugin hooks for a request the
+// protocol gateway is about to tunnel (a WebSocket upgrade). It returns false
+// after writing the deny response. The gateway calls it before dialing the
+// backend so a plugin deny applies to upgrades too (audit F-09).
+func (h *Handler) AllowUpgrade(w http.ResponseWriter, req *http.Request) bool {
+	ctx, cancel := context.WithTimeout(req.Context(), h.timeout)
+	defer cancel()
+	_, ok := h.preRequest(ctx, w, req)
+	return ok
+}
+
 // ServeHTTP proxies req to a selected backend, retrying on transport errors and
 // configured 5xx statuses up to the retry budget.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -130,22 +164,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// Pre-request plugin hooks: a deny short-circuits the proxy; header
 	// modifications are applied to the outbound request.
-	var preHeaders map[string][]string
-	if h.hooks != nil && h.hooks.Len() > 0 {
-		out, err := h.hooks.Execute(ctx, h.hookInput(req, plugins.HookPreRequest))
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "plugin hook error")
-			return
-		}
-		if !out.Allow {
-			status := out.Status
-			if status == 0 {
-				status = http.StatusForbidden
-			}
-			writeJSONError(w, status, "denied by plugin")
-			return
-		}
-		preHeaders = out.Headers
+	preHeaders, ok := h.preRequest(ctx, w, req)
+	if !ok {
+		return
 	}
 
 	attempts := h.retries + 1

@@ -108,12 +108,18 @@ func (s *Server) RunCommand(ctx context.Context, cmd string, stream func(string)
 	return b.String(), err
 }
 
-// InstallPackage installs pkg using the detected package manager (approval).
+// InstallPackage installs pkg (one or more space-separated package names)
+// using the detected package manager (approval). Names are validated before
+// approval is asked, and the approval shows the exact command.
 func (s *Server) InstallPackage(ctx context.Context, pkg string) error {
-	if !s.approve("install package: " + pkg) {
+	pkgs, err := packageList(pkg)
+	if err != nil {
+		return err
+	}
+	cmd := s.installCommand(pkgs)
+	if !s.approve("install package(s) " + strings.Join(pkgs, " ") + ": " + cmd) {
 		return fmt.Errorf("devops: install not approved: %s", pkg)
 	}
-	cmd := s.installCommand(pkg)
 	_, stderr, code, err := s.ssh.Run(ctx, cmd)
 	if err != nil {
 		return err
@@ -124,15 +130,21 @@ func (s *Server) InstallPackage(ctx context.Context, pkg string) error {
 	return nil
 }
 
-// installCommand returns the install command for the detected package manager.
-func (s *Server) installCommand(pkg string) string {
+// installCommand returns the install command for the detected package
+// manager. Each (already validated) name is shell-quoted as well.
+func (s *Server) installCommand(pkgs []string) string {
+	quoted := make([]string, len(pkgs))
+	for i, p := range pkgs {
+		quoted[i] = shellQuote(p)
+	}
+	args := strings.Join(quoted, " ")
 	switch s.OS {
 	case "centos", "rhel", "fedora", "rocky", "almalinux":
-		return "yum install -y " + pkg
+		return "yum install -y " + args
 	case "alpine":
-		return "apk add " + pkg
+		return "apk add " + args
 	default: // ubuntu/debian
-		return "DEBIAN_FRONTEND=noninteractive apt-get install -y " + pkg
+		return "DEBIAN_FRONTEND=noninteractive apt-get install -y " + args
 	}
 }
 

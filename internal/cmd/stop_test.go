@@ -17,7 +17,7 @@ func TestStopCommandRegisters(t *testing.T) {
 func TestStopFlagDefaults(t *testing.T) {
 	c := newStopCommand()
 	cases := map[string]string{
-		"pidfile":  "vortex.pid",
+		"pidfile":  "gubern.pid",
 		"timeout":  (10 * time.Second).String(),
 		"api-port": "9090",
 	}
@@ -39,7 +39,7 @@ func TestStopWhenNotRunning(t *testing.T) {
 	c.SetOut(&buf)
 	c.SetErr(&buf)
 	// Point at a pidfile that does not exist.
-	missing := filepath.Join(t.TempDir(), "vortex.pid")
+	missing := filepath.Join(t.TempDir(), "gubern.pid")
 	c.SetArgs([]string{"--pidfile", missing})
 
 	if err := c.Execute(); err != nil {

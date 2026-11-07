@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // TestRun_DurableRunsCarryEffectScope proves that when durability is enabled

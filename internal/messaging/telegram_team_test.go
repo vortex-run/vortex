@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // fakeSender records Telegram sends for assertions.

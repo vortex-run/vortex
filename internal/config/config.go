@@ -1,7 +1,7 @@
-// Package config implements VORTEX's CUE-based configuration engine (build
+// Package config implements Gubern's CUE-based configuration engine (build
 // plan M1.2).
 //
-// The user edits a single vortex.cue file. At startup it is unified against the
+// The user edits a single gubern.cue file. At startup it is unified against the
 // embedded master schema (config/schema.cue). If it violates any type or
 // constraint, or declares an unknown field, loading fails with the offending
 // file, line, and field path and the process exits 1 — config is always valid
@@ -18,11 +18,32 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync/atomic"
 )
 
-// DefaultPath is where VORTEX looks for the config file when none is specified.
-const DefaultPath = "vortex.cue"
+// DefaultPath is where Gubern looks for the config file when none is
+// specified; LegacyPath is the pre-rename name, still used when it exists and
+// DefaultPath doesn't (see ResolvePath).
+const (
+	DefaultPath = "gubern.cue"
+	LegacyPath  = "vortex.cue"
+)
+
+// ResolvePath returns the config file to use for path: path itself when it
+// names a file explicitly, otherwise DefaultPath, or LegacyPath when only a
+// pre-rename vortex.cue is present.
+func ResolvePath(path string) string {
+	if path != "" && path != DefaultPath {
+		return path
+	}
+	if _, err := os.Stat(DefaultPath); err != nil {
+		if _, lerr := os.Stat(LegacyPath); lerr == nil {
+			return LegacyPath
+		}
+	}
+	return DefaultPath
+}
 
 // Config is the fully-typed, validated configuration. It is produced by Load
 // and is safe to treat as immutable; reloads create a new Config rather than

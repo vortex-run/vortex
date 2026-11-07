@@ -10,13 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // hookWASM builds a minimal WASM module that ignores its input and always
 // returns the JSON `output` (a HookOutput). It exports memory, alloc, and handle
-// per the VORTEX plugin ABI. Hand-encoded so the test needs no WASM toolchain.
+// per the Gubern plugin ABI. Hand-encoded so the test needs no WASM toolchain.
 func hookWASM(output []byte) []byte {
 	leb := func(n uint32) []byte {
 		var out []byte
@@ -74,7 +74,7 @@ func hookWASM(output []byte) []byte {
 }
 
 // installPlugin writes a plugin into a registry rooted at dir (the same
-// VORTEX_PLUGIN_DIR the server reads).
+// GUBERN_PLUGIN_DIR the server reads).
 func installPlugin(t *testing.T, dir, name string, output []byte) {
 	t.Helper()
 	reg, err := plugins.NewRegistry(dir)
@@ -127,7 +127,7 @@ func TestPlugin_NoPlugins(t *testing.T) {
 
 func TestPlugin_HookChainPassthrough(t *testing.T) {
 	pluginDir := t.TempDir()
-	t.Setenv("VORTEX_PLUGIN_DIR", pluginDir)
+	t.Setenv("GUBERN_PLUGIN_DIR", pluginDir)
 	installPlugin(t, pluginDir, "allow", []byte(`{"allow":true}`))
 
 	bin := getNetBinary(t)
@@ -162,7 +162,7 @@ func TestPlugin_HookChainPassthrough(t *testing.T) {
 
 func TestPlugin_HookChainDeny(t *testing.T) {
 	pluginDir := t.TempDir()
-	t.Setenv("VORTEX_PLUGIN_DIR", pluginDir)
+	t.Setenv("GUBERN_PLUGIN_DIR", pluginDir)
 	installPlugin(t, pluginDir, "deny", []byte(`{"allow":false}`))
 
 	bin := getNetBinary(t)

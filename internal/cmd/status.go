@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/pkg/pidfile"
+	"github.com/sandeepbollavaram/vortex/pkg/pidfile"
 )
 
 // statusHealth mirrors the JSON returned by GET /health.
@@ -27,7 +27,7 @@ type statusHealth struct {
 // an extra generic log line.
 var errNotRunning = errors.New("vortex is not running")
 
-// newStatusCommand builds `vortex status`, which reports whether the server is
+// newStatusCommand builds `gubern status`, which reports whether the server is
 // running and, if so, fetches /health and prints a formatted table (or raw
 // JSON with --json).
 func newStatusCommand() *cobra.Command {
@@ -38,14 +38,14 @@ func newStatusCommand() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show status of the running VORTEX server",
+		Short: "Show status of the running Gubern server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
-			alive, pid, err := pidfile.IsRunning(pidfilePath)
+			alive, pid, err := pidfile.IsRunning(resolvePidfile(pidfilePath))
 			if errors.Is(err, os.ErrNotExist) || (err == nil && !alive) {
-				fmt.Fprintln(out, "VORTEX is not running")
+				fmt.Fprintln(out, "Gubern is not running")
 				return errNotRunning
 			}
 			if err != nil {
@@ -70,14 +70,14 @@ func newStatusCommand() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVar(&pidfilePath, "pidfile", "vortex.pid", "path to the PID file")
-	c.Flags().IntVar(&apiPort, "api-port", 9090, "management API port")
+	c.Flags().StringVar(&pidfilePath, "pidfile", defaultPidfile, "path to the PID file")
+	c.Flags().IntVar(&apiPort, "api-port", defaultAPIPort(), "management API port")
 	c.Flags().BoolVar(&jsonOut, "json", false, "output raw JSON from /health instead of a table")
 	return c
 }
 
 func fetchHealth(apiPort int) ([]byte, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/health", apiPort)
+	url := "http://" + localAPIAddr(apiPort) + "/health"
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -97,5 +97,5 @@ func printStatusTable(out io.Writer, pid, apiPort int, h statusHealth) {
 	fmt.Fprintf(out, "Uptime:   %s\n", h.Uptime)
 	fmt.Fprintf(out, "Config:   %s (hash: %s)\n", flags.configPath, shortHash(h.ConfigHash))
 	fmt.Fprintf(out, "Cluster:  %s\n", h.ClusterName)
-	fmt.Fprintf(out, "API:      http://127.0.0.1:%d\n", apiPort)
+	fmt.Fprintf(out, "API:      http://%s\n", localAPIAddr(apiPort))
 }

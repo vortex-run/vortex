@@ -1,4 +1,4 @@
-// Package api hosts VORTEX's management HTTP server. In M1.2 this is just a
+// Package api hosts Gubern's management HTTP server. In M1.2 this is just a
 // health endpoint that reports liveness and the active config hash, so a reload
 // can be verified externally (e.g. curl localhost:9090/health). It is built on
 // net/http from the standard library (Non-Negotiable Rule #10).
@@ -10,18 +10,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/dashboard"
-	proxyhttp "github.com/vortex-run/vortex/internal/proxy/http"
-	"github.com/vortex-run/vortex/internal/security"
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/dashboard"
+	proxyhttp "github.com/sandeepbollavaram/vortex/internal/proxy/http"
+	"github.com/sandeepbollavaram/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // DefaultAddr is the management server's default listen address.
@@ -34,6 +36,7 @@ const correlationHeader = "X-Correlation-ID"
 // Server is the management HTTP server.
 type Server struct {
 	srv       *http.Server
+	ln        net.Listener // set by Listen; Start serves on it
 	holder    *config.Holder
 	log       *slog.Logger
 	version   string
@@ -94,8 +97,11 @@ type Server struct {
 	// webhooks maps /webhook/<platform> paths to rate-limited, signature-self-
 	// verifying handlers (Telegram/WhatsApp/Slack). Set via SetWebhooks.
 	webhooks map[string]http.Handler
-	// studioHandler serves the VORTEX Studio tree under /studio/ (auth-gated).
+	// studioHandler serves the Gubern Studio tree under /studio/ (auth-gated).
 	studioHandler http.Handler
+
+	reloadMu   sync.Mutex
+	lastReload *ReloadStatus // see RecordReload
 	// forgeRuntime backs the /api/forge endpoints. Optional; nil yields 503.
 	forgeRuntime ForgeRuntime
 	// logBuffer backs GET /api/logs (recent structured log lines). Optional.
@@ -122,8 +128,9 @@ type Server struct {
 	keyStatusProvider func() KeyStatusInfo
 
 	// a2aHandler serves the A2A protocol tree under /a2a/ (agent teams). It is
-	// NOT auth-gated: agents call one another over loopback, and the cards
-	// expose no secrets. Wired via SetA2AHandler; nil yields 404.
+	// outside API-key auth; the caller wraps it in a2a.RequireToken so only the
+	// in-process coordinator can reach it. Wired via SetA2AHandler; nil yields
+	// 404.
 	a2aHandler http.Handler
 	// teamAgents backs GET /api/team/agents + /api/team/status (auth-gated
 	// views of the agent team). Nil yields an empty list.
@@ -140,7 +147,7 @@ type Server struct {
 	checkpoints CheckpointProvider
 
 	// trustLoopback controls whether loopback callers bypass auth on the
-	// control plane. Default true (on-box `vortex reload`/`stop` work without a
+	// control plane. Default true (on-box `gubern reload`/`stop` work without a
 	// key). Set false for deployments behind a same-host reverse proxy, where
 	// every request presents a loopback RemoteAddr and the bypass would expose
 	// the control plane (production audit M1). The destructive
@@ -195,6 +202,8 @@ type StatusInfo struct {
 	WorkingDir      string   `json:"working_dir"`
 	Routes          int      `json:"routes"`
 	RouteNames      []string `json:"route_names,omitempty"`
+	// LastReload is nil until the first reload.
+	LastReload *ReloadStatus `json:"last_reload,omitempty"`
 }
 
 // SecretStatus is one declared secret's set/unset state (never its value).
@@ -373,7 +382,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 		globalLimiter: security.NewGlobalRateLimiter(0),
 		burst:         security.NewBurstProtection(security.BurstProtectionConfig{}),
 		// Loopback trust defaults on; operators behind a same-host proxy set
-		// VORTEX_TRUST_LOOPBACK=false so a loopback RemoteAddr does not bypass
+		// GUBERN_TRUST_LOOPBACK=false so a loopback RemoteAddr does not bypass
 		// control-plane auth (production audit M1).
 		trustLoopback: loopbackTrustEnabled(),
 	}
@@ -388,9 +397,9 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// (if one has been wired via SetAuth) so a missing/invalid credential is
 	// rejected before the handler runs.
 	mux.Handle("POST /internal/reload", s.protected(http.HandlerFunc(s.handleInternalReload)))
-	// /internal/shutdown is the SIGTERM equivalent used by `vortex stop` from
+	// /internal/shutdown is the SIGTERM equivalent used by `gubern stop` from
 	// the same host, so it honours loopback trust like reload. Operators behind
-	// a same-host reverse proxy set VORTEX_TRUST_LOOPBACK=false to require a
+	// a same-host reverse proxy set GUBERN_TRUST_LOOPBACK=false to require a
 	// credential here too (production audit M1) — see protected().
 	mux.Handle("POST /internal/shutdown", s.protected(http.HandlerFunc(s.handleInternalShutdown)))
 	// /metrics is protected like the control plane: reachable from localhost
@@ -432,7 +441,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("GET /api/agents/history", s.requireAPIKey(http.HandlerFunc(s.handleAgentHistory)))
 	mux.Handle("GET /api/agents/history/{id}", s.requireAPIKey(http.HandlerFunc(s.handleAgentSessionHistory)))
 
-	// VORTEX Forge (M13) — autonomous app builder. Data-plane: requires a key.
+	// Gubern Forge (M13) — autonomous app builder. Data-plane: requires a key.
 	mux.Handle("POST /api/forge/build", s.requireAPIKey(http.HandlerFunc(s.handleForgeBuild)))
 	mux.Handle("GET /api/forge/status/{id}", s.requireAPIKey(http.HandlerFunc(s.handleForgeStatus)))
 	mux.Handle("GET /api/forge/jobs", s.requireAPIKey(http.HandlerFunc(s.handleForgeJobs)))
@@ -444,7 +453,7 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	mux.Handle("POST /api/notify", s.requireAPIKey(http.HandlerFunc(s.handleNotify)))
 
 	// OpenAI-compatible surface (upgrade 3): lets any OpenAI-speaking tool
-	// (Claude Code, Aider, Cline, Cursor) use VORTEX as its AI backend. Data
+	// (Claude Code, Aider, Cline, Cursor) use Gubern as its AI backend. Data
 	// plane — requires a key (Bearer or X-API-Key) even from localhost.
 	mux.Handle("GET /v1/models", s.requireAPIKey(http.HandlerFunc(s.handleOpenAIModels)))
 	mux.Handle("POST /v1/chat/completions", s.requireAPIKey(http.HandlerFunc(s.handleChatCompletions)))
@@ -455,11 +464,13 @@ func New(addr string, holder *config.Holder, version string, log *slog.Logger) *
 	// route through the same dispatcher.
 	mux.HandleFunc("/webhook/", s.handleWebhook)
 
-	// VORTEX Studio (M12): browser IDE/terminal/db/git, auth-gated.
+	// Gubern Studio (M12): browser IDE/terminal/db/git, auth-gated.
 	mux.HandleFunc("/studio/", s.handleStudio)
 
-	// A2A protocol tree (agent teams). Loopback agent-to-agent traffic; cards
-	// expose no secrets, so not auth-gated. 404 when team mode is off.
+	// A2A protocol tree (agent teams). Not behind API-key auth: the handler set
+	// via SetA2AHandler is wrapped in a2a.RequireToken, a per-process token only
+	// the in-process coordinator holds (RPC submits tasks that write files).
+	// 404 when team mode is off.
 	mux.HandleFunc("/a2a/", s.handleA2A)
 	mux.Handle("GET /api/team/agents", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
 	mux.Handle("GET /api/team/status", s.requireAPIKey(http.HandlerFunc(s.handleTeamAgents)))
@@ -611,13 +622,13 @@ func (s *Server) keyLimit(h http.Handler) http.Handler {
 // protected wraps h with the auth middleware (if wired) — except for loopback
 // requests, which are allowed through without a credential WHEN loopback trust
 // is enabled (the default). The /internal/* control-plane endpoints stand in
-// for SIGHUP/SIGTERM used by `vortex reload`/`stop`, so an on-box call is
+// for SIGHUP/SIGTERM used by `gubern reload`/`stop`, so an on-box call is
 // implicitly trusted. Operators behind a same-host reverse proxy disable the
-// bypass with VORTEX_TRUST_LOOPBACK=false (production audit M1). With no auth
+// bypass with GUBERN_TRUST_LOOPBACK=false (production audit M1). With no auth
 // wired the handler runs unchanged.
 func (s *Server) protected(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
+		if s.authMW == nil || (s.trustLoopback && loopbackTrusted(r)) {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -626,9 +637,9 @@ func (s *Server) protected(h http.Handler) http.Handler {
 }
 
 // loopbackTrustEnabled reports whether loopback callers bypass control-plane
-// auth. Enabled by default; set VORTEX_TRUST_LOOPBACK=false/0/no to disable.
+// auth. Enabled by default; set GUBERN_TRUST_LOOPBACK=false/0/no to disable.
 func loopbackTrustEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("VORTEX_TRUST_LOOPBACK"))) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GUBERN_TRUST_LOOPBACK"))) {
 	case "false", "0", "no", "off":
 		return false
 	default:
@@ -707,11 +718,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// trusted like the rest of the control plane; remote authenticated callers
 	// read it from /api/status instead. When no auth is wired (tests/legacy)
 	// the field is populated as before so existing behaviour is preserved.
-	if s.authMW == nil || (s.trustLoopback && localhostOnly(r)) {
+	// Routes follow the same rule: /health is public, and the route list
+	// (names, listen addresses, live connection counts) maps the deployment
+	// for anyone on the internet. Not authenticating a key here is deliberate:
+	// a bcrypt check per request on a public endpoint is a CPU lever.
+	if s.authMW == nil || (s.trustLoopback && loopbackTrusted(r)) {
 		resp.ClusterName = cfg.Cluster.Name
-	}
-	if s.routeStats != nil {
-		resp.Routes = s.routeStats()
+		if s.routeStats != nil {
+			resp.Routes = s.routeStats()
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -747,12 +762,32 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// Start begins serving in a background goroutine. It returns immediately; serve
+// Listen binds the management address now, so a busy port is a startup
+// error instead of a log line from a goroutine. Without it the process kept
+// running with no management API: no /health, no auth'd API, and on Windows
+// no way for `gubern stop` (which goes through /internal/shutdown) to reach it.
+func (s *Server) Listen() error {
+	ln, err := net.Listen("tcp", s.srv.Addr)
+	if err != nil {
+		return err
+	}
+	s.ln = ln
+	return nil
+}
+
+// Start begins serving in a background goroutine on the listener from Listen
+// (or binds itself if Listen wasn't called). It returns immediately; serve
 // errors other than graceful shutdown are logged.
 func (s *Server) Start() {
 	go func() {
 		s.log.Info("management API listening", "addr", s.srv.Addr)
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.ln != nil {
+			err = s.srv.Serve(s.ln)
+		} else {
+			err = s.srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			s.log.Error("management API stopped unexpectedly", "err", err)
 		}
 	}()

@@ -1,4 +1,4 @@
-// Package studio implements VORTEX Studio (build plan M12): a browser-based
+// Package studio implements Gubern Studio (build plan M12): a browser-based
 // IDE and operations console served from the binary. It manages an external
 // code-server (VS Code in the browser) process, a WebSocket terminal, a browser
 // database GUI, and a Git panel — all mounted under /studio/ by the management
@@ -11,6 +11,8 @@ package studio
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +23,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,9 +38,9 @@ var ErrCodeServerNotInstalled = errors.New("studio: code-server binary not insta
 type CodeServerConfig struct {
 	BinaryPath   string // path to code-server; auto-detected when empty
 	WorkspaceDir string // directory to open
-	Port         int    // internal bind port (default 8080)
-	Auth         string // "none" — VORTEX handles auth at the edge
-	CertFile     string // optional; VORTEX serves TLS, code-server stays plaintext
+	Port         int    // Windows only: loopback port (default: a free one)
+	Auth         string // "none" — Gubern handles auth at the edge
+	CertFile     string // optional; Gubern serves TLS, code-server stays plaintext
 	DataDir      string // code-server --user-data-dir
 	Logger       *slog.Logger
 }
@@ -48,13 +53,33 @@ var commonCodeServerPaths = []string{
 
 // CodeServer manages a code-server subprocess and proxies HTTP/WebSocket traffic
 // to it.
+//
+// code-server runs with --auth none (Gubern authenticates /studio/), so
+// whoever can connect to it gets an IDE and a shell. On Linux and macOS it
+// therefore listens on a Unix socket in a fresh 0700 directory, which only
+// this user can reach. A loopback TCP port would be open to every local user
+// and to anything Gubern itself forwards there: with the old fixed :8080, a
+// route whose backend is 127.0.0.1:8080 (the README example) published the
+// IDE to the internet. On Windows, where Node can't listen on a socket path,
+// it falls back to a free loopback port.
 type CodeServer struct {
-	cfg  CodeServerConfig
-	log  *slog.Logger
-	addr string // 127.0.0.1:<port>
+	cfg       CodeServerConfig
+	log       *slog.Logger
+	addr      string // 127.0.0.1:<port>, when socket is empty
+	socket    string // Unix socket path
+	socketDir string // removed on Stop
+	// password is code-server's per-launch random password, used only in TCP
+	// mode (Windows). A loopback port, unlike a 0700 socket directory, is
+	// reachable by every local account and process, so --auth none there
+	// handed any of them an editor and terminal as this user (audit NV-02).
+	password string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
+
+	// session holds the cookies from Gubern's own login to code-server; the
+	// proxy attaches them so Studio users never see code-server's prompt.
+	session atomic.Pointer[[]*http.Cookie]
 }
 
 // resolveBinary returns the code-server binary path, probing common locations
@@ -87,9 +112,6 @@ func resolveBinary(cfg CodeServerConfig) (string, error) {
 // the binary is missing (callers treat this as a non-fatal degraded mode), or
 // an error when the workspace directory does not exist.
 func NewCodeServer(cfg CodeServerConfig) (*CodeServer, error) {
-	if cfg.Port == 0 {
-		cfg.Port = 8080
-	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -103,24 +125,92 @@ func NewCodeServer(cfg CodeServerConfig) (*CodeServer, error) {
 			return nil, fmt.Errorf("studio: workspace dir not found: %w", serr)
 		}
 	}
-	return &CodeServer{
-		cfg:  cfg,
-		log:  cfg.Logger,
-		addr: fmt.Sprintf("127.0.0.1:%d", cfg.Port),
-	}, nil
+	return &CodeServer{cfg: cfg, log: cfg.Logger}, nil
 }
 
-// Start launches the code-server subprocess and waits (up to 10s) for its port
-// to accept connections.
+// Start launches the code-server subprocess and waits (up to 10s) for it to
+// accept connections.
 func (c *CodeServer) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cmd != nil {
 		return nil // already running
 	}
-	args := []string{
-		"--bind-addr", c.addr,
-		"--auth", "none",
+	if err := c.chooseListener(); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, c.cfg.BinaryPath, c.args()...)
+	if c.password != "" {
+		// code-server reads its password from $PASSWORD; it never appears on
+		// the command line, where other local users could read it.
+		cmd.Env = append(os.Environ(), "PASSWORD="+c.password)
+	}
+	cmd.Stdout = logWriter{c.log, "code-server"}
+	cmd.Stderr = logWriter{c.log, "code-server"}
+	if err := cmd.Start(); err != nil {
+		c.removeSocketDir()
+		return fmt.Errorf("studio: starting code-server: %w", err)
+	}
+	c.cmd = cmd
+
+	if err := c.waitReady(10 * time.Second); err != nil {
+		_ = c.stopLocked()
+		return fmt.Errorf("studio: code-server did not become ready: %w", err)
+	}
+	if c.password != "" {
+		cookies, err := c.login(ctx)
+		if err != nil {
+			_ = c.stopLocked()
+			return fmt.Errorf("studio: logging in to code-server: %w", err)
+		}
+		c.session.Store(&cookies)
+	}
+	c.log.Info("code-server started", "listen", c.listenDesc(), "workspace", c.cfg.WorkspaceDir)
+	return nil
+}
+
+// chooseListener picks where code-server listens: a Unix socket in a new
+// private directory, or (Windows) a free loopback port.
+func (c *CodeServer) chooseListener() error {
+	if runtime.GOOS != "windows" {
+		dir, err := os.MkdirTemp("", "vortex-code-server-") // 0700
+		if err != nil {
+			return fmt.Errorf("studio: code-server socket dir: %w", err)
+		}
+		c.socketDir = dir
+		c.socket = filepath.Join(dir, "code-server.sock")
+		return nil
+	}
+	pw := make([]byte, 32)
+	if _, err := rand.Read(pw); err != nil {
+		return fmt.Errorf("studio: generating code-server password: %w", err)
+	}
+	c.password = hex.EncodeToString(pw)
+	port := c.cfg.Port
+	if port == 0 {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return fmt.Errorf("studio: picking a code-server port: %w", err)
+		}
+		port = l.Addr().(*net.TCPAddr).Port
+		_ = l.Close()
+	}
+	c.addr = fmt.Sprintf("127.0.0.1:%d", port)
+	return nil
+}
+
+// args returns code-server's command line for the chosen listener.
+func (c *CodeServer) args() []string {
+	var args []string
+	if c.socket != "" {
+		args = []string{"--socket", c.socket}
+	} else {
+		args = []string{"--bind-addr", c.addr}
+	}
+	if c.password != "" {
+		args = append(args, "--auth", "password")
+	} else {
+		args = append(args, "--auth", "none") // private 0700 socket dir
 	}
 	if c.cfg.DataDir != "" {
 		args = append(args, "--user-data-dir", c.cfg.DataDir)
@@ -128,20 +218,32 @@ func (c *CodeServer) Start(ctx context.Context) error {
 	if c.cfg.WorkspaceDir != "" {
 		args = append(args, c.cfg.WorkspaceDir)
 	}
-	cmd := exec.CommandContext(ctx, c.cfg.BinaryPath, args...)
-	cmd.Stdout = logWriter{c.log, "code-server"}
-	cmd.Stderr = logWriter{c.log, "code-server"}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("studio: starting code-server: %w", err)
-	}
-	c.cmd = cmd
+	return args
+}
 
-	if err := waitForPort(c.addr, 10*time.Second); err != nil {
-		_ = c.stopLocked()
-		return fmt.Errorf("studio: code-server did not become ready: %w", err)
+// listenDesc names the listener for logs.
+func (c *CodeServer) listenDesc() string {
+	if c.socket != "" {
+		return "unix:" + c.socket
 	}
-	c.log.Info("code-server started", "addr", c.addr, "workspace", c.cfg.WorkspaceDir)
-	return nil
+	return c.addr
+}
+
+// dial connects to code-server's listener.
+func (c *CodeServer) dial(ctx context.Context) (net.Conn, error) {
+	var d net.Dialer
+	if c.socket != "" {
+		return d.DialContext(ctx, "unix", c.socket)
+	}
+	return d.DialContext(ctx, "tcp", c.addr)
+}
+
+// removeSocketDir deletes the private socket directory, if any.
+func (c *CodeServer) removeSocketDir() {
+	if c.socketDir != "" {
+		_ = os.RemoveAll(c.socketDir)
+		c.socketDir, c.socket = "", ""
+	}
 }
 
 // Stop sends SIGTERM (or the platform equivalent via Process.Kill on Windows)
@@ -170,7 +272,61 @@ func (c *CodeServer) stopLocked() error {
 		_ = proc.Kill()
 	}
 	c.cmd = nil
+	c.session.Store(nil)
+	c.removeSocketDir()
 	return nil
+}
+
+// login signs in to code-server with the per-launch password and returns the
+// session cookies it sets. It does not follow the post-login redirect.
+func (c *CodeServer) login(ctx context.Context) ([]*http.Cookie, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return c.dial(ctx)
+		}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	form := url.Values{"password": {c.password}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://code-server/login", strings.NewReader(form))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	cookies := resp.Cookies()
+	if resp.StatusCode >= 400 || len(cookies) == 0 {
+		return nil, fmt.Errorf("login returned %s with %d cookie(s)", resp.Status, len(cookies))
+	}
+	return cookies, nil
+}
+
+// withSession replaces any client cookies that share a name with Gubern's
+// code-server session cookies (so a client cannot pick the session) and adds
+// Gubern's own.
+func withSession(h http.Header, session []*http.Cookie) {
+	ours := map[string]bool{}
+	for _, ck := range session {
+		ours[ck.Name] = true
+	}
+	r := &http.Request{Header: http.Header{"Cookie": h.Values("Cookie")}}
+	var parts []string
+	for _, ck := range r.Cookies() {
+		if !ours[ck.Name] {
+			parts = append(parts, ck.Name+"="+ck.Value)
+		}
+	}
+	for _, ck := range session {
+		parts = append(parts, ck.Name+"="+ck.Value)
+	}
+	h.Del("Cookie")
+	if len(parts) > 0 {
+		h.Set("Cookie", strings.Join(parts, "; "))
+	}
 }
 
 // IsRunning reports whether the subprocess is currently running.
@@ -184,10 +340,31 @@ func (c *CodeServer) IsRunning() bool {
 // code-server backend, preserving WebSocket upgrades (used by code-server for
 // live updates).
 func (c *CodeServer) ProxyHandler() http.Handler {
-	target := &url.URL{Scheme: "http", Host: c.addr}
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	// The default director preserves the path; httputil already handles
-	// Connection/Upgrade headers for WebSockets in Go 1.12+.
+	// The URL host is only a label: every connection goes through dial.
+	target := &url.URL{Scheme: "http", Host: "code-server"}
+	proxy := &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(target)
+		// SetURL sets Host to the target's; keep the client's, which
+		// code-server's WebSocket origin check compares against.
+		pr.Out.Host = pr.In.Host
+		pr.SetXForwarded()
+		// The caller's Gubern key is not code-server's business (or its
+		// extensions').
+		pr.Out.Header.Del("Authorization")
+		pr.Out.Header.Del("X-API-Key")
+		if s := c.session.Load(); s != nil {
+			withSession(pr.Out.Header, *s)
+		}
+	}}
+	// No Proxy field: HTTP_PROXY must not apply to a local backend.
+	proxy.Transport = &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return c.dial(ctx)
+		},
+		MaxIdleConns:    16,
+		IdleConnTimeout: 90 * time.Second,
+	}
+	// httputil handles Connection/Upgrade headers for WebSockets.
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
 		c.log.Warn("code-server proxy error", "err", err)
 		http.Error(w, "code-server unavailable", http.StatusBadGateway)
@@ -195,18 +372,21 @@ func (c *CodeServer) ProxyHandler() http.Handler {
 	return proxy
 }
 
-// waitForPort dials addr until it accepts a connection or the timeout elapses.
-func waitForPort(addr string, timeout time.Duration) error {
+// waitReady dials code-server until it accepts a connection or the timeout
+// elapses.
+func (c *CodeServer) waitReady(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		conn, err := c.dial(ctx)
+		cancel()
 		if err == nil {
 			_ = conn.Close()
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for %s", addr)
+	return fmt.Errorf("timeout waiting for %s", c.listenDesc())
 }
 
 // logWriter adapts a slog.Logger to an io.Writer for subprocess output.

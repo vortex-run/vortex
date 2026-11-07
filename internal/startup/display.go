@@ -1,4 +1,4 @@
-// Package startup renders VORTEX's boot sequence for humans (brand redesign
+// Package startup renders Gubern's boot sequence for humans (brand redesign
 // part 2): a banner, one ✓/✗ line per subsystem, and a final "ready" block —
 // instead of a raw structured-log dump. In verbose mode (or when stdout is not
 // an interactive terminal, e.g. under systemd) every method is a no-op and the
@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // Display prints the clean boot sequence. The zero value is unusable;
@@ -38,7 +38,7 @@ func (d *Display) Active() bool { return !d.verbose }
 // bannerWidth is the inner width of the banner / ready boxes.
 const bannerWidth = 47
 
-// Banner prints the VORTEX mark, version, and tagline in a box.
+// Banner prints the Gubern mark, version, and tagline in a box.
 func (d *Display) Banner() {
 	if d.verbose {
 		return
@@ -95,7 +95,7 @@ type ReadyConfig struct {
 	Telegram   bool
 }
 
-// Ready prints the final "VORTEX is running" block with the addresses and
+// Ready prints the final "Gubern is running" block with the addresses and
 // next actions a new user needs.
 func (d *Display) Ready(cfg ReadyConfig) {
 	if d.verbose {
@@ -104,10 +104,10 @@ func (d *Display) Ready(cfg ReadyConfig) {
 	base := "http://localhost" + normalizeAddr(cfg.APIAddr)
 	fmt.Fprintln(d.out)
 	fmt.Fprintln(d.out, strings.Repeat(brand.IconSep, bannerWidth))
-	fmt.Fprintf(d.out, "%s VORTEX is running\n\n", brand.IconSuccess)
+	fmt.Fprintf(d.out, "%s Gubern is running\n\n", brand.IconSuccess)
 	fmt.Fprintf(d.out, "  Dashboard:    %s/dashboard\n", base)
-	fmt.Fprintln(d.out, "  Agent chat:   run: vortex ui")
-	fmt.Fprintln(d.out, "  Coding mode:  run: vortex code")
+	fmt.Fprintln(d.out, "  Agent chat:   run: gubern ui")
+	fmt.Fprintln(d.out, "  Coding mode:  run: gubern code")
 	fmt.Fprintln(d.out, "  Docs:         https://vortex.run/docs")
 	fmt.Fprintln(d.out)
 	var facts []string
@@ -159,7 +159,7 @@ func Explain(errMsg string) string {
 			addr = m[1]
 		}
 		return "Could not reach cluster peer at " + addr + ".\n" +
-			"If running single node, remove peers from vortex.cue: cluster: peers: []"
+			"If running single node, remove peers from gubern.cue: cluster: peers: []"
 
 	case strings.Contains(low, "secret") &&
 		(strings.Contains(low, "missing") || strings.Contains(low, "not found") || strings.Contains(low, "not set")):
@@ -168,7 +168,7 @@ func Explain(errMsg string) string {
 			name = m[1]
 		}
 		return "Secret '" + name + "' is not set.\n" +
-			"Set it with: vortex secret set " + name + " <value>"
+			"Set it with: gubern secret set " + name + " <value>"
 
 	case strings.Contains(low, "certificate") || strings.Contains(low, "tls"):
 		return "TLS certificate error. If testing locally, certificates will be\n" +

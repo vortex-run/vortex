@@ -14,7 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // routeHeader carries the route name into the request so the middleware can

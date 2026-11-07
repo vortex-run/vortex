@@ -42,7 +42,7 @@ func TestPlugin_RemoveInfoRegister(t *testing.T) {
 }
 
 func TestPlugin_ListEmptyRegistry(t *testing.T) {
-	t.Setenv("VORTEX_PLUGIN_DIR", t.TempDir())
+	t.Setenv("GUBERN_PLUGIN_DIR", t.TempDir())
 
 	c := newPluginCommand()
 	var buf bytes.Buffer

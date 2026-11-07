@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // Notifier delivers pipeline results. Satisfied by *messaging.Router via an
@@ -270,7 +270,7 @@ func (a *DataPipelineAgent) notify(ctx context.Context, request string, r *Pipel
 		return
 	}
 	body := fmt.Sprintf("📊 Analysis: %s\nRows: %d\nSaved: %s", request, r.Rows, r.DataPath)
-	_ = a.notifier.Notify(ctx, "VORTEX Data Pipeline", body)
+	_ = a.notifier.Notify(ctx, "Gubern Data Pipeline", body)
 	if r.ChartPath != "" {
 		if data, err := os.ReadFile(r.ChartPath); err == nil { //nolint:gosec // own output
 			_ = a.notifier.NotifyFile(ctx, filepath.Base(r.ChartPath), data, "Chart: "+request)

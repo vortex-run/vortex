@@ -156,9 +156,9 @@ func (m *RecoveryManager) handleRecovery(ctx context.Context, event HealthEvent,
 	delete(m.lastRun, rule.CheckName)
 	m.mu.Unlock()
 
-	body := fmt.Sprintf("✅ VORTEX Recovered\nCheck: %s is healthy again\nDowntime: %s",
+	body := fmt.Sprintf("✅ Gubern Recovered\nCheck: %s is healthy again\nDowntime: %s",
 		event.Name, downtime.Round(time.Second))
-	_ = m.notify(ctx, "info", "VORTEX Recovered", body)
+	_ = m.notify(ctx, "info", "Gubern Recovered", body)
 	m.auditAction(ctx, event.Name, "recovered", "ok", nil, 0)
 	return nil
 }
@@ -167,9 +167,9 @@ func (m *RecoveryManager) handleRecovery(ctx context.Context, event HealthEvent,
 func (m *RecoveryManager) execute(ctx context.Context, event HealthEvent, rule RecoveryRule) (string, error) {
 	// NotifyOnly downgrades any action to an alert.
 	if rule.NotifyOnly || rule.Action == ActionNotify {
-		body := fmt.Sprintf("⚠️ VORTEX Health Alert\nCheck: %s\nError: %s\nConsecutive failures: %d\nTime: %s",
+		body := fmt.Sprintf("⚠️ Gubern Health Alert\nCheck: %s\nError: %s\nConsecutive failures: %d\nTime: %s",
 			event.Name, event.Error, event.Consecutive, event.Timestamp.Format(time.RFC3339))
-		if err := m.notify(ctx, "critical", "VORTEX Health Alert", body); err != nil {
+		if err := m.notify(ctx, "critical", "Gubern Health Alert", body); err != nil {
 			return "notify failed", err
 		}
 		return "notified", nil

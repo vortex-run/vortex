@@ -130,7 +130,7 @@ func TestWatchdog_ExitsOnContextCancel(t *testing.T) {
 func TestWatchdog_PidfileAliveForRealProcess(t *testing.T) {
 	// Write our own PID to a pidfile; the watchdog should see it as alive.
 	dir := t.TempDir()
-	pf := filepath.Join(dir, "vortex.pid")
+	pf := filepath.Join(dir, "gubern.pid")
 	if err := os.WriteFile(pf, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
 	}

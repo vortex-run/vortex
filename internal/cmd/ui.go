@@ -9,30 +9,30 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/tui"
-	tuiapp "github.com/vortex-run/vortex/internal/tui/app"
+	"github.com/sandeepbollavaram/vortex/internal/tui"
+	tuiapp "github.com/sandeepbollavaram/vortex/internal/tui/app"
 )
 
-// errUINotRunning signals that `vortex ui` found no running server (and was not
+// errUINotRunning signals that `gubern ui` found no running server (and was not
 // asked to start one); the message was already printed, so Execute exits 1
 // without an extra generic log line.
 var errUINotRunning = errors.New("ui: vortex is not running")
 
-// newUICommand builds `vortex ui`.
+// newUICommand builds `gubern ui`.
 func newUICommand() *cobra.Command {
 	var addr, key string
 	var start bool
 	c := &cobra.Command{
 		Use:   "ui",
-		Short: "Open the VORTEX terminal dashboard",
+		Short: "Open the Gubern terminal dashboard",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runUI(cmd.Context(), addr, key, start)
 		},
 	}
-	c.Flags().StringVar(&addr, "addr", "http://localhost:9090", "VORTEX API address")
-	c.Flags().StringVar(&key, "key", "", "API key (reads VORTEX_API_KEY if empty)")
-	c.Flags().BoolVar(&start, "start", false, "start an embedded server if VORTEX is not running")
+	c.Flags().StringVar(&addr, "addr", defaultAPIBase(), "Gubern API address (default from GUBERN_API_LISTEN)")
+	c.Flags().StringVar(&key, "key", "", "API key (reads GUBERN_API_KEY if empty)")
+	c.Flags().BoolVar(&start, "start", false, "start an embedded server if Gubern is not running")
 	return c
 }
 
@@ -45,9 +45,9 @@ func runUI(ctx context.Context, addr, key string, start bool) error {
 
 	if !client.IsConnected() {
 		if !start {
-			fmt.Println("VORTEX is not running.")
-			fmt.Println("Start it with: vortex start")
-			fmt.Println("Or run:        vortex ui --start")
+			fmt.Println("Gubern is not running.")
+			fmt.Println("Start it with: gubern start")
+			fmt.Println("Or run:        gubern ui --start")
 			return errUINotRunning
 		}
 		if err := startEmbeddedServer(ctx, client); err != nil {
@@ -67,7 +67,7 @@ func startEmbeddedServer(ctx context.Context, client *tui.Client) error {
 	go func() {
 		// runStart blocks until shutdown; run it detached. Errors surface via the
 		// readiness poll below.
-		_ = runStart(ctx, "vortex.pid")
+		_ = runStart(ctx, defaultPidfile)
 	}()
 
 	deadline := time.Now().Add(5 * time.Second)

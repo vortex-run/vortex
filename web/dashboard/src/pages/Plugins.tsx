@@ -25,7 +25,7 @@ export function Plugins() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <a
-          href="https://github.com/vortex-run/vortex"
+          href="https://github.com/sandeepbollavaram/vortex"
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
@@ -43,7 +43,7 @@ export function Plugins() {
           <div className="text-foreground">No plugins installed</div>
           <p className="mt-1 text-sm">
             Install a plugin:{" "}
-            <code className="font-mono">vortex plugin install &lt;path&gt;</code>
+            <code className="font-mono">gubern plugin install &lt;path&gt;</code>
           </p>
         </div>
       ) : (

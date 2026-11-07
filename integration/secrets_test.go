@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
-// secretsConfig renders a vortex.cue declaring the given secret keys and no
+// secretsConfig renders a gubern.cue declaring the given secret keys and no
 // routes (secrets are independent of the data plane).
 func secretsConfig(cluster string, keys string) string {
 	return `cluster: { name: "` + cluster + `" }
@@ -23,7 +23,7 @@ observability: { log_level: "info", log_sink: "stderr" }
 
 func TestSecrets_SetAndList(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, secretsConfig("secret-cluster", `"TEST_KEY"`))
@@ -44,7 +44,7 @@ func TestSecrets_SetAndList(t *testing.T) {
 
 func TestSecrets_RevealValue(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	cfg := testutil.WriteTestConfig(t, secretsConfig("secret-cluster", `"TEST_KEY"`))
@@ -65,7 +65,7 @@ func TestSecrets_RevealValue(t *testing.T) {
 
 func TestSecrets_MissingSecretWarnsNotFails(t *testing.T) {
 	storeDir := t.TempDir()
-	t.Setenv("VORTEX_SECRET_STORE", storeDir)
+	t.Setenv("GUBERN_SECRET_STORE", storeDir)
 
 	bin := getNetBinary(t)
 	// Declare a secret that is never set.

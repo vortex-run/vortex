@@ -9,6 +9,13 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    ignore:
+      # raft v1.7.3 and memberlist v0.5.4 import github.com/hashicorp/go-metrics/compat,
+      # which go-metrics v0.7.0 removed (v0.6.x still ships it), so bumping this
+      # indirect dependency to v0.7 breaks `go mod tidy` and fails the whole
+      # grouped update. Remove once raft and memberlist stop importing compat.
+      - dependency-name: github.com/hashicorp/go-metrics
+        versions: [">= 0.7.0"]
     groups:
       go-dependencies:
         patterns:

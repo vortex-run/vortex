@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // FriendlyError is a structured, human-facing error explanation.
@@ -49,29 +49,29 @@ func NewFriendly(err error) *FriendlyError {
 			Title:   "Network connection failed",
 			Detail:  "Could not connect to " + addr,
 			Why:     "The target host is not reachable or the port is not open",
-			Fix:     "Check the address in vortex.cue.\nIf running single node, remove unreachable peers: cluster: peers: []",
+			Fix:     "Check the address in gubern.cue.\nIf running single node, remove unreachable peers: cluster: peers: []",
 			DocsURL: "https://vortex.run/docs/cluster",
 			Code:    "NET_TIMEOUT",
 		}
 
-	case (strings.Contains(low, "rate limit") || strings.Contains(low, "429")) && !strings.Contains(low, "connection"):
+	case (strings.Contains(low, "rate limit") || hasStatus(low, "429")) && !strings.Contains(low, "connection"):
 		provider := providerOr(msg, "the AI provider")
 		return &FriendlyError{
 			Title:   "AI provider rate limited",
 			Detail:  "Too many requests to " + provider,
 			Why:     "Your API key has hit its rate limit",
-			Fix:     "Wait a minute, or add backup keys:\nvortex keys add --provider <name> --key <key>",
+			Fix:     "Wait a minute, or add backup keys:\ngubern keys add --provider <name> --key <key>",
 			DocsURL: "https://vortex.run/docs/api-keys",
 			Code:    "AI_RATE_LIMIT",
 		}
 
-	case strings.Contains(low, "invalid api key") || strings.Contains(low, "401") || strings.Contains(low, "unauthorized"):
+	case strings.Contains(low, "invalid api key") || hasStatus(low, "401") || strings.Contains(low, "unauthorized"):
 		provider := providerOr(msg, "the AI provider")
 		return &FriendlyError{
 			Title:   "Invalid API key",
 			Detail:  "Authentication failed with " + provider,
 			Why:     "The API key is incorrect or expired",
-			Fix:     "Run vortex setup to configure a new key",
+			Fix:     "Run gubern setup to configure a new key",
 			DocsURL: "https://vortex.run/docs/api-keys",
 			Code:    "AI_AUTH",
 		}
@@ -85,8 +85,8 @@ func NewFriendly(err error) *FriendlyError {
 		return &FriendlyError{
 			Title:   "Secret not configured",
 			Detail:  "Secret '" + name + "' is required but not set",
-			Why:     "This secret was declared in vortex.cue but has not been given a value",
-			Fix:     "Set it with: vortex secret set " + name + " <value>",
+			Why:     "This secret was declared in gubern.cue but has not been given a value",
+			Fix:     "Set it with: gubern secret set " + name + " <value>",
 			DocsURL: "https://vortex.run/docs/secrets",
 			Code:    "SECRET_MISSING",
 		}
@@ -110,7 +110,7 @@ func NewFriendly(err error) *FriendlyError {
 			Title:  "Service not running",
 			Detail: "Could not connect to " + addr,
 			Why:    "The service at this address is not accepting connections",
-			Fix:    "Start the target service, or check the address in vortex.cue",
+			Fix:    "Start the target service, or check the address in gubern.cue",
 			Code:   "CONN_REFUSED",
 		}
 
@@ -118,7 +118,7 @@ func NewFriendly(err error) *FriendlyError {
 		return &FriendlyError{
 			Title:  "Permission denied",
 			Detail: msg,
-			Why:    "VORTEX does not have permission to access this file or directory",
+			Why:    "Gubern does not have permission to access this file or directory",
 			Fix:    "Check file permissions, or run with appropriate user privileges",
 			Code:   "PERM_DENIED",
 		}
@@ -128,7 +128,7 @@ func NewFriendly(err error) *FriendlyError {
 			Title:  "Unexpected error",
 			Detail: msg,
 			Why:    "An unexpected error occurred",
-			Fix:    "Check the logs with: vortex start --verbose\nReport at: https://github.com/vortex-run/vortex/issues",
+			Fix:    "Check the logs with: gubern start --verbose\nReport at: https://github.com/sandeepbollavaram/vortex/issues",
 			Code:   "UNKNOWN",
 		}
 	}
@@ -181,4 +181,29 @@ func Format(err error) string {
 		return ""
 	}
 	return NewFriendly(err).String()
+}
+
+// hasStatus reports whether msg contains the HTTP status code as a number of
+// its own ("status 401", "401 Unauthorized"), not as digits inside something
+// else. A substring match classified a config error as "Invalid API key"
+// because its file path (a temp dir name) happened to contain 401.
+func hasStatus(msg, code string) bool {
+	for i := strings.Index(msg, code); i >= 0; {
+		before := i == 0 || !isDigitOrLetter(msg[i-1])
+		end := i + len(code)
+		after := end == len(msg) || !isDigitOrLetter(msg[end])
+		if before && after {
+			return true
+		}
+		next := strings.Index(msg[i+1:], code)
+		if next < 0 {
+			return false
+		}
+		i += 1 + next
+	}
+	return false
+}
+
+func isDigitOrLetter(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }

@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// requestReload sends SIGHUP, which VORTEX's lifecycle manager handles by
+// requestReload sends SIGHUP, which Gubern's lifecycle manager handles by
 // re-reading and re-validating the config. apiPort is unused on Unix.
 func requestReload(pid int, _ int) error {
 	proc, err := os.FindProcess(pid)

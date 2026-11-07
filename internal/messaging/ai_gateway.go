@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
 )
 
 // Provider names.
@@ -380,8 +382,15 @@ func (g *AIGateway) callDeepSeek(ctx context.Context, p AIProvider, prompt, syst
 	return text, tokens, nil
 }
 
-// callGemini calls Google's Gemini generateContent REST API. The API key is a
-// query parameter; the system prompt goes in systemInstruction.
+// geminiHeaders carries the API key in x-goog-api-key. It used to be a ?key=
+// query parameter, and net/http puts the URL in transport errors, so a
+// connection failure wrote the key into the returned error and the logs.
+func geminiHeaders(p AIProvider) map[string]string {
+	return map[string]string{"x-goog-api-key": p.APIKey}
+}
+
+// callGemini calls Google's Gemini generateContent REST API. The system
+// prompt goes in systemInstruction.
 func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, systemPrompt string) (string, int, error) {
 	base := p.Endpoint
 	if base == "" {
@@ -391,7 +400,7 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 	if model == "" {
 		model = "gemini-1.5-flash"
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, model, p.APIKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, neturl.PathEscape(model))
 
 	var out struct {
 		Candidates []struct {
@@ -405,7 +414,7 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 			TotalTokenCount int `json:"totalTokenCount"`
 		} `json:"usageMetadata"`
 	}
-	_, err := g.doJSON(ctx, url, nil, map[string]any{
+	_, err := g.doJSON(ctx, url, geminiHeaders(p), map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]any{{"text": prompt}}},
 		},
@@ -770,9 +779,37 @@ func (g *AIGateway) ModelIDs() []string {
 // providers: the caller asked for a specific model, so a failure surfaces
 // rather than silently answering with a different one. Returns the text and
 // the provider-reported token count.
+// ErrInvalidModel is returned for a caller-supplied model name that could
+// reshape the provider request URL.
+var ErrInvalidModel = errors.New("messaging: invalid model name")
+
+// validModelName reports whether a caller-supplied model is a single plain
+// identifier. The /v1 API passes any key holder's model string into the
+// Azure deployment and Gemini model URL paths; '/', '..', '?', '#' or '%'
+// would let it retarget the operator-credentialed request to another
+// deployment or endpoint (audit F-13). Real model IDs fit this set
+// (gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-flash, llama3.1:8b,
+// accounts/fireworks/... are configured, not passed through).
+func validModelName(m string) bool {
+	if m == "" || len(m) > 128 || m == "." || m == ".." {
+		return false
+	}
+	for _, c := range m {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '.' || c == '_' || c == ':' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (g *AIGateway) CompleteForModel(ctx context.Context, model, prompt, systemPrompt string) (string, int, error) {
 	if g.budgetExceeded() {
 		return "", 0, ErrBudgetExceeded
+	}
+	if model != "" && !validModelName(model) {
+		return "", 0, fmt.Errorf("%w: %q", ErrInvalidModel, model)
 	}
 	p, ok := g.providerForModel(model)
 	if !ok {

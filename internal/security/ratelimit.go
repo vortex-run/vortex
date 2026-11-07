@@ -1,4 +1,4 @@
-// Package security implements VORTEX's edge protection (build plan M3.7): an
+// Package security implements Gubern's edge protection (build plan M3.7): an
 // HTTP-layer token-bucket rate limiter keyed per client IP, an IP
 // allowlist/blocklist with Tor-exit and auto-ban support, and an edge
 // middleware that composes them. It is distinct from the M2.5 UDP rate limiter,
@@ -208,11 +208,34 @@ const clientIPHeader = "X-Vortex-Client-IP"
 
 // clientIP returns the request's client IP: the edge-resolved header if present,
 // otherwise the host portion of RemoteAddr.
+//
+// Only the edge's own resolution (carried in the request context) is used.
+// The X-Vortex-Client-IP header itself is client-controlled whenever the
+// edge isn't in front (its default: no allow-list or exit-node filter), so
+// trusting it let a client send a new fake address with every request and
+// never hit a per-route or global rate limit.
 func clientIP(r *http.Request) string {
-	if ip := r.Header.Get(clientIPHeader); ip != "" {
+	if ip, ok := r.Context().Value(clientIPKey{}).(string); ok && ip != "" {
 		return ip
 	}
 	return hostOnly(r.RemoteAddr)
+}
+
+// clientIPKey carries the edge-resolved client IP in the request context.
+type clientIPKey struct{}
+
+// ClientIPHeader is the header the edge sets for backends.
+const ClientIPHeader = clientIPHeader
+
+// WithClientIP records the edge-resolved client IP in ctx.
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey{}, ip)
+}
+
+// ClientIPFromContext returns the edge-resolved client IP, if the edge ran.
+func ClientIPFromContext(ctx context.Context) (string, bool) {
+	ip, ok := ctx.Value(clientIPKey{}).(string)
+	return ip, ok && ip != ""
 }
 
 // hostOnly strips the port from a host:port address, returning the input
@@ -540,7 +563,7 @@ func (b *BurstProtection) Allow(ip string) bool {
 		"ip", ip, "threshold", b.cfg.Threshold,
 		"window", b.cfg.Window.String(), "ban", b.cfg.BanFor.String())
 	if notify != nil {
-		go notify("🚨 VORTEX burst protection",
+		go notify("🚨 Gubern burst protection",
 			"IP "+ip+" exceeded "+strconv.Itoa(b.cfg.Threshold)+
 				" requests in "+b.cfg.Window.String()+
 				" — banned for "+b.cfg.BanFor.String())

@@ -1,4 +1,4 @@
-// Package specialists implements VORTEX's specialist agents (coder, tester,
+// Package specialists implements Gubern's specialist agents (coder, tester,
 // reviewer) that collaborate over the A2A protocol. Each embeds BaseAgent for
 // shared AI-completion, tool execution, and progress reporting; each overrides
 // HandleTask with its own focused behaviour.
@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // AIGateway is the completion interface specialists use (satisfied by the

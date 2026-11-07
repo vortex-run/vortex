@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/config"
 )
 
 // nsServer builds a server with in-memory namespace hooks reachable from
@@ -142,3 +142,17 @@ func httpBody(b []byte) readCloser { return readCloser{bytes.NewReader(b)} }
 type readCloser struct{ *bytes.Reader }
 
 func (readCloser) Close() error { return nil }
+
+func TestAPI_NamespaceCreateRejectsOversizedBody(t *testing.T) {
+	s := nsServer(t)
+	huge := `{"id":"ns-big","name":"` + string(bytes.Repeat([]byte("a"), 100<<10)) + `","org_id":"org-a"}`
+	req := loopbackReq(http.MethodPost, "/api/namespaces")
+	req.Body = httpBody([]byte(huge))
+	rec := serve(s, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("oversized create = %d, want 400", rec.Code)
+	}
+	if lrec := serve(s, loopbackReq(http.MethodGet, "/api/namespaces")); bytes.Contains(lrec.Body.Bytes(), []byte("ns-big")) {
+		t.Error("namespace created from an oversized request")
+	}
+}

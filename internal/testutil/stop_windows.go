@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -11,7 +12,7 @@ import (
 // stopProcess triggers shutdown via the localhost-only /internal/shutdown
 // endpoint (Windows has no SIGTERM), then waits for the child process to exit.
 //
-// It posts directly rather than shelling out to `vortex stop`: that subcommand
+// It posts directly rather than shelling out to `gubern stop`: that subcommand
 // runs its own liveness poll against the pidfile, which races the test's
 // not-yet-reaped child process on Windows and can spuriously time out. Posting
 // here and waiting on p.Cmd.Wait observes the real exit.
@@ -42,3 +43,9 @@ func waitExit(t *testing.T, p *VortexProcess, d time.Duration) {
 		t.Fatalf("vortex did not exit within %s", d)
 	}
 }
+
+// dumpStacks is Unix-only (SIGQUIT); Windows has no equivalent signal.
+func dumpStacks(*VortexProcess) {}
+
+// quitForStacks has no SIGQUIT equivalent on Windows; it just kills.
+func quitForStacks(p *os.Process) error { return p.Kill() }

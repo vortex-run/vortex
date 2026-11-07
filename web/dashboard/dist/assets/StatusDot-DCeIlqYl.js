@@ -1,0 +1,1 @@
+import{l as e}from"./react-B_0HfCOE.js";var t=e(),n={green:`bg-green-500`,amber:`bg-amber-500`,red:`bg-red-500`};function r({status:e}){return(0,t.jsx)(`span`,{className:`inline-block h-2.5 w-2.5 rounded-full ${n[e]}`})}export{r as t};

@@ -1,4 +1,4 @@
-# VORTEX continuous integration (build plan M1.6).
+# Gubern continuous integration (build plan M1.6).
 #
 # Runs tests and lint on every push and pull request. The merge gate is
 # Non-Negotiable Rule #9: `task test` must pass before merging.
@@ -62,13 +62,18 @@ jobs:
         # Same four paths as `task test:race:critical` (orchestration, agents, a2a, api).
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 -timeout 10m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
+        run: go test -race -count=1 -timeout 15m ./internal/orchestration/... ./internal/agents/... ./internal/a2a/... ./internal/api/...
 
       - name: Test (race)
         # ubuntu-latest has a C toolchain, so run the race detector on the
         # whole unit suite — the merge gate must catch data races on every
         # push/PR, not only at release time (audit M7). Bounded via Taskfile.
         run: task test:race
+
+      - name: Test (installer signature check)
+        # install.sh verifies checksums.txt.sig with OpenSSL 3; exercise good,
+        # tampered, wrong-key, unsigned and no-openssl cases with a throwaway key.
+        run: sh scripts/install_sig_test.sh
 
       - name: Test (release build tag)
         # Shipped binaries are built with `-tags=release`, which makes the
@@ -92,6 +97,33 @@ jobs:
           name: coverage
           path: coverage.out
           retention-days: 14
+
+  test-os:
+    # Releases ship macOS and Windows binaries, so test there too: path, line
+    # ending, permission, signal and terminal behaviour all differ by OS, and
+    # several bugs (e.g. reserved Windows UDP ports, /dev/null as a terminal)
+    # only showed on one of them. Unit + integration, without -race (no C
+    # toolchain is guaranteed on these runners).
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Test
+        run: go test -count=1 -timeout 20m ./...
+
+      - name: Integration
+        run: go test -tags integration -count=1 -timeout 20m ./integration/...
 
   lint:
     name: Lint

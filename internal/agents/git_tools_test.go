@@ -156,3 +156,21 @@ func TestParseLocalRequest_Git(t *testing.T) {
 		t.Errorf("/commit → %q %v", tool, params)
 	}
 }
+
+// TestGitAdd_FilesAreNeverOptions: a "file" that looks like an option is a
+// path, so -f cannot stage an ignored file.
+func TestGitAdd_FilesAreNeverOptions(t *testing.T) {
+	dir := initRepo(t)
+	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env"+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=1"), 0o600)
+	cfg := LocalFSConfig{Root: dir}
+	for _, files := range [][]string{{"-f", ".env"}, {"--force", ".env"}} {
+		_, _ = GitAddTool{cfg: cfg}.Execute(context.Background(), map[string]any{"files": files})
+		_, _ = GitCommitTool{cfg: cfg}.Execute(context.Background(), map[string]any{"message": "m", "files": files})
+		cmd := exec.Command("git", "ls-files", "--cached", ".env")
+		cmd.Dir = dir
+		if out, _ := cmd.Output(); strings.TrimSpace(string(out)) != "" {
+			t.Fatalf("%v staged the ignored .env", files)
+		}
+	}
+}

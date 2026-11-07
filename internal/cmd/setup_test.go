@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 func TestSetup_CommandRegisters(t *testing.T) {
@@ -59,7 +61,9 @@ func TestSetup_EmptyKeyEncryptsToEmpty(t *testing.T) {
 }
 
 func TestSetup_ConfigSaveLoad(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // redirect UserConfigDir on Linux
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	// On Windows UserConfigDir uses %AppData%; redirect that too.
 	t.Setenv("AppData", t.TempDir())
 
@@ -86,7 +90,9 @@ func TestSetup_ConfigSaveLoad(t *testing.T) {
 }
 
 func TestSetup_KeyEncryptedAtRest(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 
 	enc, _ := encryptKey("sk-ant-PLAINTEXTSECRET")
@@ -103,15 +109,17 @@ func TestSetup_KeyEncryptedAtRest(t *testing.T) {
 }
 
 func TestSetup_SkipWritesNoProvider(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 	// Ensure no provider env var triggers a "configured" state.
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 
 	// Isolate the API-key store so the test doesn't touch the real one.
-	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
+	t.Setenv("GUBERN_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
 
 	var out bytes.Buffer
 	// Enter (welcome), 10 (skip AI), 2 (skip Telegram), 1 (editor), Enter (key).
@@ -127,10 +135,10 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 		t.Errorf("skip output missing message:\n%s", out.String())
 	}
 	// The wizard always prints the API key box + the complete screen.
-	if !strings.Contains(out.String(), "Your VORTEX API Key") {
+	if !strings.Contains(out.String(), "Your Gubern API Key") {
 		t.Error("wizard should print the API key box")
 	}
-	if !strings.Contains(out.String(), "VORTEX is configured and ready") {
+	if !strings.Contains(out.String(), "Gubern is configured and ready") {
 		t.Error("wizard should print the completion banner")
 	}
 }
@@ -138,10 +146,12 @@ func TestSetup_SkipWritesNoProvider(t *testing.T) {
 // setupTestEnv isolates config + key-store paths for a full wizard run.
 func setupTestEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
-	t.Setenv("VORTEX_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	t.Setenv("GUBERN_APIKEY_STORE", filepath.Join(t.TempDir(), "apikeys.json"))
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 }
@@ -179,7 +189,7 @@ func TestSetup_FullFlowBranded(t *testing.T) {
 	out := buf.String()
 
 	// Welcome banner names the product.
-	for _, want := range []string{"VORTEX", "One binary. Any server. Fully autonomous.", "Press Enter to start setup"} {
+	for _, want := range []string{"Gubern", "One binary. Any server. Fully autonomous.", "Press Enter to start setup"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("welcome missing %q", want)
 		}
@@ -218,17 +228,17 @@ func TestSetup_FullFlowBranded(t *testing.T) {
 		}
 	}
 	// API key box.
-	for _, want := range []string{"Your VORTEX API Key", "it will not be shown again"} {
+	for _, want := range []string{"Your Gubern API Key", "it will not be shown again"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("API key step missing %q", want)
 		}
 	}
 	// Complete screen lists everything configured.
 	for _, want := range []string{
-		"VORTEX is configured and ready",
+		"Gubern is configured and ready",
 		"AI: DeepSeek (primary) + Ollama (backup)",
 		"Telegram: connected",
-		"vortex start",
+		"gubern start",
 		"OPENAI_BASE_URL",
 	} {
 		if !strings.Contains(out, want) {
@@ -253,20 +263,24 @@ func TestSetup_FullFlowBranded(t *testing.T) {
 }
 
 func TestSetup_ProviderConfiguredEnvOverridesFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
 
 	// No file, env set → configured.
-	t.Setenv("VORTEX_ANTHROPIC_KEY", "sk-ant-x")
+	t.Setenv("GUBERN_ANTHROPIC_KEY", "sk-ant-x")
 	if !providerConfigured() {
 		t.Error("env var should mark provider as configured")
 	}
 }
 
 func TestSetup_ProviderConfiguredFromFile(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	userHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userHome)
+	t.Setenv("HOME", userHome) // macOS: UserConfigDir/UserCacheDir live under $HOME/Library
 	t.Setenv("AppData", t.TempDir())
-	for _, e := range []string{"VORTEX_ANTHROPIC_KEY", "VORTEX_OPENAI_KEY", "VORTEX_DEEPSEEK_KEY", "VORTEX_GEMINI_KEY", "VORTEX_OLLAMA_URL"} {
+	for _, e := range []string{"GUBERN_ANTHROPIC_KEY", "GUBERN_OPENAI_KEY", "GUBERN_DEEPSEEK_KEY", "GUBERN_GEMINI_KEY", "GUBERN_OLLAMA_URL"} {
 		t.Setenv(e, "")
 	}
 	if providerConfigured() {
@@ -279,12 +293,13 @@ func TestSetup_ProviderConfiguredFromFile(t *testing.T) {
 	}
 }
 
-func TestSetup_ConfigPathUnderVortexDir(t *testing.T) {
+func TestSetup_ConfigPathUnderAppDir(t *testing.T) {
 	p := aiProviderConfigPath()
 	if filepath.Base(p) != "ai-provider.json" {
 		t.Errorf("config path base = %q, want ai-provider.json", filepath.Base(p))
 	}
-	if !strings.Contains(filepath.ToSlash(p), "vortex/") {
-		t.Errorf("config path should be under a vortex dir: %q", p)
+	// Under the app dir: gubern, or vortex on installs from before the rename.
+	if want := userdir.App(userdir.Config()); filepath.Dir(p) != want {
+		t.Errorf("config path %q should be in %q", p, want)
 	}
 }

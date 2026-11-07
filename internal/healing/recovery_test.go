@@ -66,7 +66,7 @@ func TestRecovery_NotifyAction(t *testing.T) {
 	if n.count() != 1 {
 		t.Fatalf("expected 1 notification, got %d", n.count())
 	}
-	if n.sent[0] != "critical|VORTEX Health Alert" {
+	if n.sent[0] != "critical|Gubern Health Alert" {
 		t.Errorf("alert = %q, want critical health alert", n.sent[0])
 	}
 	if a.count() != 1 {
@@ -152,7 +152,7 @@ func TestRecovery_RecoveryEventSendsGreenAlert(t *testing.T) {
 	if len(n.sent) != 2 {
 		t.Fatalf("expected fail + recovery alerts, got %d", len(n.sent))
 	}
-	if n.sent[1] != "info|VORTEX Recovered" {
+	if n.sent[1] != "info|Gubern Recovered" {
 		t.Errorf("recovery alert = %q, want info recovered", n.sent[1])
 	}
 	if !contains(n.bodies[1], "Recovered") || !contains(n.bodies[1], "Downtime") {

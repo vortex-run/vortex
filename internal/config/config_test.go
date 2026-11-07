@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vortex-run/vortex/pkg/lifecycle"
+	"github.com/sandeepbollavaram/vortex/pkg/lifecycle"
 )
 
 // validConfig is a minimal but complete config that satisfies the schema.
@@ -31,7 +31,7 @@ observability: {log_level: "debug"}
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "vortex.cue")
+	p := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -196,10 +196,10 @@ func TestEnvOverride(t *testing.T) {
 	p := writeConfig(t, validConfig)
 	src, _ := os.ReadFile(p)
 	env := map[string]string{
-		"VORTEX_CLUSTER_NAME":            "overridden",
-		"VORTEX_OBSERVABILITY_LOG_LEVEL": "error",
-		"VORTEX_CLUSTER_GOSSIP_PORT":     "8000",
-		"VORTEX_SECURITY_BLOCK_CLOUDS":   "true",
+		"GUBERN_CLUSTER_NAME":            "overridden",
+		"GUBERN_OBSERVABILITY_LOG_LEVEL": "error",
+		"GUBERN_CLUSTER_GOSSIP_PORT":     "8000",
+		"GUBERN_SECURITY_BLOCK_CLOUDS":   "true",
 	}
 	cfg, err := loadFromBytes(p, src, schemaSource(t), env)
 	if err != nil {
@@ -342,4 +342,42 @@ func TestLoadFileNotFound(t *testing.T) {
 func schemaSource(t *testing.T) []byte {
 	t.Helper()
 	return schemaBytes()
+}
+
+// TestEnv_LegacyVORTEXNamesStillWork: after the rename, a deployment that
+// still sets VORTEX_* gets the same override; GUBERN_* wins when both are set.
+func TestEnv_LegacyVORTEXNamesStillWork(t *testing.T) {
+	t.Setenv("VORTEX_CLUSTER_NAME", "legacy-name")
+	if env := osEnv(); env["GUBERN_CLUSTER_NAME"] != "legacy-name" {
+		t.Errorf("legacy VORTEX_CLUSTER_NAME not honoured: %q", env["GUBERN_CLUSTER_NAME"])
+	}
+	t.Setenv("GUBERN_CLUSTER_NAME", "new-name")
+	if env := osEnv(); env["GUBERN_CLUSTER_NAME"] != "new-name" {
+		t.Errorf("GUBERN_ must win: %q", env["GUBERN_CLUSTER_NAME"])
+	}
+}
+
+func TestResolvePath_LegacyConfigFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if got := ResolvePath(""); got != DefaultPath {
+		t.Errorf("nothing present: %s", got)
+	}
+	if err := os.WriteFile(LegacyPath, []byte("cluster: {name: \"x\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(""); got != LegacyPath {
+		t.Errorf("only gubern.cue: %s", got)
+	}
+	if got := ResolvePath(DefaultPath); got != LegacyPath {
+		t.Errorf("default flag value with only gubern.cue: %s", got)
+	}
+	if err := os.WriteFile(DefaultPath, []byte("cluster: {name: \"y\"}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolvePath(""); got != DefaultPath {
+		t.Errorf("both: %s (gubern.cue wins)", got)
+	}
+	if got := ResolvePath("other.cue"); got != "other.cue" {
+		t.Errorf("explicit: %s", got)
+	}
 }

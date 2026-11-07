@@ -50,7 +50,7 @@ export function Sidebar() {
         <div className="h-7 w-7 rounded bg-primary/20 grid place-items-center text-primary font-bold">
           V
         </div>
-        <span className="text-lg font-semibold tracking-tight">VORTEX</span>
+        <span className="text-lg font-semibold tracking-tight">Gubern</span>
       </div>
 
       {/* Nav */}
@@ -79,7 +79,7 @@ export function Sidebar() {
       {/* Footer: user + version */}
       <div className="border-t border-border px-5 py-4 text-xs text-muted-foreground">
         <div className="font-medium text-foreground">admin</div>
-        <div>VORTEX {VERSION}</div>
+        <div>Gubern {VERSION}</div>
       </div>
     </aside>
   );

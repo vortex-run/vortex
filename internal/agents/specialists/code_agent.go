@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // CodeAgent writes and edits code. It reads context (task files + AGENTS.md),
@@ -19,7 +19,7 @@ type CodeAgent struct {
 }
 
 // codeSystemPrompt is the Code Agent's focused role definition.
-const codeSystemPrompt = `You are an expert software engineer in VORTEX.
+const codeSystemPrompt = `You are an expert software engineer in Gubern.
 Your ONLY job is to write clean, working code.
 
 Rules:

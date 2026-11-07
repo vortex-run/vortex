@@ -1,4 +1,4 @@
-// Package observability implements VORTEX's observability stack (build plan M5):
+// Package observability implements Gubern's observability stack (build plan M5):
 // OpenTelemetry distributed tracing, a Prometheus metrics registry, an HTTP
 // middleware that records both, a localhost pprof profiler, and SLO/error-budget
 // tracking. Tracing and profiling are opt-in; metrics are always available.

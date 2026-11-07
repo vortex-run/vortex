@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
 )
 
 // Executor runs a single task for a given agent type, returning its result.

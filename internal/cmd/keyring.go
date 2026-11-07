@@ -8,31 +8,29 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/keyring"
-	"github.com/vortex-run/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/keyring"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // masterKeyPath resolves the on-disk location of the master key, honouring
-// VORTEX_MASTER_KEY_FILE and otherwise defaulting to <user-config>/vortex/
+// GUBERN_MASTER_KEY_FILE and otherwise defaulting to <user-config>/vortex/
 // master.key. The config dir (not the cache dir) is used so the key survives
-// cache clears. VORTEX_MASTER_KEY (inline) takes precedence inside keyring.
+// cache clears. GUBERN_MASTER_KEY (inline) takes precedence inside keyring.
 func masterKeyPath() string {
-	if override := os.Getenv("VORTEX_MASTER_KEY_FILE"); override != "" {
+	if override := os.Getenv("GUBERN_MASTER_KEY_FILE"); override != "" {
 		return override
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "vortex", "master.key")
+	dir := userdir.Config()
+	return filepath.Join(userdir.App(dir), "master.key")
 }
 
 // sharedKeyring loads (or creates on first run) the process master key once
 // and caches it, so the secret store, TLS/mTLS stores, and audit log all
-// derive their at-rest keys from the same root. Both `vortex start` and the
-// `vortex secret`/`vortex audit` CLIs call this, so they agree on every key.
+// derive their at-rest keys from the same root. Both `gubern start` and the
+// `gubern secret`/`gubern audit` CLIs call this, so they agree on every key.
 var (
 	keyringOnce sync.Once
 	keyringInst *keyring.Keyring
@@ -86,7 +84,7 @@ func migrationMarkerPath() string {
 // re-keys the local secret store and the audit log from the old cluster-name-
 // derived keys onto master-key-derived keys. It is a no-op when:
 //   - the marker file already exists (migration done), or
-//   - VORTEX_MASTER_KEY is set (operator manages the key; no legacy data
+//   - GUBERN_MASTER_KEY is set (operator manages the key; no legacy data
 //     assumption), or
 //   - the data already decrypts/verifies under the new key.
 //

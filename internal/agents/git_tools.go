@@ -21,10 +21,15 @@ const gitTimeout = 30 * time.Second
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", args...)
+	// core.fsmonitor names a program git runs on status/diff/add. A repo
+	// config written by the model must not turn the approval-free read tools
+	// into command execution (audit F-05 defense in depth).
+	full := append([]string{"-c", "core.fsmonitor=false"}, args...)
+	cmd := exec.CommandContext(cctx, "git", full...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = gitEnv() // hooks run with it: no provider keys or tokens
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -33,6 +38,11 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	}
 	return strings.TrimRight(stdout.String(), "\n"), nil
 }
+
+// Paths from the model always follow "--": without it a "file" such as -f or
+// --pathspec-from-file=<path> is read as an option (staging ignored files,
+// or paths named in some other file) behind an approval that reads like a
+// plain "git add".
 
 // strSliceParam extracts a []string param (accepts []string or []any of strings).
 func strSliceParam(params map[string]any, key string) []string {
@@ -110,7 +120,9 @@ func (GitDiffTool) Description() string { return "Show git diff" }
 
 // Execute runs `git diff [file]`.
 func (t GitDiffTool) Execute(ctx context.Context, params map[string]any) (any, error) {
-	args := []string{"diff"}
+	// No external diff drivers or textconv filters: both run programs named
+	// in repo config / .gitattributes.
+	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
 	if file, _ := params["file"].(string); file != "" {
 		args = append(args, "--", file)
 	}
@@ -149,7 +161,7 @@ func (t GitAddTool) Execute(ctx context.Context, params map[string]any) (any, er
 			Params:      params,
 		}}
 	}
-	if _, err := runGit(ctx, t.cfg.Root, append([]string{"add"}, files...)...); err != nil {
+	if _, err := runGit(ctx, t.cfg.Root, append([]string{"add", "--"}, files...)...); err != nil {
 		return nil, err
 	}
 	return map[string]any{"staged": files}, nil
@@ -189,7 +201,7 @@ func (t GitCommitTool) Execute(ctx context.Context, params map[string]any) (any,
 		}}
 	}
 	if len(files) > 0 {
-		if _, aerr := runGit(ctx, t.cfg.Root, append([]string{"add"}, files...)...); aerr != nil {
+		if _, aerr := runGit(ctx, t.cfg.Root, append([]string{"add", "--"}, files...)...); aerr != nil {
 			return nil, aerr
 		}
 	}

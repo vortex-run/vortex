@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/orchestration"
+	"github.com/sandeepbollavaram/vortex/internal/orchestration"
 )
 
 const (

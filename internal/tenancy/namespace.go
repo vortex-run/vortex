@@ -1,4 +1,4 @@
-// Package tenancy implements VORTEX's multi-tenancy layer (build plan M8):
+// Package tenancy implements Gubern's multi-tenancy layer (build plan M8):
 // namespaces that isolate routes, secrets, metrics, and logs per tenant, with
 // per-namespace resource quotas enforced at the HTTP and TCP edge. Standard
 // library only.

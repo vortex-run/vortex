@@ -119,7 +119,7 @@ func (a *ResearchAgent) notify(ctx context.Context, query string, summary *Summa
 	if report.FilePath != "" {
 		fmt.Fprintf(&b, "Full report saved to: %s", report.FilePath)
 	}
-	_ = a.notifier.Notify(ctx, "VORTEX Research", b.String())
+	_ = a.notifier.Notify(ctx, "Gubern Research", b.String())
 
 	if report.FilePath != "" {
 		if data, err := os.ReadFile(report.FilePath); err == nil { //nolint:gosec // own report

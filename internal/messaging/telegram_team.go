@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // checkpointResolver is the subset of *a2a.CheckpointManager the bridge needs to
@@ -275,7 +275,7 @@ func agentLabel(id string) string {
 	case "user":
 		return "You"
 	case "":
-		return "VORTEX"
+		return "Gubern"
 	default:
 		return id
 	}

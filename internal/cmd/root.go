@@ -4,7 +4,7 @@
 // PersistentPreRunE so every subcommand has a ready logger before it runs.
 //
 // Subcommands (start, stop, status, reload, version) are added one at a time in
-// their own files. With no subcommand, the root command boots VORTEX: it loads
+// their own files. With no subcommand, the root command boots Gubern: it loads
 // and validates the config, starts the management API, wires SIGHUP hot-reload,
 // and blocks until a shutdown signal.
 package cmd
@@ -15,11 +15,14 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
+
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/config"
-	vortexerrors "github.com/vortex-run/vortex/internal/errors"
-	"github.com/vortex-run/vortex/pkg/logger"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	vortexerrors "github.com/sandeepbollavaram/vortex/internal/errors"
+	"github.com/sandeepbollavaram/vortex/internal/legacyenv"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
 // Build metadata, overridden at build time via -ldflags (see Taskfile.yml).
@@ -43,18 +46,41 @@ var (
 	log   *slog.Logger
 )
 
+// keepsState reports whether cmd reads or writes Gubern state (keys, secrets,
+// audit log...), which needs a private per-user directory; see userdir.Check.
+// Commands that only print or validate are exempt.
+func keepsState(cmd *cobra.Command) bool {
+	top := cmd
+	for top.HasParent() && top.Parent().HasParent() {
+		top = top.Parent()
+	}
+	switch top.Name() {
+	case "version", "help", "completion", "check", "status", "stop", "verify",
+		cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return false
+	}
+	return true
+}
+
 // NewRootCommand constructs the root cobra command with global flags wired up.
 // It is exported so tests can build an isolated command tree.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "vortex",
-		Short:         "VORTEX — one binary. any server. fully autonomous.",
-		Long:          "VORTEX is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
+		Use:           "gubern",
+		Short:         "Gubern — one binary. any server. fully autonomous.",
+		Long:          "Gubern is a self-hosted autonomous platform: a single binary that owns edge, routing, clustering, security, observability, and an AI agent runtime.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// --version must work: self-update on Unix verifies the downloaded
+		// binary by running it with --version, including the update code in
+		// already-released binaries (v0.3.0 and earlier). Without the flag
+		// the new binary exits 1 ("unknown flag") and every update from those
+		// versions rolls back. (v0.3.0 itself exited 0 on unknown flags, which
+		// is the only reason its own check ever passed.)
+		Version: version,
 		// Initialise the logger from the global flags before any subcommand
 		// (or the root RunE) executes.
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			format := logger.FormatText
 			if flags.jsonLog {
 				format = logger.FormatJSON
@@ -63,17 +89,20 @@ func NewRootCommand() *cobra.Command {
 				Level:  logger.ParseLevel(flags.logLevel),
 				Format: format,
 			})
+			if keepsState(cmd) {
+				return userdir.Check()
+			}
 			return nil
 		},
-		// With no subcommand, boot VORTEX using the default pidfile — the same
-		// path as `vortex start`.
+		// With no subcommand, boot Gubern using the default pidfile — the same
+		// path as `gubern start`.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runStart(cmd.Context(), "vortex.pid")
+			return runStart(cmd.Context(), defaultPidfile)
 		},
 	}
 
 	pf := root.PersistentFlags()
-	pf.StringVar(&flags.configPath, "config", config.DefaultPath, "path to vortex.cue")
+	pf.StringVar(&flags.configPath, "config", config.DefaultPath, "path to the config file (default gubern.cue; an existing vortex.cue is used if gubern.cue is absent)")
 	pf.StringVar(&flags.logLevel, "log-level", "info", "log level: debug|info|warn|error")
 	pf.BoolVar(&flags.jsonLog, "json", false, "emit logs as JSON instead of human-readable text")
 
@@ -97,12 +126,24 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newUICommand())
 	root.AddCommand(newCodeCommand())
 	root.AddCommand(newWatchdogCommand())
+	root.AddCommand(newAICommand())
+	root.AddCommand(newSkillsCommand())
 
 	return root
 }
 
 // Execute runs the root command and exits the process with an appropriate code.
 func Execute() {
+	// Pre-rename VORTEX_* settings keep working (GUBERN_* wins). Done first so
+	// flag defaults and every later lookup see the new names.
+	if n := legacyenv.Notice(legacyenv.Apply()); n != "" {
+		fmt.Fprintln(os.Stderr, n)
+	}
+	// A Windows self-update leaves the previous binary as <exe>.old while it
+	// is still running; remove it once nothing uses it. No-op elsewhere.
+	if self, err := os.Executable(); err == nil {
+		removeStaleOldBinary(self)
+	}
 	if err := NewRootCommand().Execute(); err != nil {
 		// Some subcommands (e.g. check) already print their own detailed,
 		// user-facing diagnostics and signal failure via a sentinel; in that
@@ -113,7 +154,8 @@ func Execute() {
 			errors.Is(err, errCluster) || errors.Is(err, errPlugin) ||
 			errors.Is(err, errNamespace) || errors.Is(err, errTune) ||
 			errors.Is(err, errUINotRunning) || errors.Is(err, errCodeNotRunning) ||
-			errors.Is(err, errKeys) || errors.Is(err, errVerify) {
+			errors.Is(err, errKeys) || errors.Is(err, errVerify) ||
+			errors.Is(err, errProbe) || errors.Is(err, errSkills) {
 			os.Exit(1)
 		}
 		// Print a friendly, actionable explanation (brand redesign part 6)

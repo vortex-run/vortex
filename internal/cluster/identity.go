@@ -1,4 +1,4 @@
-// Package cluster implements VORTEX's clustering and high-availability layer
+// Package cluster implements Gubern's clustering and high-availability layer
 // (build plan M4): node identity, SWIM gossip membership (hashicorp/memberlist),
 // Raft consensus for config replication (hashicorp/raft), and a manager that
 // orchestrates the two. A single-node deployment runs with no cluster overhead;

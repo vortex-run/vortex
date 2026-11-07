@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/vortex-run/vortex/internal/testutil"
+	"github.com/sandeepbollavaram/vortex/internal/testutil"
 )
 
 // TestStudio_GracefulDegradationWithoutCodeServer is the core M12 graceful-
@@ -20,7 +20,7 @@ func TestStudio_GracefulDegradationWithoutCodeServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VORTEX_STUDIO_WORKSPACE", wd) // the repo itself (a git repo)
+	t.Setenv("GUBERN_STUDIO_WORKSPACE", wd) // the repo itself (a git repo)
 	secret := seedAdminKey(t)
 
 	bin := getNetBinary(t)
@@ -69,7 +69,7 @@ func TestStudio_GracefulDegradationWithoutCodeServer(t *testing.T) {
 // mounted and rejects unauthenticated requests (no API key → 401, not 404).
 func TestStudio_TerminalEndpointRequiresAuth(t *testing.T) {
 	wd, _ := os.Getwd()
-	t.Setenv("VORTEX_STUDIO_WORKSPACE", wd)
+	t.Setenv("GUBERN_STUDIO_WORKSPACE", wd)
 	_ = seedAdminKey(t)
 
 	bin := getNetBinary(t)
@@ -94,7 +94,7 @@ func TestStudio_TerminalEndpointRequiresAuth(t *testing.T) {
 // mTLS TCP routes (read-only by default), with auth.
 func TestStudio_DBConnectionsList(t *testing.T) {
 	wd, _ := os.Getwd()
-	t.Setenv("VORTEX_STUDIO_WORKSPACE", wd)
+	t.Setenv("GUBERN_STUDIO_WORKSPACE", wd)
 	secret := seedAdminKey(t)
 
 	bin := getNetBinary(t)

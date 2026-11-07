@@ -6,7 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/vortex-run/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
 )
 
 // HelpViewID identifies which view's help content to show. It mirrors the
@@ -99,6 +99,7 @@ var agentsHelp = HelpContent{
 			{Key: "N+Enter", Action: "Reject action"},
 		}},
 		{Title: "Slash commands", Items: []HelpItem{
+			{Key: "/agent <task>", Action: "Let the model plan and use tools (asks before changes)"},
 			{Key: "/ls [path]", Action: "List files"},
 			{Key: "/read <file>", Action: "Read a file"},
 			{Key: "/run <cmd>", Action: "Run a command"},
@@ -151,7 +152,7 @@ var logsHelp = HelpContent{
 }
 
 var codeHelp = HelpContent{
-	Title: "VORTEX Code",
+	Title: "Gubern Code",
 	Sections: []HelpSection{
 		{Title: "Keyboard shortcuts", Items: []HelpItem{
 			{Key: "P", Action: "Pause/resume agents"},

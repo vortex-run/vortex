@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vortex-run/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
 )
 
 // ReviewAgent reviews code quality and returns a 0-10 score with an approval
@@ -18,7 +18,7 @@ type ReviewAgent struct {
 const reviewApprovalThreshold = 7
 
 // reviewSystemPrompt is the Review Agent's focused role definition.
-const reviewSystemPrompt = `You are a senior code reviewer in VORTEX.
+const reviewSystemPrompt = `You are a senior code reviewer in Gubern.
 Your ONLY job is to review code quality.
 
 Review every file for:

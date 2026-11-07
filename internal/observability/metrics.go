@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Metrics holds VORTEX's Prometheus collectors and their registry.
+// Metrics holds Gubern's Prometheus collectors and their registry.
 type Metrics struct {
 	registry *prometheus.Registry
 
@@ -31,7 +31,7 @@ type Metrics struct {
 }
 
 // NewMetrics creates a Metrics with a private registry under the given namespace
-// and registers all VORTEX collectors.
+// and registers all Gubern collectors.
 func NewMetrics(namespace string) *Metrics {
 	if namespace == "" {
 		namespace = "vortex"

@@ -1,4 +1,4 @@
-# VORTEX — Agent Handoff (read this first)
+# Gubern — Agent Handoff (read this first)
 
 > **Audience:** AI coding agents and humans onboarding cold.  
 > **Goal:** Understand the *product*, the *codebase*, and *how to change it safely* without prior chat context.  
@@ -10,7 +10,7 @@ If you only read one file in this repo, read this. Then open the linked docs for
 
 ## 0. 60-second briefing
 
-**VORTEX** (`github.com/vortex-run/vortex`) is a **self-hosted, single-tenant autonomous infrastructure platform** shipped as **one static Go binary**.
+**Gubern** (`github.com/sandeepbollavaram/vortex`) is a **self-hosted, single-tenant autonomous infrastructure platform** shipped as **one static Go binary**.
 
 One process owns:
 
@@ -21,18 +21,18 @@ One process owns:
 5. **Control surfaces** — TUI, embedded web dashboard, Telegram (+ Slack/WhatsApp webhooks), HTTP API, OpenAI-compatible `/v1`
 
 **Tagline:** *One binary. Any server. Fully autonomous.*  
-**Config:** one CUE file (`vortex.cue`) + `VORTEX_*` env. **Secrets never in CUE.**  
+**Config:** one CUE file (`gubern.cue`) + `GUBERN_*` env (legacy `VORTEX_*` still read). **Secrets never in CUE.**  
 **License:** Apache-2.0. Nothing phones home.
 
-**Maturity:** designed and tested as a **single-node** deployment; production readiness is not asserted by this document — judge it from the audit (`VORTEX_PRODUCTION_AUDIT.md`), CI evidence, and your own hardening review. Multi-node HA and container tool isolation are **not** done — do not claim them.
+**Maturity:** designed and tested as a **single-node** deployment; production readiness is not asserted by this document — judge it from the audit (`GUBERN_PRODUCTION_AUDIT.md`), CI evidence, and your own hardening review. Multi-node HA and container tool isolation are **not** done — do not claim them.
 
 ---
 
-## 1. Product position (VORTEX vs Hermes vs OpenClaw)
+## 1. Product position (Gubern vs Hermes vs OpenClaw)
 
 These three live in the same *self-hosted AI* universe. They are **not** the same product.
 
-| | **OpenClaw** | **Hermes** | **VORTEX** |
+| | **OpenClaw** | **Hermes** | **Gubern** |
 |---|---|---|---|
 | **Center of gravity** | Chat↔agent **gateway** | Learning **agent** (memory/skills/cron) | **Infra platform** + agents |
 | **Primary job** | Bridge WhatsApp/Telegram/… to coding agents | Persistent autonomous agent with sandboxes | Own the VPS: proxy+TLS+secrets+audit+agents |
@@ -46,7 +46,7 @@ These three live in the same *self-hosted AI* universe. They are **not** the sam
 **Pitch rule for agents writing copy or issues:**  
 Do **not** say “OpenClaw in Go” or “Hermes with a proxy.” Say: *self-hosted edge + security + autonomous ops agents in one binary.*
 
-**Claude Code comparison** (in README): Claude Code is an IDE coding agent; VORTEX is coding agent **plus** the server it runs on.
+**Claude Code comparison** (in README): Claude Code is an IDE coding agent; Gubern is coding agent **plus** the server it runs on.
 
 ---
 
@@ -89,19 +89,19 @@ Do **not** say “OpenClaw in Go” or “Hermes with a proxy.” Say: *self-hos
 ## 3. User journey (runtime)
 
 ```text
-install → vortex setup → vortex start → control
+install → gubern setup → gubern start → control
 ```
 
 | Step | Command / surface | Code / docs |
 |------|-------------------|-------------|
 | Install | curl installer or release zip | `docs/install.md`, `scripts/` |
-| Setup | `vortex setup` | `internal/cmd/setup.go` |
-| Start | `vortex start` / `vortex start --ui` | `internal/cmd/start.go` |
-| TUI | `vortex ui` | `internal/tui/` |
+| Setup | `gubern setup` | `internal/cmd/setup.go` |
+| Start | `gubern start` / `gubern start --ui` | `internal/cmd/start.go` |
+| TUI | `gubern ui` | `internal/tui/` |
 | Dashboard | `http://localhost:9090/dashboard/` | `web/dashboard/` embedded via `internal/dashboard/` |
 | Telegram | bot drives agent + approvals | `docs/telegram.md`, `internal/messaging/` |
 | API | Bearer / `X-API-Key` on `:9090` | `docs/api.md`, `docs/openapi.yaml` |
-| Project code | `vortex code` from a cwd | `internal/cmd/code.go` |
+| Project code | `gubern code` from a cwd | `internal/cmd/code.go` |
 | Local demo | `pwsh scripts/demo/demo.ps1` | `scripts/demo/` |
 
 Default management listen: **`:9090`**.
@@ -112,7 +112,7 @@ Default management listen: **`:9090`**.
 
 ```text
 vortex/
-├── cmd/vortex/main.go          # binary entry → internal/cmd.Execute()
+├── cmd/gubern/main.go          # binary entry → internal/cmd.Execute()
 ├── internal/                   # ALL product logic (preferred import boundary)
 ├── pkg/                        # small reusable libs (atomicfile, safedial, …)
 ├── config/schema.cue           # embedded master schema (+ schema.go)
@@ -122,9 +122,9 @@ vortex/
 ├── scripts/                    # install, sign, demo, path helpers
 ├── .github/workflows/          # ci, security, release, codeql, scorecard
 ├── Taskfile.yml                # build/test/lint (not Makefile)
-├── go.mod                      # module github.com/vortex-run/vortex ; toolchain go1.26.9
-├── vortex.cue                  # example / local config
-├── VORTEX_PRODUCTION_AUDIT.md  # independent audit + remediation status
+├── go.mod                      # module github.com/sandeepbollavaram/vortex ; toolchain go1.26.9
+├── gubern.cue                  # example / local config
+├── GUBERN_PRODUCTION_AUDIT.md  # independent audit + remediation status
 └── agents|pipeline|research|plugins/   # OPERATOR scaffolding only — NOT product code
 ```
 
@@ -149,7 +149,7 @@ Use this table to decide *where* a change belongs.
 
 | Package | Role |
 |---------|------|
-| `config/` | Load/unify CUE vs embedded schema; hot reload; `VORTEX_*` env overlays |
+| `config/` | Load/unify CUE vs embedded schema; hot reload; `GUBERN_*` env overlays |
 | `keyring/` | Random master key → HKDF-SHA256 per-purpose keys |
 | `secrets/` | Encrypted store + Vault/AWS SSM/GCP adapters |
 | `update/` | Self-update; Ed25519 verify against `ReleaseSigningPublicKey` |
@@ -212,12 +212,12 @@ Use this table to decide *where* a change belongs.
 
 ## 6. Config & secrets (non-negotiable rules)
 
-1. **Source of truth:** `vortex.cue` unified against embedded `config/schema.cue`. Invalid config = **fail start**.  
-2. **Env overlays:** `VORTEX_<SECTION>_<FIELD>` for **scalars only** (`internal/config/env.go`). Lists/routes are not env-overridable.  
-3. **Secrets:** names in CUE; values via secret store / keyring / provider env (`VORTEX_ANTHROPIC_KEY`, `VORTEX_OPENAI_KEY`, …).  
-4. **Master key:** `VORTEX_MASTER_KEY` or generated file — never derive from cluster name (audit C1 fixed).  
-5. **Loopback trust:** control endpoints may trust loopback by default; set `VORTEX_TRUST_LOOPBACK=false` behind a same-host reverse proxy.  
-6. **Hot reload:** SIGHUP / `POST /internal/reload` / `vortex reload`.
+1. **Source of truth:** `gubern.cue` unified against embedded `config/schema.cue`. Invalid config = **fail start**.  
+2. **Env overlays:** `GUBERN_<SECTION>_<FIELD>` for **scalars only** (`internal/config/env.go`). Lists/routes are not env-overridable.  
+3. **Secrets:** names in CUE; values via secret store / keyring / provider env (`GUBERN_ANTHROPIC_KEY`, `GUBERN_OPENAI_KEY`, …).  
+4. **Master key:** `GUBERN_MASTER_KEY` or generated file — never derive from cluster name (audit C1 fixed).  
+5. **Loopback trust:** control endpoints may trust loopback by default; set `GUBERN_TRUST_LOOPBACK=false` behind a same-host reverse proxy.  
+6. **Hot reload:** SIGHUP / `POST /internal/reload` / `gubern reload`.
 
 Full reference: `docs/configuration.md`.
 
@@ -265,7 +265,7 @@ Specialist docs: `docs/agents.md`.
 
 ## 9. Security & audit posture
 
-Read: `docs/security.md`, `VORTEX_PRODUCTION_AUDIT.md`, `SECURITY.md`.
+Read: `docs/security.md`, `GUBERN_PRODUCTION_AUDIT.md`, `SECURITY.md`.
 
 | Topic | Status |
 |-------|--------|
@@ -345,7 +345,7 @@ cd web/dashboard && npm ci && npm run lint && npm run build && npm run audit:ci
 ## 13. Known pitfalls (agents get these wrong)
 
 1. **Editing dashboard source without rebuilding/committing `dist/`** → CI Dashboard job fails.  
-2. **Putting secrets in `vortex.cue` or tests** → forbidden.  
+2. **Putting secrets in `gubern.cue` or tests** → forbidden.  
 3. **Confusing AI `gateway` with `proxy/gateway`.**  
 4. **Treating empty top-level `agents/` as the agent package** — real code is `internal/agents`.  
 5. **Claiming multi-node HA or container isolation** — false.  
@@ -370,10 +370,11 @@ cd web/dashboard && npm ci && npm run lint && npm run build && npm run audit:ci
 | 7 | `docs/api.md` + `docs/openapi.yaml` | HTTP surface |
 | 8 | `docs/telegram.md` | Phone control |
 | 9 | `docs/install.md` | Install paths |
-| 10 | `VORTEX_PRODUCTION_AUDIT.md` | What’s fixed vs open |
+| 10 | `GUBERN_PRODUCTION_AUDIT.md` | What’s fixed vs open |
 | 11 | `CONTRIBUTING.md` / `SECURITY.md` | Community + vuln reporting |
 | 12 | `docs/IP_NOTES.md` | Patent counsel note (maintainers) |
 | 13 | `docs/runbooks.md` | Operator incident and recovery steps |
+| 14 | `docs/troubleshooting.md` | Common setup problems, state locations, messaging and approval gotchas |
 
 ---
 
@@ -390,7 +391,7 @@ cd web/dashboard && npm ci && npm run lint && npm run build && npm run audit:ci
 
 ## 16. One-paragraph product story (for issues/PRs/README)
 
-People started with IDE coding agents, then chat gateways (OpenClaw) and learning agents (Hermes). VORTEX takes the ops-shaped step: if the agent lives on your server, the product should also *be* that server’s edge and security plane. One `vortex start` replaces a pile of sidecars; the same process that terminates TLS can rebuild an app or restart nginx when you message Telegram — with an audit trail and signed updates.
+People started with IDE coding agents, then chat gateways (OpenClaw) and learning agents (Hermes). Gubern takes the ops-shaped step: if the agent lives on your server, the product should also *be* that server’s edge and security plane. One `gubern start` replaces a pile of sidecars; the same process that terminates TLS can rebuild an app or restart nginx when you message Telegram — with an audit trail and signed updates.
 
 ---
 

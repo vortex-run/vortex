@@ -10,23 +10,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // errAudit signals an audit-command failure whose detail was already printed.
 var errAudit = errors.New("audit command failed")
 
 // auditLogPath returns the on-disk path of the audit log, honouring
-// VORTEX_AUDIT_LOG and otherwise defaulting to <user-cache>/vortex/audit.log.
+// GUBERN_AUDIT_LOG and otherwise defaulting to <user-cache>/vortex/audit.log.
 func auditLogPath() string {
-	if override := os.Getenv("VORTEX_AUDIT_LOG"); override != "" {
+	if override := os.Getenv("GUBERN_AUDIT_LOG"); override != "" {
 		return override
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	return filepath.Join(cacheDir, "vortex", "audit.log")
+	cacheDir := userdir.Cache()
+	return filepath.Join(userdir.App(cacheDir), "audit.log")
 }
 
 // openAuditLog opens the audit log keyed by the master-key-derived audit
@@ -52,7 +50,7 @@ func auditCLI(cmd *cobra.Command, action, resource string) {
 	_ = log.Append(cmd.Context(), "cli", action, resource, nil)
 }
 
-// newAuditCommand builds `vortex audit` with verify and export subcommands.
+// newAuditCommand builds `gubern audit` with verify and export subcommands.
 func newAuditCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "audit",
@@ -66,7 +64,7 @@ func newAuditCommand() *cobra.Command {
 	return c
 }
 
-// newAuditReportCommand builds `vortex audit report` (M19): a compliance
+// newAuditReportCommand builds `gubern audit report` (M19): a compliance
 // summary of the audit log over a period, in markdown, JSON, or CSV.
 func newAuditReportCommand() *cobra.Command {
 	var (
@@ -146,7 +144,7 @@ func newAuditReportCommand() *cobra.Command {
 	return c
 }
 
-// newAuditArchiveCommand builds `vortex audit archive` (M19): manually rotate
+// newAuditArchiveCommand builds `gubern audit archive` (M19): manually rotate
 // the live audit log into a gzipped monthly archive.
 func newAuditArchiveCommand() *cobra.Command {
 	return &cobra.Command{

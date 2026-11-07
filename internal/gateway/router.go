@@ -14,7 +14,7 @@ type BudgetMode string
 
 // Budget modes.
 const (
-	ModeAuto     BudgetMode = "auto"     // VORTEX decides per request type
+	ModeAuto     BudgetMode = "auto"     // Gubern decides per request type
 	ModeCheap    BudgetMode = "cheap"    // cheapest available
 	ModeFast     BudgetMode = "fast"     // lowest latency
 	ModeQuality  BudgetMode = "quality"  // highest score
@@ -342,7 +342,7 @@ func (r *Router) RecordError(slotID string, err error, isRateLimit bool) {
 		if slot != nil {
 			provider = slot.Provider
 		}
-		r.alert("⚠️ VORTEX API Key Alert",
+		r.alert("⚠️ Gubern API Key Alert",
 			fmt.Sprintf("Slot %s (%s) is rate limited\nSwitching to next available slot\nEstimated recovery: %.0f seconds",
 				slotID, provider, wait.Seconds()))
 	}
@@ -363,7 +363,7 @@ func (r *Router) RecordCost(slotID string, usd float64) {
 	_ = r.store.UpdateHealth(*h) // recomputes score (budget penalty)
 
 	if slot.DailyBudget > 0 && wasUnder && h.SpentTodayUSD >= slot.DailyBudget {
-		r.alert("⚠️ VORTEX Budget Alert",
+		r.alert("⚠️ Gubern Budget Alert",
 			fmt.Sprintf("Slot %s daily budget reached ($%.2f)\nSwitching to next slot\nReset at midnight",
 				slotID, slot.DailyBudget))
 	}

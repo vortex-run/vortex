@@ -1,6 +1,6 @@
 # Telegram Setup
 
-VORTEX can be driven entirely from Telegram: send the agent a message, approve
+Gubern can be driven entirely from Telegram: send the agent a message, approve
 tool actions, and receive alerts (secret expiry, burst bans, self-healing
 events) on your phone.
 
@@ -16,33 +16,37 @@ events) on your phone.
 2. Visit `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 3. Copy the numeric `chat.id` from the JSON.
 
-## 3. Configure VORTEX
+## 3. Configure Gubern
 
 Either run the wizard:
 
 ```bash
-vortex setup     # answer "y" to the Telegram step
+gubern setup     # answer "y" to the Telegram step
 ```
 
-…or set environment variables before `vortex start`:
+…or set environment variables before `gubern start`:
 
 ```bash
-export VORTEX_TELEGRAM_TOKEN="123456:ABC-DEF..."
-export VORTEX_TELEGRAM_DEFAULT_CHAT="987654321"
+export GUBERN_TELEGRAM_TOKEN="123456:ABC-DEF..."
+export GUBERN_TELEGRAM_DEFAULT_CHAT="987654321"
 # optional: restrict who may command the bot
-export VORTEX_TELEGRAM_ALLOWED_IDS="987654321,111222333"
+export GUBERN_TELEGRAM_ALLOWED_IDS="987654321,111222333"
 ```
 
 Environment variables override the saved setup config.
 
 ## 4. Webhook vs polling
 
-- **Webhook** (recommended for a public server): set `VORTEX_PUBLIC_URL` to
-  your HTTPS base URL; VORTEX registers `https://<host>/webhook/telegram`.
+- **Webhook** (recommended for a public server): set `GUBERN_PUBLIC_URL` to
+  your HTTPS base URL; Gubern registers `https://<host>/webhook/telegram`.
 - **Polling** (for a box with no public URL): set
-  `VORTEX_TELEGRAM_POLLING=true`.
+  `GUBERN_TELEGRAM_POLLING=true`.
 
-The webhook verifies Telegram's secret token and is per-IP rate limited.
+The webhook verifies Telegram's secret token and is per-IP rate limited. When
+Gubern registers the webhook it generates the secret itself (or uses
+`GUBERN_TELEGRAM_SECRET`). If you register the webhook some other way, set
+`GUBERN_TELEGRAM_SECRET` to the `secret_token` you gave Telegram: without a
+matching secret every update is refused.
 
 ## 5. Use it
 
@@ -56,7 +60,7 @@ arrive automatically based on the notification rules.
 
 ## Security notes
 
-- Always set `VORTEX_TELEGRAM_ALLOWED_IDS` on a server so only you can command
+- Always set `GUBERN_TELEGRAM_ALLOWED_IDS` on a server so only you can command
   the bot.
 - The bot token is a credential — keep it in the environment or the encrypted
-  setup config, never in `vortex.cue` or version control.
+  setup config, never in `gubern.cue` or version control.

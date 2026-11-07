@@ -6,50 +6,56 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/sandeepbollavaram/vortex/pkg/pidfile"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vortex-run/vortex/internal/a2a"
-	"github.com/vortex-run/vortex/internal/agents"
-	"github.com/vortex-run/vortex/internal/api"
-	"github.com/vortex-run/vortex/internal/audit"
-	"github.com/vortex-run/vortex/internal/auth"
-	"github.com/vortex-run/vortex/internal/cluster"
-	"github.com/vortex-run/vortex/internal/config"
-	"github.com/vortex-run/vortex/internal/devops"
-	"github.com/vortex-run/vortex/internal/forge"
-	"github.com/vortex-run/vortex/internal/gateway"
-	"github.com/vortex-run/vortex/internal/healing"
-	"github.com/vortex-run/vortex/internal/messaging"
-	"github.com/vortex-run/vortex/internal/observability"
-	"github.com/vortex-run/vortex/internal/orchestration"
-	"github.com/vortex-run/vortex/internal/perf"
-	"github.com/vortex-run/vortex/internal/pipeline"
-	"github.com/vortex-run/vortex/internal/plugins"
-	"github.com/vortex-run/vortex/internal/policy"
-	"github.com/vortex-run/vortex/internal/proxy"
-	"github.com/vortex-run/vortex/internal/proxy/tcp"
-	"github.com/vortex-run/vortex/internal/research"
-	"github.com/vortex-run/vortex/internal/secrets"
-	"github.com/vortex-run/vortex/internal/security"
-	"github.com/vortex-run/vortex/internal/startup"
-	"github.com/vortex-run/vortex/internal/studio"
-	"github.com/vortex-run/vortex/internal/tenancy"
-	vtls "github.com/vortex-run/vortex/internal/tls"
-	"github.com/vortex-run/vortex/internal/tui/brand"
-	"github.com/vortex-run/vortex/pkg/lifecycle"
-	"github.com/vortex-run/vortex/pkg/logger"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/sandeepbollavaram/vortex/internal/a2a"
+	"github.com/sandeepbollavaram/vortex/internal/agents"
+	"github.com/sandeepbollavaram/vortex/internal/api"
+	"github.com/sandeepbollavaram/vortex/internal/audit"
+	"github.com/sandeepbollavaram/vortex/internal/auth"
+	"github.com/sandeepbollavaram/vortex/internal/cluster"
+	"github.com/sandeepbollavaram/vortex/internal/config"
+	"github.com/sandeepbollavaram/vortex/internal/devops"
+	"github.com/sandeepbollavaram/vortex/internal/forge"
+	"github.com/sandeepbollavaram/vortex/internal/gateway"
+	"github.com/sandeepbollavaram/vortex/internal/healing"
+	"github.com/sandeepbollavaram/vortex/internal/messaging"
+	"github.com/sandeepbollavaram/vortex/internal/observability"
+	"github.com/sandeepbollavaram/vortex/internal/orchestration"
+	"github.com/sandeepbollavaram/vortex/internal/perf"
+	"github.com/sandeepbollavaram/vortex/internal/pipeline"
+	"github.com/sandeepbollavaram/vortex/internal/plugins"
+	"github.com/sandeepbollavaram/vortex/internal/policy"
+	"github.com/sandeepbollavaram/vortex/internal/proxy"
+	"github.com/sandeepbollavaram/vortex/internal/proxy/tcp"
+	"github.com/sandeepbollavaram/vortex/internal/research"
+	"github.com/sandeepbollavaram/vortex/internal/secrets"
+	"github.com/sandeepbollavaram/vortex/internal/security"
+	"github.com/sandeepbollavaram/vortex/internal/startup"
+	"github.com/sandeepbollavaram/vortex/internal/studio"
+	"github.com/sandeepbollavaram/vortex/internal/tenancy"
+	vtls "github.com/sandeepbollavaram/vortex/internal/tls"
+	"github.com/sandeepbollavaram/vortex/internal/tui/brand"
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
+	"github.com/sandeepbollavaram/vortex/pkg/lifecycle"
+	"github.com/sandeepbollavaram/vortex/pkg/logger"
 )
 
-// newStartCommand builds `vortex start`, which loads and validates config,
+// newStartCommand builds `gubern start`, which loads and validates config,
 // writes a PID file, starts the management API, wires SIGHUP hot-reload, then
 // blocks until a shutdown signal — removing the PID file on the way out.
 func newStartCommand() *cobra.Command {
@@ -58,7 +64,7 @@ func newStartCommand() *cobra.Command {
 	var withUI bool
 	c := &cobra.Command{
 		Use:   "start",
-		Short: "Start the VORTEX server",
+		Short: "Start the Gubern server",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Run the first-run wizard when --setup is given, or automatically on
@@ -73,12 +79,12 @@ func newStartCommand() *cobra.Command {
 			if withUI {
 				// Start the server in the background, then open the TUI; the TUI
 				// owns the foreground until the user quits.
-				return runUI(cmd.Context(), "http://localhost:9090", "", true)
+				return runUI(cmd.Context(), defaultAPIBase(), "", true)
 			}
 			return runStart(cmd.Context(), pidfile)
 		},
 	}
-	c.Flags().StringVar(&pidfile, "pidfile", "vortex.pid", "path to the PID file")
+	c.Flags().StringVar(&pidfile, "pidfile", defaultPidfile, "path to the PID file")
 	c.Flags().BoolVar(&setup, "setup", false, "run the interactive setup wizard before starting")
 	c.Flags().BoolVar(&withUI, "ui", false, "start the server and open the terminal dashboard")
 	c.Flags().BoolVar(&startVerbose, "verbose", false, "show raw structured logs instead of the clean startup sequence")
@@ -91,7 +97,7 @@ func newStartCommand() *cobra.Command {
 // regardless, so journals never lose records to the cosmetic display.
 var startVerbose bool
 
-// teamMode enables the specialist agent team (--team or VORTEX_TEAM_MODE=true).
+// teamMode enables the specialist agent team (--team or GUBERN_TEAM_MODE=true).
 var teamMode bool
 
 // telegramFromFile reads the Telegram token + chat id from the setup config
@@ -106,13 +112,13 @@ func telegramFromFile() (token string, chatID int64, ok bool) {
 }
 
 // resolveWorkingDir returns the base directory the agents use for relative
-// paths (where the Code Agent writes files). It honours VORTEX_WORK_DIR so the
+// paths (where the Code Agent writes files). It honours GUBERN_WORK_DIR so the
 // server can be pointed at a project directory (e.g. the one the user opens with
-// `vortex code`), falling back to the process working directory. It is shown in
-// the TUI top bar. Optional agents.local_tools.trusted_root in vortex.cue may
+// `gubern code`), falling back to the process working directory. It is shown in
+// the TUI top bar. Optional agents.local_tools.trusted_root in gubern.cue may
 // confine local FS tools; otherwise the approval gate is the primary control.
 func resolveWorkingDir() string {
-	if dir := strings.TrimSpace(os.Getenv("VORTEX_WORK_DIR")); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv("GUBERN_WORK_DIR")); dir != "" {
 		if abs, err := filepath.Abs(dir); err == nil {
 			return abs
 		}
@@ -132,12 +138,22 @@ const readinessQueueDepthLimit = 1000
 // stdoutIsTerminal reports whether stdout is a character device (a console).
 // Piped/captured stdout (CI harnesses, journald, shell redirects) must keep
 // the raw structured logs.
-func stdoutIsTerminal() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
+func stdoutIsTerminal() bool { return isTerminal(os.Stdout) }
+
+// isTerminal reports whether f is a terminal: a character device other than
+// the null device. /dev/null is a character device too, and it is what
+// systemd connects a service's stdin to by default, so checking the mode
+// alone made `gubern start` under systemd (or with < /dev/null) run the
+// interactive setup wizard against nobody, adding minutes to every start.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return false
 	}
-	return (fi.Mode() & os.ModeCharDevice) != 0
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	return true
 }
 
 // routerNotifierAdapter adapts a messaging.Router to gateway.Notifier so the
@@ -246,7 +262,7 @@ func midnightReset(ctx context.Context, store *gateway.KeyStore, log *slog.Logge
 }
 
 // safeGo runs fn in a goroutine with panic recovery (a panicking background
-// monitor must never take down VORTEX).
+// monitor must never take down Gubern).
 func safeGo(_ context.Context, log *slog.Logger, name string, fn func()) {
 	go func() {
 		defer func() {
@@ -297,6 +313,14 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 	a2aServer := a2a.NewAgentServer()
 	baseURL := "http://localhost" + portSuffix(apiSrv.Addr())
 	a2aClient := a2a.NewAgentClient(baseURL, "coordinator")
+	// /a2a/ is outside API-key auth; only this process's own client may call
+	// it (see a2a.RequireToken).
+	a2aToken, err := a2a.NewToken()
+	if err != nil {
+		log.Error("agent team disabled: generating A2A token", "err", err)
+		return
+	}
+	a2aClient.SetToken(a2aToken)
 
 	// AG-UI collaboration layer: the bus carries all inter-agent traffic for the
 	// UI; the checkpoint manager pauses between steps for human review. The bus
@@ -325,12 +349,12 @@ func wireAgentTeam(ctx context.Context, apiSrv *api.Server, rt *agents.Runtime, 
 	}, gateway, tools)
 
 	rt.Coordinator().SetTeam(team)
-	apiSrv.SetA2AHandler(a2aServer.Handler())
+	apiSrv.SetA2AHandler(a2a.RequireToken(a2aToken, a2aServer.Handler()))
 	apiSrv.SetTeamAgentsProvider(func() []api.TeamAgentInfo {
 		out := []api.TeamAgentInfo{}
 		// Coordinator first, then the specialists from the A2A server.
 		out = append(out, api.TeamAgentInfo{
-			ID: "coordinator", Name: "VORTEX Coordinator", Role: "coordinator", Status: "idle",
+			ID: "coordinator", Name: "Gubern Coordinator", Role: "coordinator", Status: "idle",
 		})
 		for _, c := range a2aServer.List() {
 			out = append(out, api.TeamAgentInfo{
@@ -472,9 +496,9 @@ func busToRecord(m a2a.BusMessage) api.CommsRecord {
 
 // primaryTelegramChatID returns the first allowed Telegram chat ID (the user's
 // own chat), used as the default target for the team bridge's proactive
-// messages. It reads VORTEX_TELEGRAM_ALLOWED_IDS (comma-separated).
+// messages. It reads GUBERN_TELEGRAM_ALLOWED_IDS (comma-separated).
 func primaryTelegramChatID() (int64, bool) {
-	raw := strings.TrimSpace(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS"))
+	raw := strings.TrimSpace(os.Getenv("GUBERN_TELEGRAM_ALLOWED_IDS"))
 	if raw == "" {
 		return 0, false
 	}
@@ -497,10 +521,10 @@ func routeNames(cfg *config.Config) []string {
 
 // managementAPIListenAddr returns the management HTTP listen address.
 // Default is api.DefaultAddr (":9090", all interfaces). Override with
-// VORTEX_API_LISTEN (e.g. "127.0.0.1:0" in unit tests) so Windows Firewall is
+// GUBERN_API_LISTEN (e.g. "127.0.0.1:0" in unit tests) so Windows Firewall is
 // not prompted for a wildcard bind from ephemeral go test binaries.
 func managementAPIListenAddr() string {
-	if v := strings.TrimSpace(os.Getenv("VORTEX_API_LISTEN")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("GUBERN_API_LISTEN")); v != "" {
 		return v
 	}
 	return api.DefaultAddr
@@ -549,7 +573,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	migrateLegacyKeys(cfg, log)
 
 	// Audit log: tamper-proof record of security-relevant events. Keyed by a
-	// master-key-derived subkey so the `vortex audit` CLI verifies the same
+	// master-key-derived subkey so the `gubern audit` CLI verifies the same
 	// chain (both derive "audit" from the shared master key).
 	auditLog, err := openRuntimeAuditLog(log)
 	if err != nil {
@@ -564,7 +588,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		// printed "tamper-proof chain" unconditionally, so an operator whose
 		// chain did not verify — from real tampering, a restored backup, or a
 		// re-key migration that could not run — was reassured at every boot and
-		// only found out by running `vortex audit verify` by hand.
+		// only found out by running `gubern audit verify` by hand.
 		if verr := auditLog.Verify(); verr != nil {
 			if errors.Is(verr, audit.ErrChainUnverified) {
 				display.Step("Audit log", "enabled — CHAIN UNVERIFIED (key mismatch or tampering)")
@@ -616,8 +640,31 @@ func runStart(ctx context.Context, pidfile string) error {
 	// stand in for SIGHUP/SIGTERM, which Windows lacks. Reload goes through the
 	// lifecycle so ALL reload hooks fire (config swap + proxy rebuild), not just
 	// the config swap.
-	apiSrv.SetReloadFunc(func() error { mgr.Reload(); return nil })
+	// The hooks swallow errors (a bad file must not stop the process), so read
+	// the outcome back to tell `gubern reload` the truth. dp is set once the
+	// data plane exists, below.
+	var dpRef atomic.Pointer[dataPlane]
+	reloadOutcome := func() error {
+		if err := cfgMgr.LastReloadError(); err != nil {
+			return err
+		}
+		if dp := dpRef.Load(); dp != nil {
+			if err := dp.lastRebuildError(); err != nil {
+				return fmt.Errorf("routes not changed: %w", err)
+			}
+		}
+		return nil
+	}
+	apiSrv.SetReloadFunc(func() error {
+		mgr.Reload()
+		return reloadOutcome()
+	})
 	apiSrv.SetShutdownFunc(mgr.Shutdown)
+	if err := apiSrv.Listen(); err != nil {
+		_ = removeOwnPIDFile(pidfile)
+		return fmt.Errorf("management API can't listen on %s (is another vortex or program using it? set GUBERN_API_LISTEN to change it): %w",
+			managementAPIListenAddr(), err)
+	}
 	apiSrv.Start()
 	// Background sweeps that bound the rate-limiter maps (production audit H5).
 	apiSrv.StartCleanup(ctx)
@@ -625,7 +672,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		return apiSrv.Shutdown(ctx)
 	})
 	mgr.OnShutdown("pidfile", func(context.Context) error {
-		return os.Remove(pidfile)
+		return removeOwnPIDFile(pidfile)
 	})
 
 	// In-memory log ring buffer feeding GET /api/logs (the TUI log viewer).
@@ -663,13 +710,13 @@ func runStart(ctx context.Context, pidfile string) error {
 	}
 	display.Step("Secrets", fmt.Sprintf("%d/%d loaded", len(secretEnv), len(cfg.Secrets.Keys)))
 
-	// --- policy: OPA authorization engine (opt-in via VORTEX_POLICY_DIR) -----
+	// --- policy: OPA authorization engine (opt-in via GUBERN_POLICY_DIR) -----
 	policyEngine, err := buildPolicyEngine(log)
 	if err != nil {
 		display.StepFail("Policy engine", err.Error())
 		return fmt.Errorf("initialising policy engine: %w", err)
 	}
-	if os.Getenv("VORTEX_POLICY_DIR") != "" {
+	if os.Getenv("GUBERN_POLICY_DIR") != "" {
 		display.Step("Policy engine", "custom policies loaded")
 	} else {
 		display.Step("Policy engine", "default allow")
@@ -708,7 +755,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	tracer := tracerProvider.Tracer("vortex/proxy")
 
 	profiler := observability.NewProfiler(observability.ProfilerConfig{
-		Enabled: os.Getenv("VORTEX_PPROF") == "true",
+		Enabled: os.Getenv("GUBERN_PPROF") == "true",
 	})
 	go func() {
 		if perr := profiler.Start(ctx); perr != nil {
@@ -718,7 +765,7 @@ func runStart(ctx context.Context, pidfile string) error {
 
 	log.Info("observability started",
 		"tracing", cfg.Observability.Tracing && cfg.Observability.TraceEndpoint != "",
-		"profiling", os.Getenv("VORTEX_PPROF") == "true",
+		"profiling", os.Getenv("GUBERN_PPROF") == "true",
 		"metrics_path", "/metrics",
 	)
 	if cfg.Observability.Tracing && cfg.Observability.TraceEndpoint != "" {
@@ -807,6 +854,7 @@ func runStart(ctx context.Context, pidfile string) error {
 		display.StepFail("Routes", err.Error())
 		return fmt.Errorf("initialising proxy manager: %w", err)
 	}
+	dpRef.Store(dp)
 	if names := routeNames(cfg); len(names) > 0 {
 		display.Step("Routes", strings.Join(names, ", "))
 	} else {
@@ -820,6 +868,12 @@ func runStart(ctx context.Context, pidfile string) error {
 		if rerr := dp.rebuild(cfgMgr.Holder()); rerr != nil {
 			log.Error("proxy rebuild after reload failed, keeping previous routes", "err", rerr)
 		}
+		return nil
+	})
+	// Registered last, so it sees every hook's outcome: published in
+	// /api/status for `gubern reload` after a SIGHUP, which has no reply.
+	mgr.OnReload("reload-status", func(context.Context) error {
+		apiSrv.RecordReload(reloadOutcome())
 		return nil
 	})
 
@@ -843,7 +897,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	if msg.gateway != nil {
 		display.Step("AI gateway", "provider="+strings.Join(msg.gateway.ProviderNames(), ","))
 	} else {
-		display.Step("AI gateway", "not configured — run: vortex setup")
+		display.Step("AI gateway", "not configured — run: gubern setup")
 	}
 	if msg.telegram != nil {
 		display.Step("Messaging", "telegram")
@@ -879,7 +933,7 @@ func runStart(ctx context.Context, pidfile string) error {
 			}
 		})
 		// OpenAI-compatible /v1/* surface (upgrade 3): any OpenAI-speaking tool
-		// can use VORTEX as its AI backend with provider routing + cost tracking.
+		// can use Gubern as its AI backend with provider routing + cost tracking.
 		// CompleteStreamForModel serves stream:true with true token streaming.
 		// Both paths translate the api layer's client-requested generation cap
 		// onto the gateway's own context key (the packages stay decoupled: api
@@ -909,7 +963,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	if msg.gateway != nil {
 		gateway = msg.gateway
 	}
-	// --- VORTEX Forge (M13): autonomous app builder ------------------------
+	// --- Gubern Forge (M13): autonomous app builder ------------------------
 	// Built before the agent runtime so its BUILD_APP handler can be wired into
 	// the coordinator. forge imports agents, so the coordinator reaches forge
 	// only through a callback (no import cycle).
@@ -934,9 +988,11 @@ func runStart(ctx context.Context, pidfile string) error {
 	// Durable run store (production audit H3): the planned DAG and every task
 	// transition persist so interrupted runs resume at task granularity on the
 	// next boot — completed tasks keep their results and never re-execute.
+	bootSteps.begin(log)
+	bootSteps.step("orchestration run store")
 	var orchStore *orchestration.RunStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
-		orchDB := filepath.Join(cacheDir, "vortex", "memory", "orchestration.db")
+		orchDB := filepath.Join(userdir.App(cacheDir), "memory", "orchestration.db")
 		if rs, rerr := orchestration.NewRunStore(orchDB); rerr != nil {
 			log.Warn("orchestration run store unavailable, crash recovery disabled", "err", rerr)
 		} else {
@@ -946,12 +1002,14 @@ func runStart(ctx context.Context, pidfile string) error {
 			apiSrv.SetOrchStoreProvider(&api.OrchRunStoreAdapter{Store: rs})
 		}
 	}
+	bootSteps.step("orchestration")
 	orchestrateFn := buildOrchestration(ctx, gateway, msg, apiSrv, log, researchFn, devopsFn, pipelineFn, metrics, orchStore)
 	// Durable workflow store (upgrade 4 — crash recovery): opened here so the
 	// startup resume below can notify via the messaging router.
+	bootSteps.step("workflow store")
 	var workflowStore *agents.WorkflowStore
 	if cacheDir, cerr := os.UserCacheDir(); cerr == nil {
-		wfDB := filepath.Join(cacheDir, "vortex", "memory", "workflows.db")
+		wfDB := filepath.Join(userdir.App(cacheDir), "memory", "workflows.db")
 		if ws, werr := agents.NewWorkflowStore(wfDB); werr != nil {
 			log.Warn("workflow store unavailable, crash recovery disabled", "err", werr)
 		} else {
@@ -959,11 +1017,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		}
 	}
 	workDir := resolveWorkingDir()
+	bootSteps.step("local workspace config")
 	localFS, lerr := resolveLocalFSConfig(cfg, workDir)
 	if lerr != nil {
 		display.StepFail("Configuration", lerr.Error())
 		return fmt.Errorf("config invalid, refusing to start: %w", lerr)
 	}
+	bootSteps.step("agent runtime")
 	agentRuntime := buildAgentRuntime(ctx, log, apiSrv.Addr(), auditLog, gateway, msg.approvalFn, forgeBuildApp(forgeJobs), workDir, localFS, clarifying, pending, researchFn, devopsFn, pipelineFn, orchestrateFn)
 	if agentRuntime != nil {
 		adapter := &agentRuntimeAdapter{rt: agentRuntime}
@@ -987,13 +1047,13 @@ func runStart(ctx context.Context, pidfile string) error {
 		registerMessagingWebhooks(apiSrv, msg, agentRuntime, log)
 
 		// Specialist agent team (agent teams): coder → tester → reviewer over
-		// A2A. Enabled by --team or VORTEX_TEAM_MODE=true.
-		if teamMode || envTrue("VORTEX_TEAM_MODE") {
+		// A2A. Enabled by --team or GUBERN_TEAM_MODE=true.
+		if teamMode || envTrue("GUBERN_TEAM_MODE") {
 			wireAgentTeam(ctx, apiSrv, agentRuntime, gateway, msg.router, msg.telegram, workDir, localFS, display, log)
 		}
 	}
 
-	// --- VORTEX Studio (M12): browser IDE/terminal/db/git -------------------
+	// --- Gubern Studio (M12): browser IDE/terminal/db/git -------------------
 	if h := buildStudio(ctx, cfg, auditLog, mgr, log); h != nil {
 		apiSrv.SetStudioHandler(h)
 	}
@@ -1007,7 +1067,8 @@ func runStart(ctx context.Context, pidfile string) error {
 	buildHealing(ctx, cfg, apiSrv, mgr, msg, auditLog, metrics, log)
 	display.Step("Self-healing", "enabled")
 
-	log.Info("VORTEX started",
+	bootSteps.finish()
+	log.Info("Gubern started",
 		"version", version,
 		"cluster", cfg.Cluster.Name,
 		"api_addr", apiSrv.Addr(),
@@ -1029,7 +1090,7 @@ func runStart(ctx context.Context, pidfile string) error {
 	})
 
 	mgr.Run(ctx)
-	log.Info("VORTEX stopped cleanly")
+	log.Info("Gubern stopped cleanly")
 	return nil
 }
 
@@ -1053,11 +1114,58 @@ type dataPlane struct {
 	mu      sync.Mutex
 	current *proxy.Manager
 	cancel  context.CancelFunc
+	applied *config.Config // config the running manager was built from
+	lastErr error          // outcome of the most recent rebuild
 }
 
-// rebuild constructs a proxy.Manager from the current config and starts it,
-// stopping any previously-running manager first. On a build error the previous
-// manager is left running and the error is returned.
+// startGrace is how long apply waits for a new manager's listeners to fail.
+// Bind errors (port in use, permission denied) surface immediately.
+const startGrace = 500 * time.Millisecond
+
+// rebuild brings the routes in line with the holder's config. It does
+// nothing when that config is the one already running, which is the case
+// after a reload whose file failed validation. If the new routes fail to
+// start (a port in use, say), the previous routes are restored and the
+// holder is pointed back at their config, so one bad route can't take every
+// route down; the error is returned either way.
+func (d *dataPlane) rebuild(holder *config.Holder) error {
+	cfg := holder.Get()
+	d.mu.Lock()
+	prevCfg := d.applied
+	d.mu.Unlock()
+	if prevCfg != nil && (prevCfg == cfg || (cfg.Hash() != "" && prevCfg.Hash() == cfg.Hash())) {
+		d.setLastErr(nil)
+		return nil
+	}
+	err := d.apply(cfg)
+	if err != nil && prevCfg != nil {
+		d.log.Error("new routes failed to start, restoring previous routes", "err", err)
+		if rerr := d.apply(prevCfg); rerr != nil {
+			err = fmt.Errorf("%w; restoring previous routes also failed: %v", err, rerr)
+		} else {
+			holder.Store(prevCfg)
+		}
+	}
+	d.setLastErr(err)
+	return err
+}
+
+func (d *dataPlane) setLastErr(err error) {
+	d.mu.Lock()
+	d.lastErr = err
+	d.mu.Unlock()
+}
+
+// lastRebuildError returns the outcome of the most recent rebuild.
+func (d *dataPlane) lastRebuildError() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastErr
+}
+
+// apply constructs a proxy.Manager from cfg and starts it, stopping any
+// previously-running manager first. It returns an error if the manager can't
+// be built or a listener fails within startGrace.
 //
 // The previous manager is stopped BEFORE the new one starts: routes bind fixed
 // ports, so an overlapping start would race the old listener and fail with
@@ -1065,14 +1173,14 @@ type dataPlane struct {
 // frees the ports for a clean rebind. This trades a brief (sub-second) bind gap
 // for correctness; in-flight requests on the old listener still drain via the
 // listener's own graceful shutdown.
-func (d *dataPlane) rebuild(holder *config.Holder) error {
-	cfg := holder.Get()
+func (d *dataPlane) apply(cfg *config.Config) error {
 	mgr, err := proxy.NewManager(proxy.ManagerConfig{
 		Config: cfg, TLS: d.tls, TCPPool: d.pool, MTLSConfig: d.mtls,
 		PolicyEngine: d.policy, Edge: d.edge,
 		Metrics: d.metrics, Tracer: d.tracer,
 		Runtime: d.pluginRT, PluginRegistry: d.pluginReg,
 		Registry: d.tenantReg, Enforcer: d.tenantEnf, Logger: d.log,
+		BindHost: edgeBindHost(),
 	})
 	if err != nil {
 		return err
@@ -1092,11 +1200,24 @@ func (d *dataPlane) rebuild(holder *config.Holder) error {
 		_ = prev.Stop(context.Background())
 	}
 
+	started := make(chan error, 1)
 	go func() {
-		if perr := mgr.Start(runCtx); perr != nil {
+		perr := mgr.Start(runCtx)
+		if perr != nil {
 			d.log.Error("proxy manager stopped with error", "err", perr)
 		}
+		started <- perr
 	}()
+	select {
+	case perr := <-started:
+		if perr != nil {
+			return perr // Start already stopped every listener
+		}
+	case <-time.After(startGrace):
+	}
+	d.mu.Lock()
+	d.applied = cfg
+	d.mu.Unlock()
 	return nil
 }
 
@@ -1131,11 +1252,8 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 	if !needsTLS(cfg) {
 		return nil, nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	storePath := filepath.Join(cacheDir, "vortex", "certs")
+	cacheDir := userdir.Cache()
+	storePath := filepath.Join(userdir.App(cacheDir), "certs")
 	storeKey, err := deriveKey("tls-store")
 	if err != nil {
 		return nil, err
@@ -1147,11 +1265,33 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 		StorePath:  storePath,
 		StoreKey:   storeKey,
 		MinVersion: cfg.TLS.MinVersion,
+		Hosts:      tlsRouteHosts(cfg, log),
 		ACME: vtls.ACMEConfig{
 			Email:   cfg.TLS.ACMEEmail,
 			Staging: false,
 		},
 	})
+}
+
+// tlsRouteHosts returns the hosts of the TLS-bearing routes, which bound what
+// the TLS manager will issue or order certificates for. It returns nil
+// (unrestricted) when any https/h3 route has no host, because that route
+// serves every name.
+func tlsRouteHosts(cfg *config.Config, log *slog.Logger) []string {
+	var hosts []string
+	for _, r := range cfg.Routes {
+		if r.Protocol != "https" && r.Protocol != "h3" {
+			continue
+		}
+		if strings.TrimSpace(r.Host) == "" {
+			if cfg.TLS.Provider == "letsencrypt" || cfg.TLS.Provider == "zerossl" {
+				log.Warn("a TLS route has no host, so ACME will order certificates for any name a client sends; set host on every https/h3 route to restrict it", "route", r.Name)
+			}
+			return nil
+		}
+		hosts = append(hosts, r.Host)
+	}
+	return hosts
 }
 
 // needsTLS reports whether any route uses a TLS-bearing protocol.
@@ -1172,14 +1312,11 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 		return nil, nil
 	}
 	// The mTLS store path defaults to the user cache dir but can be overridden
-	// via VORTEX_MTLS_STORE so peers (and tests) can share the same cluster CA.
-	storePath := os.Getenv("VORTEX_MTLS_STORE")
+	// via GUBERN_MTLS_STORE so peers (and tests) can share the same cluster CA.
+	storePath := os.Getenv("GUBERN_MTLS_STORE")
 	if storePath == "" {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
-		storePath = filepath.Join(cacheDir, "vortex", "mtls")
+		cacheDir := userdir.Cache()
+		storePath = filepath.Join(userdir.App(cacheDir), "mtls")
 	}
 	mtlsKey, err := deriveKey("mtls-store")
 	if err != nil {
@@ -1217,17 +1354,14 @@ func buildMTLS(ctx context.Context, cfg *config.Config, log *slog.Logger) (*vtls
 }
 
 // openAPIKeyStore opens the API-key store, loading any persisted keys. The path
-// honours VORTEX_APIKEY_STORE (used by tests/operators) and otherwise defaults
+// honours GUBERN_APIKEY_STORE (used by tests/operators) and otherwise defaults
 // to <user-cache>/vortex/apikeys.json. A load failure is logged but not fatal —
 // the server starts with an empty store rather than refusing to boot.
 func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
-	path := os.Getenv("VORTEX_APIKEY_STORE")
+	path := os.Getenv("GUBERN_APIKEY_STORE")
 	if path == "" {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
-		path = filepath.Join(cacheDir, "vortex", "apikeys.json")
+		cacheDir := userdir.Cache()
+		path = filepath.Join(userdir.App(cacheDir), "apikeys.json")
 	}
 	// Ensure the parent directory exists so Save on shutdown succeeds.
 	if derr := os.MkdirAll(filepath.Dir(path), 0o700); derr != nil {
@@ -1244,11 +1378,8 @@ func openAPIKeyStore(log *slog.Logger) (*auth.APIKeyStore, string) {
 // <user-config>/vortex/tui-key. This matches tui.APIKeyFilePath() but is
 // computed locally so the server path does not import the TUI package.
 func tuiKeyPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "vortex", "tui-key")
+	dir := userdir.Config()
+	return filepath.Join(userdir.App(dir), "tui-key")
 }
 
 // ensureAPIKey guarantees the store holds at least one usable key so the local
@@ -1258,15 +1389,24 @@ func tuiKeyPath() string {
 func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
 	keyPath := tuiKeyPath()
 
-	// Step 1: import an existing tui-key (from `vortex setup`) so a raw key that
+	// Step 1: import an existing tui-key (from `gubern setup`) so a raw key that
 	// outlived an empty/rotated hash store still authenticates.
 	if data, err := os.ReadFile(keyPath); err == nil {
 		if raw := strings.TrimSpace(string(data)); raw != "" {
 			if _, verr := keyStore.Verify(raw); verr != nil {
-				// Not currently valid (store empty or out of sync) — re-admit it.
-				if ierr := keyStore.ImportRaw(raw, "admin", "default", []auth.Role{auth.RoleAdmin}, "tui-setup-key"); ierr != nil {
+				// Not currently valid (store empty or out of sync) — re-admit it,
+				// unless the operator revoked it: a revocation must survive the
+				// restart (audit F-03), so drop the dead plaintext instead.
+				ierr := keyStore.ImportRaw(raw, "admin", "default", []auth.Role{auth.RoleAdmin}, "tui-setup-key")
+				switch {
+				case errors.Is(ierr, auth.ErrRevoked):
+					log.Warn("tui-key was revoked; removing it (a new key is created if none remain)")
+					if rerr := os.Remove(keyPath); rerr != nil && !os.IsNotExist(rerr) {
+						log.Warn("removing revoked tui-key failed", "err", rerr)
+					}
+				case ierr != nil:
 					log.Warn("importing tui-key failed", "err", ierr)
-				} else {
+				default:
 					log.Info("loaded TUI key from setup config")
 				}
 			}
@@ -1296,8 +1436,8 @@ func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
 }
 
 // openRuntimeAuditLog opens the audit log used by the running server. The path
-// (VORTEX_AUDIT_LOG or <cache>/vortex/audit.log) and the master-key-derived
-// HMAC key match the `vortex audit` CLI so the same chain is verifiable. A
+// (GUBERN_AUDIT_LOG or <cache>/vortex/audit.log) and the master-key-derived
+// HMAC key match the `gubern audit` CLI so the same chain is verifiable. A
 // failure to open is fatal — an unwritable audit log is a security
 // regression, not something to silently skip.
 func openRuntimeAuditLog(log *slog.Logger) (*audit.Log, error) {
@@ -1318,17 +1458,17 @@ func openRuntimeAuditLog(log *slog.Logger) (*audit.Log, error) {
 }
 
 // buildCluster starts the gossip+raft cluster manager when the deployment is
-// multi-node (cfg.Cluster.Nodes has more than one entry) or VORTEX_BOOTSTRAP is
+// multi-node (cfg.Cluster.Nodes has more than one entry) or GUBERN_BOOTSTRAP is
 // set. Single-node deployments skip all clustering overhead and just log the
 // mode. The returned manager is nil in single-node mode.
 func buildCluster(ctx context.Context, cfg *config.Config, log *slog.Logger) (*cluster.Manager, error) {
-	bootstrap := os.Getenv("VORTEX_BOOTSTRAP") == "true"
+	bootstrap := os.Getenv("GUBERN_BOOTSTRAP") == "true"
 	if len(cfg.Cluster.Nodes) <= 1 && !bootstrap {
 		log.Info("running in single-node mode")
 		return nil, nil
 	}
 
-	bindAddr := os.Getenv("VORTEX_CLUSTER_BIND")
+	bindAddr := os.Getenv("GUBERN_CLUSTER_BIND")
 	if bindAddr == "" {
 		bindAddr = "127.0.0.1"
 	}
@@ -1556,9 +1696,9 @@ func secretBackendKind(cfg *config.Config) string {
 }
 
 // applyTuning logs the recommended OS tuning at startup, and applies it when
-// VORTEX_APPLY_TUNING=true (Linux + root only; otherwise settings are skipped).
+// GUBERN_APPLY_TUNING=true (Linux + root only; otherwise settings are skipped).
 func applyTuning(log *slog.Logger) {
-	apply := os.Getenv("VORTEX_APPLY_TUNING") == "true"
+	apply := os.Getenv("GUBERN_APPLY_TUNING") == "true"
 	res := perf.Apply(!apply)
 	for _, s := range res.Skipped {
 		log.Debug("os tuning skipped", "setting", s)
@@ -1572,22 +1712,22 @@ func applyTuning(log *slog.Logger) {
 }
 
 // startAutoscaler creates and starts the horizontal autoscaler when
-// VORTEX_AUTOSCALE_PROVIDER is set; otherwise it logs that autoscaling is off.
+// GUBERN_AUTOSCALE_PROVIDER is set; otherwise it logs that autoscaling is off.
 // CPU comes from a runtime/metrics sampler and the node count from live
 // cluster membership (1 in single-node mode) — real signals, not the
 // hardwired placeholders the production audit flagged (M4).
 func startAutoscaler(ctx context.Context, log *slog.Logger, nodes func() int) {
-	provider := os.Getenv("VORTEX_AUTOSCALE_PROVIDER")
+	provider := os.Getenv("GUBERN_AUTOSCALE_PROVIDER")
 	if provider == "" {
 		log.Info("autoscaler disabled")
 		return
 	}
 	cfg := perf.AutoscaleConfig{
 		Provider:   provider,
-		APIKey:     os.Getenv("VORTEX_AUTOSCALE_API_KEY"),
-		WebhookURL: os.Getenv("VORTEX_AUTOSCALE_WEBHOOK"),
-		MinNodes:   atoiDefault(os.Getenv("VORTEX_AUTOSCALE_MIN_NODES"), 1),
-		MaxNodes:   atoiDefault(os.Getenv("VORTEX_AUTOSCALE_MAX_NODES"), 10),
+		APIKey:     os.Getenv("GUBERN_AUTOSCALE_API_KEY"),
+		WebhookURL: os.Getenv("GUBERN_AUTOSCALE_WEBHOOK"),
+		MinNodes:   atoiDefault(os.Getenv("GUBERN_AUTOSCALE_MIN_NODES"), 1),
+		MaxNodes:   atoiDefault(os.Getenv("GUBERN_AUTOSCALE_MAX_NODES"), 10),
 	}
 	as, err := perf.NewAutoscaler(cfg)
 	if err != nil {
@@ -1636,7 +1776,7 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 		wf := wf
 		_ = store.Fail(wf.ID, "interrupted by shutdown; resubmitted on startup")
 		if router != nil {
-			_ = router.Send(ctx, messaging.SeverityInfo, "VORTEX",
+			_ = router.Send(ctx, messaging.SeverityInfo, "Gubern",
 				fmt.Sprintf("🔄 Resuming interrupted task:\n%s (step %d of %d)",
 					wf.Goal, wf.CurrentStep+1, len(wf.Steps)+1))
 		}
@@ -1665,15 +1805,13 @@ func resumeInterruptedWorkflows(ctx context.Context, store *agents.WorkflowStore
 // given AI gateway and approval function), and the supervising runtime. It
 // returns nil if construction fails (the server still runs without agents).
 func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, auditLog *audit.Log, gateway agents.AIGateway, approval agents.ApprovalFunc, buildApp agents.BuildAppFunc, workingDir string, localFS agents.LocalFSConfig, sessionClarifying, sessionPending func(string) bool, research agents.ResearchFunc, devops agents.DevOpsFunc, pipeline agents.PipelineFunc, orchestrate agents.OrchestrateFunc) *agents.Runtime {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	sandboxBase := filepath.Join(cacheDir, "vortex", "agents")
+	cacheDir := userdir.Cache()
+	sandboxBase := filepath.Join(userdir.App(cacheDir), "agents")
 
 	bus := agents.NewBus()
 	registry := agents.NewToolRegistry()
 	apiBaseURL := "http://" + apiAddr
+	bootSteps.step("agent tools")
 	if err := agents.RegisterBuiltins(registry, sandboxBase, agents.DefaultAllowedCommands, bus, apiBaseURL, "coordinator"); err != nil {
 		log.Warn("agent runtime disabled: tool registration failed", "err", err)
 		return nil
@@ -1686,6 +1824,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// side-effecting tool calls under durable-run scopes so a crash-resumed
 	// orchestration task replays already-performed effects instead of
 	// re-executing them. Optional — the runtime works unfenced without it.
+	bootSteps.step("effect ledger")
 	if ledger := openEffectLedger(log); ledger != nil {
 		sandboxed = sandboxed.WithEffectLedger(ledger)
 	}
@@ -1694,12 +1833,19 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// Optional agents.local_tools.trusted_root confines paths; auto_mode may
 	// waive repeated in-scope file approvals only inside that root.
 	localRegistry := agents.NewToolRegistry()
+	bootSteps.step("local tools")
 	if err := agents.RegisterLocalTools(localRegistry, localFS); err != nil {
 		log.Warn("local agent tools disabled: registration failed", "err", err)
 		localRegistry = nil
 	}
 
+	var coordAudit agents.AuditLogger
+	if auditLog != nil { // a nil *audit.Log in the interface would not be nil
+		coordAudit = auditLog
+	}
+	bootSteps.step("coordinator")
 	coord, err := agents.NewCoordinator(agents.CoordinatorConfig{
+		Audit:             coordAudit,
 		Bus:               bus,
 		Tools:             sandboxed,
 		LocalTools:        localRegistry,
@@ -1713,7 +1859,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 		DevOps:            devops,
 		Pipeline:          pipeline,
 		Orchestrate:       orchestrate,
-		MemoryStore:       filepath.Join(cacheDir, "vortex", "memory"),
+		MemoryStore:       filepath.Join(userdir.App(cacheDir), "memory"),
 		WorkingDir:        workingDir,
 	})
 	if err != nil {
@@ -1724,7 +1870,8 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 	// SQLite conversation store (M20): supersedes the JSON memory directory for
 	// persistence, listing, history, and full-text search. On first run, legacy
 	// per-session JSON files are migrated into the database (idempotent).
-	memoryDir := filepath.Join(cacheDir, "vortex", "memory")
+	memoryDir := filepath.Join(userdir.App(cacheDir), "memory")
+	bootSteps.step("conversation store")
 	if store, serr := agents.NewMemoryStore(filepath.Join(memoryDir, "conversations.db")); serr != nil {
 		log.Warn("SQLite conversation store unavailable, using JSON memory", "err", serr)
 	} else {
@@ -1739,7 +1886,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 
 	// Learned-skill store (upgrade 1 — self-improving agent): proven procedures
 	// are recalled into prompts and new ones distilled from completed tasks.
-	skillsDB := filepath.Join(cacheDir, "vortex", "memory", "skills.db")
+	skillsDB := filepath.Join(userdir.App(cacheDir), "memory", "skills.db")
 	if skills, serr := agents.NewSkillStore(skillsDB); serr != nil {
 		log.Warn("skill store unavailable, agent will not learn skills", "err", serr)
 	} else {
@@ -1749,7 +1896,7 @@ func buildAgentRuntime(ctx context.Context, log *slog.Logger, apiAddr string, au
 
 	// Episodic memory (upgrade 2 — tier-2 cross-session memory): durable facts
 	// recalled into prompts; new facts mined from each exchange in background.
-	episodesDB := filepath.Join(cacheDir, "vortex", "memory", "episodes.db")
+	episodesDB := filepath.Join(userdir.App(cacheDir), "memory", "episodes.db")
 	if episodes, eerr := agents.NewEpisodicStore(episodesDB); eerr != nil {
 		log.Warn("episodic memory unavailable", "err", eerr)
 	} else {
@@ -1811,6 +1958,10 @@ func (a *agentRuntimeAdapter) Approve(sessionID string, approved bool) (string, 
 	return a.rt.Approve(sessionID, approved)
 }
 
+func (a *agentRuntimeAdapter) ApproveAction(sessionID, actionID string, approved bool) (string, bool, error) {
+	return a.rt.ApproveAction(sessionID, actionID, approved)
+}
+
 func (a *agentRuntimeAdapter) ListSessions() []api.SessionSummary {
 	src := a.rt.ListSessions()
 	out := make([]api.SessionSummary, 0, len(src))
@@ -1839,13 +1990,10 @@ func buildForge(gateway agents.AIGateway, msg messagingComponents, log *slog.Log
 		log.Info("forge disabled (no AI gateway configured)")
 		return nil
 	}
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
-	sandboxBase := filepath.Join(cacheDir, "vortex", "agents", "forge")
+	cacheDir := userdir.Cache()
+	sandboxBase := filepath.Join(userdir.App(cacheDir), "agents", "forge")
 
-	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(cacheDir, "vortex", "forge-serve")}
+	delivery := forge.DeliveryConfig{ServeBase: filepath.Join(userdir.App(cacheDir), "forge-serve")}
 	if msg.router != nil {
 		delivery.Sender = &routerNotify{router: msg.router}
 	}
@@ -1929,7 +2077,7 @@ func (a *routerNotify) NotifyFile(ctx context.Context, filename string, data []b
 }
 
 func (a *routerNotify) SendMessage(ctx context.Context, _ int64, text string) error {
-	return a.router.Send(ctx, messaging.SeverityInfo, "VORTEX Forge", text)
+	return a.router.Send(ctx, messaging.SeverityInfo, "Gubern Forge", text)
 }
 
 func (a *routerNotify) SendFile(ctx context.Context, _ int64, filename string, data []byte, caption string) error {
@@ -2029,7 +2177,7 @@ func buildOrchestration(ctx context.Context, gateway agents.AIGateway, msg messa
 			}
 		}
 		// general / build_app / unwired → a direct model completion.
-		return gateway.Complete(ctx, input, "You are a VORTEX agent. Complete the task concisely.")
+		return gateway.Complete(ctx, input, "You are a Gubern agent. Complete the task concisely.")
 	})
 
 	var notifier orchestration.Notifier
@@ -2138,11 +2286,8 @@ var (
 // behaviour (at-least-once) rather than a failure.
 func openEffectLedger(log *slog.Logger) *agents.EffectLedger {
 	effectLedgerOnce.Do(func() {
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			cacheDir = os.TempDir()
-		}
-		ledger, lerr := agents.NewEffectLedger(filepath.Join(cacheDir, "vortex", "memory", "effects.db"))
+		cacheDir := userdir.Cache()
+		ledger, lerr := agents.NewEffectLedger(filepath.Join(userdir.App(cacheDir), "memory", "effects.db"))
 		if lerr != nil {
 			log.Warn("effect ledger unavailable, side-effect fencing disabled", "err", lerr)
 			return
@@ -2221,7 +2366,7 @@ func buildHealing(ctx context.Context, cfg *config.Config, apiSrv *api.Server,
 		if r.Listen <= 0 {
 			continue
 		}
-		addr := fmt.Sprintf("127.0.0.1:%d", r.Listen)
+		addr := edgeLocalAddr(r.Listen)
 		checks = append(checks, healing.HealthCheck{
 			Name: r.Name, Kind: healing.KindRoute, Target: addr,
 			Interval: 30 * time.Second, Timeout: 5 * time.Second, Threshold: 3,
@@ -2331,7 +2476,7 @@ type messagingComponents struct {
 	tgChat     int64 // resolved Telegram default chat (env or setup config)
 }
 
-// providerFromFile builds an AIProvider from the saved `vortex setup` config
+// providerFromFile builds an AIProvider from the saved `gubern setup` config
 // (decrypting its API key), or nil when no usable config exists. Env vars take
 // precedence; this is only consulted when none are set.
 func providerFromFile(log *slog.Logger) *messaging.AIProvider {
@@ -2411,49 +2556,49 @@ func backupProvidersFromFile(log *slog.Logger) []messaging.AIProvider {
 // bots from environment variables. All credentials come from the environment,
 // never from the config file. Returns a struct whose fields are nil when the
 // corresponding integration is not configured.
-func buildMessaging(log *slog.Logger) messagingComponents {
-	var m messagingComponents
-
-	// --- AI gateway: assemble providers from env keys -----------------------
+// aiProviders assembles the AI providers from env keys, falling back to the
+// saved `gubern setup` config when no provider env var is set. Shared by
+// start and `gubern ai probe`, so both see the same providers.
+func aiProviders(log *slog.Logger) []messaging.AIProvider {
 	var providers []messaging.AIProvider
-	if k := os.Getenv("VORTEX_ANTHROPIC_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_ANTHROPIC_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderClaude, APIKey: k,
 			Models: []string{"claude-opus-4-8"}, Priority: 0,
 		})
 	}
-	if k := os.Getenv("VORTEX_OPENAI_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_OPENAI_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderOpenAI, APIKey: k,
 			Models: []string{"gpt-4o"}, Priority: 1,
 		})
 	}
-	if u := os.Getenv("VORTEX_OLLAMA_URL"); u != "" {
+	if u := os.Getenv("GUBERN_OLLAMA_URL"); u != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderOllama, Endpoint: u,
 			Models: []string{"llama3"}, Priority: 2,
 		})
 	}
-	if k := os.Getenv("VORTEX_DEEPSEEK_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_DEEPSEEK_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderDeepSeek, APIKey: k,
 			Models: []string{"deepseek-chat"}, Priority: 2,
 		})
 	}
-	if k := os.Getenv("VORTEX_GEMINI_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_GEMINI_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderGemini, APIKey: k,
 			Models: []string{"gemini-1.5-flash"}, Priority: 3,
 		})
 	}
 	// --- M20 providers ------------------------------------------------------
-	if k := os.Getenv("VORTEX_GROQ_KEY"); k != "" {
+	if k := os.Getenv("GUBERN_GROQ_KEY"); k != "" {
 		providers = append(providers, messaging.AIProvider{
 			Name: messaging.ProviderGroq, APIKey: k,
 			Models: []string{"llama-3.1-70b-versatile"}, Priority: 2, // fast + cheap
 		})
 	}
-	if region := os.Getenv("VORTEX_BEDROCK_REGION"); region != "" {
+	if region := os.Getenv("GUBERN_BEDROCK_REGION"); region != "" {
 		if ak, sk := os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY"); ak != "" && sk != "" {
 			providers = append(providers, messaging.AIProvider{
 				Name:     messaging.ProviderBedrock,
@@ -2464,9 +2609,9 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			})
 		}
 	}
-	if k := os.Getenv("VORTEX_AZURE_OPENAI_KEY"); k != "" {
-		ep := os.Getenv("VORTEX_AZURE_OPENAI_ENDPOINT")
-		dep := os.Getenv("VORTEX_AZURE_OPENAI_DEPLOYMENT")
+	if k := os.Getenv("GUBERN_AZURE_OPENAI_KEY"); k != "" {
+		ep := os.Getenv("GUBERN_AZURE_OPENAI_ENDPOINT")
+		dep := os.Getenv("GUBERN_AZURE_OPENAI_DEPLOYMENT")
 		if ep != "" && dep != "" {
 			providers = append(providers, messaging.AIProvider{
 				Name: messaging.ProviderAzureOpenAI, APIKey: k,
@@ -2474,8 +2619,8 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			})
 		}
 	}
-	if k := os.Getenv("VORTEX_OPENROUTER_KEY"); k != "" {
-		model := os.Getenv("VORTEX_OPENROUTER_MODEL")
+	if k := os.Getenv("GUBERN_OPENROUTER_KEY"); k != "" {
+		model := os.Getenv("GUBERN_OPENROUTER_MODEL")
 		if model == "" {
 			model = "openai/gpt-4o"
 		}
@@ -2484,7 +2629,7 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			Models: []string{model}, Priority: 4,
 		})
 	}
-	// Fall back to the saved `vortex setup` config only when NO provider env var
+	// Fall back to the saved `gubern setup` config only when NO provider env var
 	// was set — env vars always override the file.
 	if len(providers) == 0 {
 		if p := providerFromFile(log); p != nil {
@@ -2494,6 +2639,14 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			providers = append(providers, backupProvidersFromFile(log)...)
 		}
 	}
+	return providers
+}
+
+func buildMessaging(log *slog.Logger) messagingComponents {
+	var m messagingComponents
+
+	// --- AI gateway: assemble providers from env keys -----------------------
+	providers := aiProviders(log)
 	if len(providers) > 0 {
 		gw, err := messaging.NewAIGateway(messaging.AIGatewayConfig{Providers: providers})
 		if err != nil {
@@ -2507,8 +2660,8 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 	// --- platform bots ------------------------------------------------------
 	// Telegram token+chat: env var wins; otherwise fall back to the setup config
 	// (ai-provider.json telegram_token/telegram_chat_id).
-	tgToken := os.Getenv("VORTEX_TELEGRAM_TOKEN")
-	tgChat := atoi64Default(os.Getenv("VORTEX_TELEGRAM_DEFAULT_CHAT"), 0)
+	tgToken := os.Getenv("GUBERN_TELEGRAM_TOKEN")
+	tgChat := atoi64Default(os.Getenv("GUBERN_TELEGRAM_DEFAULT_CHAT"), 0)
 	if tgToken == "" {
 		if fileTok, fileChat, ok := telegramFromFile(); ok {
 			tgToken = fileTok
@@ -2519,26 +2672,22 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		}
 	}
 	if tgToken != "" {
-		allowed := parseInt64List(os.Getenv("VORTEX_TELEGRAM_ALLOWED_IDS"))
+		allowed := parseInt64List(os.Getenv("GUBERN_TELEGRAM_ALLOWED_IDS"))
 		if len(allowed) == 0 && tgChat != 0 {
 			allowed = []int64{tgChat} // the configured chat is implicitly allowed
 		}
-		bot, err := messaging.NewTelegramBot(messaging.TelegramConfig{
-			Token:       tgToken,
-			AllowedIDs:  allowed,
-			SecretToken: os.Getenv("VORTEX_TELEGRAM_SECRET"),
-		})
-		if err != nil {
+		if bot, err := newTelegramBot(tgToken, allowed, log); err != nil {
 			log.Warn("telegram disabled", "err", err)
 		} else {
 			m.telegram = bot
 		}
 	}
-	if pid, tok := os.Getenv("VORTEX_WA_PHONE_ID"), os.Getenv("VORTEX_WA_TOKEN"); pid != "" && tok != "" {
+	if pid, tok := os.Getenv("GUBERN_WA_PHONE_ID"), os.Getenv("GUBERN_WA_TOKEN"); pid != "" && tok != "" {
 		bot, err := messaging.NewWhatsAppBot(messaging.WhatsAppConfig{
 			PhoneNumberID: pid, AccessToken: tok,
-			VerifyToken: os.Getenv("VORTEX_WA_VERIFY_TOKEN"),
-			AppSecret:   os.Getenv("VORTEX_WA_APP_SECRET"),
+			VerifyToken:    os.Getenv("GUBERN_WA_VERIFY_TOKEN"),
+			AppSecret:      os.Getenv("GUBERN_WA_APP_SECRET"),
+			AllowedNumbers: splitCSV(os.Getenv("GUBERN_WA_ALLOWED_NUMBERS")),
 		})
 		if err != nil {
 			log.Warn("whatsapp disabled", "err", err)
@@ -2546,11 +2695,17 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 			m.whatsapp = bot
 		}
 	}
-	if wh := os.Getenv("VORTEX_SLACK_WEBHOOK"); wh != "" {
+	if wh := os.Getenv("GUBERN_SLACK_WEBHOOK"); wh != "" {
 		bot, _ := messaging.NewSlackBot(messaging.SlackConfig{
 			WebhookURL:    wh,
-			SigningSecret: os.Getenv("VORTEX_SLACK_SIGNING_SECRET"),
+			SigningSecret: os.Getenv("GUBERN_SLACK_SIGNING_SECRET"),
+			AllowedUsers:  splitCSV(os.Getenv("GUBERN_SLACK_ALLOWED_USERS")),
+			ReadOnlyUsers: splitCSV(os.Getenv("GUBERN_SLACK_READONLY_USERS")),
+			AllowedTeams:  splitCSV(os.Getenv("GUBERN_SLACK_ALLOWED_TEAMS")),
 		})
+		if bot.InboundEnabled() && os.Getenv("GUBERN_SLACK_ALLOWED_USERS") == "" && os.Getenv("GUBERN_SLACK_READONLY_USERS") == "" {
+			log.Warn("slack: no users registered; slash commands answer only whoami until GUBERN_SLACK_ALLOWED_USERS is set")
+		}
 		m.slack = bot
 	}
 
@@ -2560,7 +2715,7 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 		WhatsApp:      m.whatsapp,
 		Slack:         m.slack,
 		DefaultChatID: tgChat,
-		DefaultPhone:  os.Getenv("VORTEX_WA_DEFAULT_PHONE"),
+		DefaultPhone:  os.Getenv("GUBERN_WA_DEFAULT_PHONE"),
 	})
 	m.tgChat = tgChat
 	if chans := m.router.ConfiguredChannels(); len(chans) > 0 {
@@ -2588,27 +2743,48 @@ func buildMessaging(log *slog.Logger) messagingComponents {
 // registerMessagingWebhooks mounts the configured platform webhooks with their
 // own per-IP rate limits (Telegram 30/min, WhatsApp 30/min, Slack 60/min).
 func registerMessagingWebhooks(apiSrv *api.Server, m messagingComponents, rt *agents.Runtime, log *slog.Logger) {
+	specs := messagingWebhookSpecs(m, rt, log)
+	if len(specs) > 0 {
+		apiSrv.SetWebhooks(specs)
+		log.Info("messaging webhooks registered", "count", len(specs))
+	}
+	registerTelegramDelivery(apiSrv, m, rt, log)
+}
+
+// messagingWebhookSpecs returns the inbound webhook routes to mount.
+func messagingWebhookSpecs(m messagingComponents, rt *agents.Runtime, log *slog.Logger) []api.WebhookSpec {
 	var specs []api.WebhookSpec
 	if m.telegram != nil {
 		specs = append(specs, api.WebhookSpec{
 			Path: "/webhook/telegram", Handler: m.telegram.HandleWebhook(rt), RPM: 30,
 		})
 	}
+	// The WhatsApp and Slack inbound routes are public (no API key) and feed
+	// the agent runtime, so they are mounted only when their platform secret
+	// is configured. Outbound alerts keep working either way.
 	if m.whatsapp != nil {
-		specs = append(specs, api.WebhookSpec{
-			Path: "/webhook/whatsapp", Handler: m.whatsapp.HandleWebhook(rt), RPM: 30,
-		})
+		if m.whatsapp.InboundEnabled() {
+			specs = append(specs, api.WebhookSpec{
+				Path: "/webhook/whatsapp", Handler: m.whatsapp.HandleWebhook(rt), RPM: 30,
+			})
+		} else {
+			log.Warn("whatsapp inbound webhook not mounted: set GUBERN_WA_APP_SECRET to accept messages (outbound still works)")
+		}
 	}
 	if m.slack != nil {
-		specs = append(specs, api.WebhookSpec{
-			Path: "/webhook/slack", Handler: m.slack.HandleSlashCommand(rt), RPM: 60,
-		})
+		if m.slack.InboundEnabled() {
+			specs = append(specs, api.WebhookSpec{
+				Path: "/webhook/slack", Handler: m.slack.HandleSlashCommand(rt), RPM: 60,
+			})
+		} else {
+			log.Warn("slack slash-command webhook not mounted: set GUBERN_SLACK_SIGNING_SECRET to accept commands (outbound alerts still work)")
+		}
 	}
-	if len(specs) > 0 {
-		apiSrv.SetWebhooks(specs)
-		log.Info("messaging webhooks registered", "count", len(specs))
-	}
+	return specs
+}
 
+// registerTelegramDelivery wires Telegram's command hooks and delivery mode.
+func registerTelegramDelivery(apiSrv *api.Server, m messagingComponents, rt *agents.Runtime, log *slog.Logger) {
 	// Telegram: wire built-in command hooks, register the command menu, and pick
 	// a delivery mode (polling for local testing, webhook for production). The
 	// network calls (setMyCommands, setWebhook) run in the BACKGROUND so a slow
@@ -2635,7 +2811,7 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 	bot.SetCommandHooks(messaging.CommandHooks{
 		Status: func() string {
 			cfg := apiSrv.StatusSnapshot()
-			return fmt.Sprintf("VORTEX %s ✅\nCluster: %s\nRoutes: %d active",
+			return fmt.Sprintf("Gubern %s ✅\nCluster: %s\nRoutes: %d active",
 				version, cfg.ClusterName, cfg.Routes)
 		},
 		Routes: func() string {
@@ -2675,15 +2851,35 @@ func wireTelegramCommands(bot *messaging.TelegramBot, apiSrv *api.Server, rt *ag
 	})
 }
 
-// startTelegramDelivery starts polling mode (VORTEX_TELEGRAM_POLLING=true) or
-// registers a webhook (VORTEX_PUBLIC_URL); otherwise logs how to enable one.
+// newTelegramBot builds the bot with a webhook secret. The webhook refuses
+// updates without the secret Telegram echoes back; with none configured
+// (GUBERN_TELEGRAM_SECRET), it uses a random one per start. Gubern registers
+// its own webhook (GUBERN_PUBLIC_URL) with it, so delivery keeps working,
+// and a forged POST to /webhook/telegram can't match it.
+func newTelegramBot(token string, allowed []int64, log *slog.Logger) (*messaging.TelegramBot, error) {
+	secret := os.Getenv("GUBERN_TELEGRAM_SECRET")
+	if secret == "" {
+		var err error
+		if secret, err = a2a.NewToken(); err != nil {
+			return nil, fmt.Errorf("generating a webhook secret: %w", err)
+		}
+		if os.Getenv("GUBERN_PUBLIC_URL") == "" && os.Getenv("GUBERN_TELEGRAM_POLLING") != "true" {
+			log.Warn("Telegram webhook secret not set: a webhook registered outside Gubern will be refused; " +
+				"set GUBERN_TELEGRAM_SECRET to its secret_token, or use GUBERN_PUBLIC_URL / GUBERN_TELEGRAM_POLLING=true")
+		}
+	}
+	return messaging.NewTelegramBot(messaging.TelegramConfig{Token: token, AllowedIDs: allowed, SecretToken: secret})
+}
+
+// startTelegramDelivery starts polling mode (GUBERN_TELEGRAM_POLLING=true) or
+// registers a webhook (GUBERN_PUBLIC_URL); otherwise logs how to enable one.
 func startTelegramDelivery(bot *messaging.TelegramBot, rt *agents.Runtime, log *slog.Logger) {
-	if os.Getenv("VORTEX_TELEGRAM_POLLING") == "true" {
+	if os.Getenv("GUBERN_TELEGRAM_POLLING") == "true" {
 		go bot.Poll(context.Background(), rt, 2*time.Second)
 		log.Info("Telegram polling mode enabled")
 		return
 	}
-	if pub := os.Getenv("VORTEX_PUBLIC_URL"); pub != "" {
+	if pub := os.Getenv("GUBERN_PUBLIC_URL"); pub != "" {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -2695,15 +2891,15 @@ func startTelegramDelivery(bot *messaging.TelegramBot, rt *agents.Runtime, log *
 		}()
 		return
 	}
-	log.Info("Telegram webhook not registered — set VORTEX_PUBLIC_URL or VORTEX_TELEGRAM_POLLING=true")
+	log.Info("Telegram webhook not registered — set GUBERN_PUBLIC_URL or GUBERN_TELEGRAM_POLLING=true")
 }
 
-// buildStudio constructs the VORTEX Studio handler tree (code-server proxy,
-// terminal, DB studio, git panel) when VORTEX_STUDIO_WORKSPACE is set. code-
+// buildStudio constructs the Gubern Studio handler tree (code-server proxy,
+// terminal, DB studio, git panel) when GUBERN_STUDIO_WORKSPACE is set. code-
 // server degrades gracefully when its binary is absent. Returns nil when Studio
 // is not configured.
 func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, mgr *lifecycle.Manager, log *slog.Logger) http.Handler {
-	workspace := os.Getenv("VORTEX_STUDIO_WORKSPACE")
+	workspace := os.Getenv("GUBERN_STUDIO_WORKSPACE")
 	if workspace == "" {
 		log.Info("studio disabled")
 		return nil
@@ -2712,13 +2908,10 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 	mux := http.NewServeMux()
 
 	// code-server (optional — graceful degradation when not installed).
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		cacheDir = os.TempDir()
-	}
+	cacheDir := userdir.Cache()
 	cs, cerr := studio.NewCodeServer(studio.CodeServerConfig{
 		WorkspaceDir: workspace,
-		DataDir:      filepath.Join(cacheDir, "vortex", "code-server"),
+		DataDir:      filepath.Join(userdir.App(cacheDir), "code-server"),
 		Logger:       log,
 	})
 	codeServerOK := false
@@ -2752,13 +2945,13 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 			dbRoutes = append(dbRoutes, studio.DBRoute{
 				Name:       rc.Name,
 				Kind:       studio.KindForPort(rc.Listen),
-				ListenAddr: fmt.Sprintf("127.0.0.1:%d", rc.Listen),
+				ListenAddr: edgeLocalAddr(rc.Listen),
 			})
 		}
 	}
 	db, _ := studio.NewDBStudio(studio.DBStudioConfig{
 		Routes:   dbRoutes,
-		ReadOnly: os.Getenv("VORTEX_STUDIO_DB_READONLY") != "false",
+		ReadOnly: os.Getenv("GUBERN_STUDIO_DB_READONLY") != "false",
 		AuditLog: auditLog,
 		Logger:   log,
 	})
@@ -2780,7 +2973,7 @@ func buildStudio(ctx context.Context, cfg *config.Config, auditLog *audit.Log, m
 }
 
 // parseInt64List parses a comma-separated list of int64s, skipping invalid
-// entries. Used for VORTEX_TELEGRAM_ALLOWED_IDS.
+// entries. Used for GUBERN_TELEGRAM_ALLOWED_IDS.
 func parseInt64List(s string) []int64 {
 	if s == "" {
 		return nil
@@ -2789,6 +2982,18 @@ func parseInt64List(s string) []int64 {
 	for _, part := range strings.Split(s, ",") {
 		if n, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
 			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// splitCSV splits a comma-separated list, trimming spaces and dropping empty
+// entries. Used for GUBERN_WA_ALLOWED_NUMBERS.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
 		}
 	}
 	return out
@@ -2808,8 +3013,8 @@ func atoi64Default(s string, def int64) int64 {
 
 // buildTenancy opens the namespace registry and builds the quota enforcer.
 // Both are always created so routes can declare a namespace_id; a route without
-// one incurs no tenancy cost. The registry path honours VORTEX_NAMESPACE_STORE
-// (shared with the `vortex namespace` CLI).
+// one incurs no tenancy cost. The registry path honours GUBERN_NAMESPACE_STORE
+// (shared with the `gubern namespace` CLI).
 func buildTenancy(log *slog.Logger) (*tenancy.Registry, *tenancy.Enforcer) {
 	reg := tenancy.NewRegistry()
 	path := namespaceStorePath()
@@ -2824,7 +3029,7 @@ func buildTenancy(log *slog.Logger) (*tenancy.Registry, *tenancy.Enforcer) {
 // buildPlugins creates the sandboxed WASM runtime and opens the plugin
 // registry. Both are always created so routes can declare plugins; a route with
 // no plugins incurs no per-request plugin cost. The registry path honours
-// VORTEX_PLUGIN_DIR (shared with the `vortex plugin` CLI).
+// GUBERN_PLUGIN_DIR (shared with the `vortex plugin` CLI).
 func buildPlugins(ctx context.Context, log *slog.Logger) (*plugins.Runtime, *plugins.Registry, error) {
 	rt, err := plugins.NewRuntime(ctx, plugins.RuntimeConfig{})
 	if err != nil {
@@ -2880,11 +3085,11 @@ func buildSecurityEdge(ctx context.Context, cfg *config.Config, log *slog.Logger
 }
 
 // buildPolicyEngine constructs the OPA policy engine. Policy enforcement is
-// opt-in: when VORTEX_POLICY_DIR is unset the engine compiles the built-in
+// opt-in: when GUBERN_POLICY_DIR is unset the engine compiles the built-in
 // allow-all policy, so a fresh install proxies all requests. A directory with
 // .rego files enables real enforcement.
 func buildPolicyEngine(log *slog.Logger) (*policy.Engine, error) {
-	policyDir := os.Getenv("VORTEX_POLICY_DIR")
+	policyDir := os.Getenv("GUBERN_POLICY_DIR")
 	engine, err := policy.NewEngine(policy.EngineConfig{
 		PolicyDir: policyDir,
 		QueryPath: "data.vortex.allow",
@@ -2934,7 +3139,7 @@ func loadSecrets(ctx context.Context, cfg *config.Config, log *slog.Logger) (map
 		case errors.Is(gerr, os.ErrNotExist):
 			missing = append(missing, key)
 			log.Warn("declared secret not set", "name", key,
-				"hint", "run: vortex secret set "+key+" <value>")
+				"hint", "run: gubern secret set "+key+" <value>")
 		default:
 			return nil, fmt.Errorf("checking secret %s: %w", key, gerr)
 		}
@@ -2967,7 +3172,7 @@ func checkSecretRotation(cfg *config.Config, router *messaging.Router, log *slog
 		return
 	}
 	for _, a := range alerts {
-		hint := "vortex secret set " + a.Name + " <value>"
+		hint := "gubern secret set " + a.Name + " <value>"
 		if a.Expired {
 			days := int(time.Since(a.Deadline).Hours() / 24)
 			log.Warn("secret EXPIRED", "name", a.Name,
@@ -3014,10 +3219,28 @@ func tlsChallengeHandler(tlsMgr *vtls.Manager, cfg *config.Config) http.Handler 
 	return tlsMgr.ChallengeHandler()
 }
 
+// edgeBindHost is the interface the edge (route listeners and the ACME
+// challenge server) binds, from GUBERN_EDGE_BIND_HOST. Empty, the default,
+// means all interfaces. Operators use it to keep the edge on one address;
+// tests set 127.0.0.1 so they don't open ports to the network.
+func edgeBindHost() string { return strings.TrimSpace(os.Getenv("GUBERN_EDGE_BIND_HOST")) }
+
+// edgeLocalAddr is where this process reaches its own route listener on
+// port: loopback when the edge binds all interfaces, else the bind host
+// (with GUBERN_EDGE_BIND_HOST=10.0.0.5 nothing listens on 127.0.0.1, so
+// health checks there would report every route down).
+func edgeLocalAddr(port int) string {
+	host := edgeBindHost()
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
 // startChallengeServer serves the ACME HTTP-01 challenge handler on :80 and
 // registers its shutdown with the lifecycle manager.
 func startChallengeServer(mgr *lifecycle.Manager, h http.Handler, log *slog.Logger) {
-	srv := &http.Server{Addr: ":80", Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: net.JoinHostPort(edgeBindHost(), "80"), Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Warn("ACME challenge server stopped", "err", err)
@@ -3026,12 +3249,24 @@ func startChallengeServer(mgr *lifecycle.Manager, h http.Handler, log *slog.Logg
 	mgr.OnShutdown("acme-challenge", func(c context.Context) error { return srv.Shutdown(c) })
 }
 
-// writePIDFile writes the current process ID to path as plain text. The richer
-// stale-lock-aware logic lives in pkg/pidfile (used by stop/status/reload).
+// writePIDFile claims path for this process. It refuses when the file names
+// a live process and replaces a stale one (a crashed run). It used to
+// overwrite the file unconditionally: a second `gubern start` replaced the
+// running server's PID with its own, then failed on the busy ports and
+// exited, after which `gubern status` and `gubern stop` reported "not
+// running" for a server that was still serving.
 func writePIDFile(path string) error {
-	pid := strconv.Itoa(os.Getpid())
-	if err := os.WriteFile(path, []byte(pid+"\n"), 0o644); err != nil {
+	if err := pidfile.Write(path); err != nil {
 		return fmt.Errorf("writing pidfile %s: %w", path, err)
 	}
 	return nil
+}
+
+// removeOwnPIDFile deletes path only if it still names this process, so a
+// shutdown never removes another instance's pidfile.
+func removeOwnPIDFile(path string) error {
+	if pid, err := pidfile.Read(path); err != nil || pid != os.Getpid() {
+		return nil
+	}
+	return pidfile.Remove(path)
 }

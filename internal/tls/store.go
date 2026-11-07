@@ -1,4 +1,4 @@
-// Package vtls implements VORTEX's TLS layer (build plan M2.4): an encrypted
+// Package vtls implements Gubern's TLS layer (build plan M2.4): an encrypted
 // certificate store, a local development CA, an ACME (Let's Encrypt/ZeroSSL)
 // manager, and a unified entry point. It is named vtls — not tls — to avoid
 // shadowing the standard library's crypto/tls, which it uses heavily.

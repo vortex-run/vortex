@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package testutil provides helpers for VORTEX's integration tests: building
+// Package testutil provides helpers for Gubern's integration tests: building
 // the binary, starting and stopping a real vortex process, and talking to its
 // management API. It is compiled only under the `integration` build tag so it
 // never bloats normal builds.
@@ -37,23 +37,36 @@ const apiBase = "http://127.0.0.1:9090"
 // package). The binary is removed when the test finishes.
 func BuildBinary(t *testing.T) string {
 	t.Helper()
+	if sharedBinary != "" {
+		return sharedBinary
+	}
 	dir := t.TempDir()
-	name := "vortex"
+	name := "gubern"
 	if runtime.GOOS == "windows" {
-		name = "vortex.exe"
+		name = "gubern.exe"
 	}
 	bin := filepath.Join(dir, name)
 
 	repoRoot := moduleRoot(t)
 
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/gubern")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building vortex binary: %v\n%s", err, out)
+		t.Fatalf("building gubern binary: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { _ = os.Remove(bin) })
 	return bin
 }
+
+// sharedBinary, when set, is returned by BuildBinary instead of compiling a
+// fresh binary for every test.
+var sharedBinary string
+
+// SetSharedBinary makes BuildBinary return bin (built once, typically by
+// BuildBinaryInto from TestMain). The integration suite calls BuildBinary in
+// about a hundred tests, and a full link each time cost minutes per test on
+// slow filesystems.
+func SetSharedBinary(bin string) { sharedBinary = bin }
 
 // BuildBinaryInto compiles the vortex binary into destDir and returns its path,
 // WITHOUT registering any per-test cleanup. Callers own destDir's lifetime —
@@ -61,9 +74,9 @@ func BuildBinary(t *testing.T) string {
 // suite (BuildBinary ties the binary to a single test via t.TempDir/t.Cleanup,
 // which deletes it when that one test finishes).
 func BuildBinaryInto(destDir string) (string, error) {
-	name := "vortex"
+	name := "gubern"
 	if runtime.GOOS == "windows" {
-		name = "vortex.exe"
+		name = "gubern.exe"
 	}
 	bin := filepath.Join(destDir, name)
 
@@ -71,10 +84,10 @@ func BuildBinaryInto(destDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vortex")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/gubern")
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("building vortex binary: %w\n%s", err, out)
+		return "", fmt.Errorf("building gubern binary: %w\n%s", err, out)
 	}
 	return bin, nil
 }
@@ -143,6 +156,11 @@ func (p *VortexProcess) env() []string {
 		"APPDATA="+p.ConfigHome,
 		"LocalAppData="+p.ConfigHome,
 		"LOCALAPPDATA="+p.ConfigHome,
+		// Keep every listener on loopback: tests talk to 127.0.0.1 only, and
+		// binding all interfaces opens ports to the network (and raises a
+		// Windows Firewall prompt per freshly built binary).
+		"GUBERN_API_LISTEN=127.0.0.1:9090",
+		"GUBERN_EDGE_BIND_HOST=127.0.0.1",
 	)
 }
 
@@ -190,7 +208,7 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	args := append([]string{"start", "--config", configPath, "--log-level", "debug"}, extraArgs...)
 	cmd := exec.Command(bin, args...)
 	// Isolate the user config dir: the developer's real ai-provider.json (from
-	// `vortex setup`) must not leak into the child, or gateway-dependent tests
+	// `gubern setup`) must not leak into the child, or gateway-dependent tests
 	// (e.g. forge-disabled-without-AI) behave differently per machine. ONE dir
 	// is shared by the server and Run-invoked CLI calls (see env()).
 	p := &VortexProcess{
@@ -221,10 +239,11 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 	// the wrong server). The management API starts serving before the later
 	// subsystems (studio, agents, webhooks) are wired onto it, so waiting for
 	// "management API listening" alone races tests that hit those endpoints
-	// immediately. "VORTEX started" is logged only after all wiring completes.
-	deadline := time.Now().Add(15 * time.Second)
+	// immediately. "Gubern started" is logged only after all wiring completes.
+	wait := startTimeout()
+	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
-		if strings.Contains(p.logBuf.String(), "VORTEX started") {
+		if strings.Contains(p.logBuf.String(), "Gubern started") {
 			resp, err := http.Get(apiBase + "/health")
 			if err == nil {
 				_ = resp.Body.Close()
@@ -235,7 +254,8 @@ func StartVortexWithArgs(t *testing.T, bin, configPath string, extraArgs ...stri
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("vortex did not become healthy within 15s:\n%s", p.logBuf.String())
+	dumpStacks(p)
+	t.Fatalf("vortex did not become healthy within %s:\n%s", wait, p.logBuf.String())
 	return nil
 }
 
@@ -326,6 +346,10 @@ func runBinary(t *testing.T, bin string, env []string, args ...string) (string, 
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = env
+	// On a hang, ask for goroutine stacks (SIGQUIT on Unix) rather than a
+	// silent kill, so the failure output shows where it was stuck.
+	cmd.Cancel = func() error { return quitForStacks(cmd.Process) }
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -344,9 +368,22 @@ func runBinary(t *testing.T, bin string, env []string, args ...string) (string, 
 func WriteTestConfig(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
-	p := filepath.Join(dir, "vortex.cue")
+	p := filepath.Join(dir, "gubern.cue")
 	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 		t.Fatalf("writing test config: %v", err)
 	}
 	return p
+}
+
+// startTimeout is how long StartVortex waits for "Gubern started". Startup
+// takes ~3s on an idle machine; on a loaded one (e.g. a WSL VM sharing CPU
+// with host builds) it can exceed 15s. GUBERN_TEST_START_TIMEOUT (a Go
+// duration) raises it for such runs; the default is unchanged for CI.
+func startTimeout() time.Duration {
+	if v := os.Getenv("GUBERN_TEST_START_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 15 * time.Second
 }
