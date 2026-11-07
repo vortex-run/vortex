@@ -26,7 +26,7 @@ import (
 // environment (GUBERN_TELEGRAM_TOKEN), never from the config file.
 type TelegramConfig struct {
 	Token       string  // bot token (from env)
-	AllowedIDs  []int64 // allowed chat/user IDs; empty means allow none
+	AllowedIDs  []int64 // allowed chat/user IDs; empty means allow none. A group message needs BOTH the group and the sender listed.
 	WebhookURL  string  // public webhook URL (optional)
 	SecretToken string  // X-Telegram-Bot-Api-Secret-Token expected on webhooks
 	// BaseURL overrides the Telegram API base (for tests). When empty the real
@@ -333,7 +333,7 @@ func (t *TelegramBot) processUpdate(ctx context.Context, runtime *agents.Runtime
 	if upd.Message == nil {
 		return
 	}
-	if !t.allowed(upd.Message.Chat.ID) {
+	if !t.allowedMessage(upd.Message) {
 		return
 	}
 	t.dispatch(ctx, runtime, upd.Message.Chat.ID, upd.Message.Text)
@@ -353,14 +353,30 @@ func (t *TelegramBot) allowedCallback(cq *telegramCallback) (chatID int64, ok bo
 
 // telegramUpdate is the subset of a Telegram Update we consume.
 type telegramUpdate struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		Chat struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
-	} `json:"message"`
+	UpdateID      int64             `json:"update_id"`
+	Message       *telegramMessage  `json:"message"`
 	CallbackQuery *telegramCallback `json:"callback_query"`
+}
+
+// telegramMessage is the subset of a Telegram Message we consume.
+type telegramMessage struct {
+	Chat struct {
+		ID int64 `json:"id"`
+	} `json:"chat"`
+	From *struct {
+		ID int64 `json:"id"`
+	} `json:"from"`
+	Text string `json:"text"`
+}
+
+// allowedMessage reports whether a text message may act. Like a button press,
+// the SENDER must be allowed, not just the chat: in an allowed group chat any
+// member could otherwise /approve the agent's pending actions or run /ls on
+// host paths (audit F-08). In a private chat the chat ID is the user's ID, so
+// listing a user still covers their DMs. Messages with no sender (channel
+// posts) are refused.
+func (t *TelegramBot) allowedMessage(m *telegramMessage) bool {
+	return m.From != nil && t.allowed(m.Chat.ID) && t.allowed(m.From.ID)
 }
 
 // telegramCallback is an inline-button press.
@@ -432,7 +448,7 @@ func (t *TelegramBot) HandleWebhook(runtime *agents.Runtime) http.Handler {
 			w.WriteHeader(http.StatusOK)
 		case upd.Message != nil:
 			chatID := upd.Message.Chat.ID
-			if !t.allowed(chatID) {
+			if !t.allowedMessage(upd.Message) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

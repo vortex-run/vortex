@@ -124,7 +124,7 @@ observability: {
 | `GUBERN_BEDROCK_REGION` + `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | AWS Bedrock. |
 | `GUBERN_AZURE_OPENAI_KEY` / `_ENDPOINT` / `_DEPLOYMENT` | Azure OpenAI. |
 | `GUBERN_TELEGRAM_TOKEN`, `GUBERN_TELEGRAM_DEFAULT_CHAT` | Telegram bot. |
-| `GUBERN_TELEGRAM_ALLOWED_IDS` | Comma-separated chat IDs allowed to command the bot. Empty allows nobody. Approval buttons also require the pressing user's ID to be listed. |
+| `GUBERN_TELEGRAM_ALLOWED_IDS` | Comma-separated chat and user IDs allowed to command the bot. Empty allows nobody. The sender's own user ID must be listed for both messages and approval buttons; in a group chat, list the group ID **and** each member allowed to command the bot. |
 | `GUBERN_TELEGRAM_SECRET` | Secret Telegram sends with each webhook update (`secret_token`); `/webhook/telegram` refuses updates without it. Unset: a random one is generated per start and registered when Gubern sets the webhook itself (`GUBERN_PUBLIC_URL`). Set it if you register the webhook yourself. |
 | `GUBERN_WA_PHONE_ID`, `GUBERN_WA_TOKEN` | WhatsApp Cloud API (outbound messages and alerts). |
 | `GUBERN_WA_APP_SECRET` | Verifies `X-Hub-Signature-256` on inbound messages. **Required for `/webhook/whatsapp` to be mounted**; without it, WhatsApp is outbound-only. |
