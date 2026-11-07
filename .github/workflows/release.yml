@@ -27,6 +27,13 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    # The signing key makes a release trusted by every `gubern self-update`.
+    # The protected `release` environment requires the maintainer's approval
+    # before this job (and so the key) runs, and only v* tags may deploy to it.
+    # A `release-tags` ruleset lets only repo admins create or move v* tags.
+    # Keep VORTEX_SIGNING_KEY as a secret of this environment, not the repo,
+    # so no other workflow can read it (audit NV-03).
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
