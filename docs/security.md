@@ -228,8 +228,11 @@ for production releases.
 
 When a server entry sets `known_hosts`, Gubern verifies the remote host key
 against that OpenSSH known_hosts file. With no file configured, connections
-use trust-on-first-use (TOFU) and log the fingerprint when a logger is set —
-prefer an explicit known_hosts file for production fleets.
+use trust-on-first-use (TOFU): the first key seen for a host is pinned in
+`<config dir>/gubern/ssh_known_hosts`, and a later connection that presents a
+different key is refused as a possible man-in-the-middle (remove the host's line
+from that file after a legitimate rebuild). Prefer an explicit known_hosts file
+for production fleets.
 
 ## Multi-node & containment (honest boundaries)
 

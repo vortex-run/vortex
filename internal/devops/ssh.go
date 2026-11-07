@@ -13,14 +13,19 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"github.com/sandeepbollavaram/vortex/internal/userdir"
 )
 
 // SSHConfig configures an SSH connection.
@@ -33,6 +38,10 @@ type SSHConfig struct {
 	KeyData    []byte        // inline private key (takes precedence over KeyPath)
 	Timeout    time.Duration // dial/handshake timeout (default 30s)
 	KnownHosts string        // path to known_hosts; empty = TOFU
+	// TOFUStore is the file trust-on-first-use pins host keys in when
+	// KnownHosts is empty. Empty uses the per-user default
+	// (<config>/gubern/ssh_known_hosts).
+	TOFUStore string
 }
 
 // SSHClient is a connected (or connectable) SSH client.
@@ -105,8 +114,11 @@ func NewSSHClient(cfg SSHConfig) (*SSHClient, error) {
 func (c *SSHClient) SetTOFULogger(fn func(host, fingerprint string)) { c.tofuLog = fn }
 
 // hostKeyCallback returns a host-key verifier. With KnownHosts set it uses
-// strict OpenSSH known_hosts verification; otherwise it trusts on first use
-// (TOFU) and logs the fingerprint via tofuLog when configured.
+// strict OpenSSH known_hosts verification. Otherwise it is real trust on first
+// use: the first key seen for a host is pinned in TOFUStore and every later
+// connection must present that key. A changed key is refused as a possible
+// man-in-the-middle. Before audit F-14 the TOFU path accepted any key on every
+// connection and pinned nothing.
 func (c *SSHClient) hostKeyCallback() (ssh.HostKeyCallback, error) {
 	if path := strings.TrimSpace(c.cfg.KnownHosts); path != "" {
 		cb, err := knownhosts.New(path)
@@ -115,12 +127,66 @@ func (c *SSHClient) hostKeyCallback() (ssh.HostKeyCallback, error) {
 		}
 		return cb, nil
 	}
-	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
-		if c.tofuLog != nil {
-			c.tofuLog(hostname, ssh.FingerprintSHA256(key))
+	store := strings.TrimSpace(c.cfg.TOFUStore)
+	if store == "" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return nil, fmt.Errorf("devops: no config dir for the SSH host-key store (set KnownHosts): %w", err)
 		}
-		return nil // Trust On First Use when no known_hosts file is configured
+		store = filepath.Join(userdir.App(dir), "ssh_known_hosts")
+	}
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		return tofuVerify(store, hostname, remote, key, c.tofuLog)
 	}, nil
+}
+
+// tofuMu serialises TOFU store reads and appends within the process.
+var tofuMu sync.Mutex
+
+// tofuVerify checks key against the pins in store, pinning it when the host
+// has none yet.
+func tofuVerify(store, hostname string, remote net.Addr, key ssh.PublicKey, logFn func(host, fingerprint string)) error {
+	tofuMu.Lock()
+	defer tofuMu.Unlock()
+	cb, err := knownhosts.New(store)
+	switch {
+	case err == nil:
+		verr := cb(hostname, remote, key)
+		if verr == nil {
+			return nil
+		}
+		var ke *knownhosts.KeyError
+		if !errors.As(verr, &ke) {
+			return verr
+		}
+		if len(ke.Want) > 0 {
+			return fmt.Errorf("devops: SSH host key for %s changed (now %s) — refusing to connect; possible man-in-the-middle. If the server was legitimately rebuilt, remove its line from %s",
+				hostname, ssh.FingerprintSHA256(key), store)
+		}
+		// Unknown host: fall through and pin it.
+	case errors.Is(err, fs.ErrNotExist):
+	default:
+		return fmt.Errorf("devops: reading SSH host-key store %s: %w", store, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+		return fmt.Errorf("devops: creating SSH host-key store dir: %w", err)
+	}
+	f, err := os.OpenFile(store, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // per-user store path
+	if err != nil {
+		return fmt.Errorf("devops: opening SSH host-key store: %w", err)
+	}
+	line := knownhosts.Line([]string{knownhosts.Normalize(hostname)}, key) + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("devops: pinning SSH host key: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("devops: pinning SSH host key: %w", err)
+	}
+	if logFn != nil {
+		logFn(hostname, ssh.FingerprintSHA256(key))
+	}
+	return nil
 }
 
 // Connect establishes the SSH connection (verifying the host key per config).
