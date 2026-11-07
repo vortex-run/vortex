@@ -1372,10 +1372,19 @@ func ensureAPIKey(keyStore *auth.APIKeyStore, log *slog.Logger) {
 	if data, err := os.ReadFile(keyPath); err == nil {
 		if raw := strings.TrimSpace(string(data)); raw != "" {
 			if _, verr := keyStore.Verify(raw); verr != nil {
-				// Not currently valid (store empty or out of sync) — re-admit it.
-				if ierr := keyStore.ImportRaw(raw, "admin", "default", []auth.Role{auth.RoleAdmin}, "tui-setup-key"); ierr != nil {
+				// Not currently valid (store empty or out of sync) — re-admit it,
+				// unless the operator revoked it: a revocation must survive the
+				// restart (audit F-03), so drop the dead plaintext instead.
+				ierr := keyStore.ImportRaw(raw, "admin", "default", []auth.Role{auth.RoleAdmin}, "tui-setup-key")
+				switch {
+				case errors.Is(ierr, auth.ErrRevoked):
+					log.Warn("tui-key was revoked; removing it (a new key is created if none remain)")
+					if rerr := os.Remove(keyPath); rerr != nil && !os.IsNotExist(rerr) {
+						log.Warn("removing revoked tui-key failed", "err", rerr)
+					}
+				case ierr != nil:
 					log.Warn("importing tui-key failed", "err", ierr)
-				} else {
+				default:
 					log.Info("loaded TUI key from setup config")
 				}
 			}
