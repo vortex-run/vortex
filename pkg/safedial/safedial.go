@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"time"
 )
@@ -23,22 +24,81 @@ import (
 var ErrBlocked = fmt.Errorf("safedial: blocked internal address")
 
 // metadataIPs are cloud instance-metadata addresses that must never be reached.
+// 100.100.100.200 is Alibaba Cloud ECS metadata (RAM-role STS credentials);
+// it is also inside the blocked CGNAT range, listed for clarity.
 var metadataIPs = map[string]bool{
 	"169.254.169.254": true,
 	"fd00:ec2::254":   true,
+	"100.100.100.200": true,
+}
+
+// blockedPrefixes are non-global ranges that net.IP's predicates do not cover
+// (audit F-11): RFC 6598 shared/CGNAT space (Tailscale and carrier overlays,
+// Alibaba metadata), "this network", IETF protocol assignments, benchmarking,
+// multicast, reserved/broadcast, the local-use NAT64 prefix, Teredo, and
+// IPv6 multicast and discard-only space.
+var blockedPrefixes = mustPrefixes(
+	"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15",
+	"224.0.0.0/4", "240.0.0.0/4",
+	"64:ff9b:1::/48", "2001::/32", "100::/64", "ff00::/8",
+)
+
+// Prefixes whose addresses embed an IPv4 address that the network translates
+// to: NAT64 well-known (RFC 6052, low 32 bits) and 6to4 (RFC 3056, bits
+// 16-47). 64:ff9b::a9fe:a9fe reaches 169.254.169.254 through a NAT64 gateway.
+var (
+	nat64WKP  = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFour = netip.MustParsePrefix("2002::/16")
+)
+
+func mustPrefixes(cidrs ...string) []netip.Prefix {
+	out := make([]netip.Prefix, len(cidrs))
+	for i, c := range cidrs {
+		out[i] = netip.MustParsePrefix(c)
+	}
+	return out
 }
 
 // IsBlockedIP reports whether ip is loopback, link-local, private, metadata,
-// or otherwise unsafe to reach from a server-side fetcher.
+// shared/CGNAT, multicast, reserved, or an IPv6 address that embeds a blocked
+// IPv4 address — anything unsafe to reach from a server-side fetcher. This is
+// the one blocklist: the agents http_get pre-flight and the research fetcher
+// call it too, so the checks cannot drift apart.
 func IsBlockedIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
-	if metadataIPs[ip.String()] {
+	a, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return true
 	}
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || ip.IsUnspecified()
+	return blockedAddr(a.Unmap(), true)
+}
+
+func blockedAddr(a netip.Addr, recurse bool) bool {
+	ip := net.IP(a.AsSlice())
+	if metadataIPs[a.String()] {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsPrivate() || ip.IsUnspecified() {
+		return true
+	}
+	for _, p := range blockedPrefixes {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	if recurse && a.Is6() {
+		b := a.As16()
+		switch {
+		case nat64WKP.Contains(a):
+			return blockedAddr(netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), false)
+		case sixToFour.Contains(a):
+			return blockedAddr(netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), false)
+		}
+	}
+	return false
 }
 
 // Config tunes a safe client.

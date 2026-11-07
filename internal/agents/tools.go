@@ -106,12 +106,6 @@ func strParam(params map[string]any, key string) (string, error) {
 // loopback, link-local, or cloud-metadata address (SSRF prevention).
 var ErrSSRFBlocked = errors.New("agents: SSRF target blocked")
 
-// metadataIPs are well-known cloud instance-metadata service addresses.
-var metadataIPs = map[string]bool{
-	"169.254.169.254": true, // AWS / GCP / Azure (IMDS)
-	"fd00:ec2::254":   true, // AWS IPv6 metadata
-}
-
 // HTTPGetTool performs an HTTP(S) GET request with SSRF protection.
 type HTTPGetTool struct {
 	Client *http.Client
@@ -126,20 +120,10 @@ func (HTTPGetTool) Name() string { return "http_get" }
 // Description returns a human-readable summary.
 func (HTTPGetTool) Description() string { return "HTTP GET a http/https URL (SSRF-protected)" }
 
-// blockedIP reports whether ip is a loopback, link-local, private, or
-// metadata address that http_get must never reach.
-func blockedIP(ip net.IP) bool {
-	if ip == nil {
-		return true // unparseable → block
-	}
-	if metadataIPs[ip.String()] {
-		return true
-	}
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() || // RFC1918 + IPv6 ULA (fc00::/7)
-		ip.IsUnspecified()
-}
+// blockedIP reports whether http_get must never reach ip. It is the shared
+// safedial blocklist, so the pre-flight check and the dialer agree (a separate
+// copy here missed CGNAT and NAT64 — audit F-11).
+func blockedIP(ip net.IP) bool { return safedial.IsBlockedIP(ip) }
 
 // isSSRFTarget resolves rawURL's host and returns ErrSSRFBlocked if the scheme
 // is not http/https, the host is in no allow-list, or any resolved IP is a
