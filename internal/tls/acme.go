@@ -37,6 +37,10 @@ type ACMEConfig struct {
 	Staging bool
 	// Logger receives renewal diagnostics; defaults to slog.Default.
 	Logger *slog.Logger
+	// HostPolicy, when set, restricts which names autocert may order
+	// certificates for. Without one any SNI an anonymous client sends makes
+	// Gubern place a CA order on the operator's account (audit NV-04).
+	HostPolicy autocert.HostPolicy
 }
 
 // ACMEManager obtains and renews certificates via the ACME protocol, backed by
@@ -81,6 +85,7 @@ func NewACMEManager(cfg ACMEConfig) (*ACMEManager, error) {
 		Cache:       autocert.DirCache(filepath.Join(cfg.Store.path, "acme-cache")),
 		Client:      &acme.Client{DirectoryURL: dir},
 		RenewBefore: renewBefore,
+		HostPolicy:  cfg.HostPolicy,
 	}
 	return m, nil
 }

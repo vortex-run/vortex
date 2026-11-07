@@ -118,6 +118,16 @@ func (ca *LocalCA) Issue(domain string) (*tls.Certificate, error) {
 			return cert, nil
 		}
 	}
+	return ca.issue(domain, true)
+}
+
+// issueEphemeral signs a leaf for domain without persisting it.
+func (ca *LocalCA) issueEphemeral(domain string) (*tls.Certificate, error) {
+	return ca.issue(domain, false)
+}
+
+// issue signs a new leaf for domain, persisting it when persist is true.
+func (ca *LocalCA) issue(domain string, persist bool) (*tls.Certificate, error) {
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -148,6 +158,9 @@ func (ca *LocalCA) Issue(domain string) (*tls.Certificate, error) {
 		Certificate: append([][]byte{der}, ca.caChain...),
 		PrivateKey:  key,
 		Leaf:        leaf,
+	}
+	if !persist {
+		return cert, nil
 	}
 	if err := ca.store.Save(domain, cert); err != nil {
 		return nil, fmt.Errorf("saving issued cert: %w", err)

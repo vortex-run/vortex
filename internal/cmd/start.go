@@ -1265,11 +1265,33 @@ func buildTLSManager(cfg *config.Config, log *slog.Logger) (*vtls.Manager, error
 		StorePath:  storePath,
 		StoreKey:   storeKey,
 		MinVersion: cfg.TLS.MinVersion,
+		Hosts:      tlsRouteHosts(cfg, log),
 		ACME: vtls.ACMEConfig{
 			Email:   cfg.TLS.ACMEEmail,
 			Staging: false,
 		},
 	})
+}
+
+// tlsRouteHosts returns the hosts of the TLS-bearing routes, which bound what
+// the TLS manager will issue or order certificates for. It returns nil
+// (unrestricted) when any https/h3 route has no host, because that route
+// serves every name.
+func tlsRouteHosts(cfg *config.Config, log *slog.Logger) []string {
+	var hosts []string
+	for _, r := range cfg.Routes {
+		if r.Protocol != "https" && r.Protocol != "h3" {
+			continue
+		}
+		if strings.TrimSpace(r.Host) == "" {
+			if cfg.TLS.Provider == "letsencrypt" || cfg.TLS.Provider == "zerossl" {
+				log.Warn("a TLS route has no host, so ACME will order certificates for any name a client sends; set host on every https/h3 route to restrict it", "route", r.Name)
+			}
+			return nil
+		}
+		hosts = append(hosts, r.Host)
+	}
+	return hosts
 }
 
 // needsTLS reports whether any route uses a TLS-bearing protocol.
