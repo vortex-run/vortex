@@ -67,7 +67,9 @@ routes: [
 ```
 
 Protocols: `http`, `https`, `tcp`, `udp`, `h3` (HTTP/3 over QUIC). Set
-`mtls: true` to require a client certificate from the cluster CA.
+`mtls: true` to require a client certificate from the cluster CA. It applies to
+`tcp`, `https` and `h3` routes; a plain `http` or `udp` route with `mtls: true`
+fails to start, as does any mTLS route when no cluster mTLS config is available.
 
 ### security
 

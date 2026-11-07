@@ -6,6 +6,7 @@ package proxy
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -179,6 +180,9 @@ func (m *Manager) buildUDP(rc config.Route) (*route, error) {
 	if len(rc.Backends) == 0 {
 		return nil, errors.New("udp route requires a backend")
 	}
+	if rc.MTLS {
+		return nil, fmt.Errorf("route %q: mtls:true is not supported on udp routes", rc.Name)
+	}
 	ln, err := proxyudp.NewListener(proxyudp.UDPListenerConfig{
 		ListenAddr:  m.listenAddr(rc.Listen),
 		BackendAddr: backendHostPort(rc.Backends[0]),
@@ -244,7 +248,13 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 		if m.cfg.TLS == nil {
 			return nil, errors.New("https route requires a TLS manager")
 		}
-		srvCfg.TLSConfig = m.cfg.TLS.TLSConfig()
+		tc, err := m.l7TLSConfig(rc)
+		if err != nil {
+			return nil, err
+		}
+		srvCfg.TLSConfig = tc
+	} else if rc.MTLS {
+		return nil, fmt.Errorf("route %q: mtls:true needs protocol https, h3 or tcp (plain http cannot verify client certificates)", rc.Name)
 	}
 	srv := proxyhttp.NewServer(srvCfg)
 
@@ -260,6 +270,24 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 			return s.ActiveConns, s.TotalReqs
 		},
 	}, nil
+}
+
+// l7TLSConfig returns the edge TLS config for an https/h3 route. With
+// mtls:true it also requires and verifies a cluster client certificate, the
+// same check a tcp route applies; before audit F-10 the flag was silently
+// ignored on L7 routes. VerifyConnection runs on resumed sessions too.
+func (m *Manager) l7TLSConfig(rc config.Route) (*tls.Config, error) {
+	cfg := m.cfg.TLS.TLSConfig()
+	if !rc.MTLS {
+		return cfg, nil
+	}
+	if m.cfg.MTLSConfig == nil {
+		return nil, fmt.Errorf("route %q has mtls:true but no mTLS config was provided", rc.Name)
+	}
+	mt := m.cfg.MTLSConfig.ServerTLSConfig()
+	cfg.ClientAuth = mt.ClientAuth
+	cfg.VerifyConnection = mt.VerifyConnection
+	return cfg, nil
 }
 
 // buildHookChain loads the plugins declared on rc from the registry into the
@@ -395,9 +423,13 @@ func (m *Manager) buildH3(rc config.Route) (*route, error) {
 	if m.cfg.PolicyEngine != nil {
 		pol = routePolicyMiddleware(m.cfg.PolicyEngine, rc.Name)
 	}
+	tlsCfg, err := m.l7TLSConfig(rc)
+	if err != nil {
+		return nil, err
+	}
 	ds, err := proxyquic.NewDualStack(proxyquic.DualStackConfig{
 		Addr:      m.listenAddr(rc.Listen),
-		TLSConfig: m.cfg.TLS.TLSConfig(),
+		TLSConfig: tlsCfg,
 		Router:    router,
 		Middleware: func(next http.Handler) http.Handler {
 			return proxyhttp.Chain(next, edge, obs, pol)
