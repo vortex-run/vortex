@@ -21,7 +21,7 @@ type denyHook struct{ calls *atomic.Int64 }
 
 func (d denyHook) Name() string           { return "deny-all" }
 func (d denyHook) Type() plugins.HookType { return plugins.HookPreRequest }
-func (d denyHook) Execute(ctx context.Context, in plugins.HookInput) (plugins.HookOutput, error) {
+func (d denyHook) Execute(_ context.Context, _ plugins.HookInput) (plugins.HookOutput, error) {
 	d.calls.Add(1)
 	return plugins.HookOutput{Allow: false}, nil
 }

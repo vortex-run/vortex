@@ -2,8 +2,8 @@ package messaging
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,7 +225,7 @@ func TestBedrockSignV4_MatchesAWSSDK(t *testing.T) {
 // /openai/deployments/x/../../../openai/deployments/other/... with api-key set.
 func TestCompleteForModel_RejectsURLShapingModelNames(t *testing.T) {
 	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}`)
 	}))

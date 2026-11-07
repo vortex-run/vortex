@@ -186,7 +186,7 @@ func (s *SlackBot) HandleSlashCommand(runtime *agents.Runtime) http.Handler {
 		case have < need:
 			slog.Warn("slack: command refused for unregistered or read-only user",
 				"team", teamID, "user", userID, "command", sub)
-			ack = s.refusal(teamID, userID, have)
+			ack = s.refusal(have)
 		default:
 			// Acknowledge immediately (Slack requires a fast 200).
 			ack = s.handleSub(r.Context(), runtime, session, sub, args)
@@ -230,7 +230,7 @@ func (s *SlackBot) whoami(teamID, userID string, have SlackAccess) string {
 }
 
 // refusal explains why a command was refused.
-func (s *SlackBot) refusal(teamID, userID string, have SlackAccess) string {
+func (s *SlackBot) refusal(have SlackAccess) string {
 	if have == SlackReadOnly {
 		return "You have read-only access: status, logs and help only."
 	}

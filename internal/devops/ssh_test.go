@@ -333,8 +333,8 @@ func TestSSH_KnownHostsMissingFile(t *testing.T) {
 // refused. Before the fix every key was accepted on every connection.
 func TestSSH_TOFUPinsAndRefusesChangedKey(t *testing.T) {
 	store := filepath.Join(t.TempDir(), "ssh_known_hosts")
-	real := newTestSSHServer(t, echoHandler)
-	host, port, _ := net.SplitHostPort(real.addr)
+	srvReal := newTestSSHServer(t, echoHandler)
+	host, port, _ := net.SplitHostPort(srvReal.addr)
 	connect := func() error {
 		c, err := NewSSHClient(SSHConfig{Host: host, Port: atoi(port), User: "u", Password: "secret",
 			Timeout: 5 * time.Second, TOFUStore: store})

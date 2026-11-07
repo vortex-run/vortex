@@ -43,8 +43,13 @@ func TestCodeServer_PasswordModeLoginAndProxy(t *testing.T) {
 	host := strings.TrimPrefix(srv.URL, "http://")
 
 	// Direct access to the port, as another local process would try.
-	if resp, err := http.Get(srv.URL + "/"); err != nil || resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("raw port without session: %v %v, want 401", resp, err)
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("raw port without session: status %d, want 401", resp.StatusCode)
 	}
 
 	cs := &CodeServer{log: discardLogger(), addr: host, password: pw}
@@ -59,7 +64,7 @@ func TestCodeServer_PasswordModeLoginAndProxy(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, front.URL+"/", nil)
 	// A client trying to choose the session, plus an unrelated cookie.
 	req.Header.Set("Cookie", "code-server-session=attacker; theme=dark")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
