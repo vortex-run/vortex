@@ -84,6 +84,11 @@ gubern verify                # does this binary match its release?
 - **"checksums signature verification failed"**: the signature does not match
   the pinned key. Treat the release as suspect and report it. See
   [SECURITY.md](../SECURITY.md).
+- **"Latest release ... is not newer than this binary"**: the latest release
+  is older than or equal to what you run. If you really mean to go back, pass
+  `--allow-downgrade`.
+- **"release vX contains a vY binary"**: the archive is a different release
+  than its tag claims (a replayed old release). Treat it as suspect.
 - **Windows: "a previous update's gubern.exe.old is still in use"**: an older
   Gubern process from the last update is still running. Stop it
   (`gubern stop`, or end it in Task Manager) and run `gubern self-update`

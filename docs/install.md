@@ -89,7 +89,10 @@ gubern verify
 ```
 
 `gubern self-update` performs the same signature check automatically before
-replacing the binary, then runs the new binary's `version` command and puts
+replacing the binary. It takes the archive's checksum from the same verified
+`checksums.txt` bytes, installs only a release newer than the running binary
+(`--allow-downgrade` overrides this), and refuses an archive whose binary reports
+a different version than the release tag. It then runs the new binary's `version` command and puts
 the old one back if that fails. On Windows the running `gubern.exe` is moved
 aside to `vortex.exe.old` (Windows can rename a running program but not
 overwrite it) and removed on a later run; a server that is running keeps the

@@ -119,30 +119,11 @@ func fetchRelease(ctx context.Context, url string) (*Release, error) {
 	return rel, nil
 }
 
-// FetchChecksums downloads and parses the release's checksums.txt, returning a
-// map of filename → SHA-256 hex.
+// FetchChecksums returns the release's checksums, signature-verified when a
+// key is pinned. It is VerifiedChecksums: there is deliberately no way to get
+// an unverified checksum map for an install or verify decision (audit F-12).
 func FetchChecksums(ctx context.Context, release *Release) (map[string]string, error) {
-	asset := findAsset(release, "checksums.txt")
-	if asset == nil {
-		return nil, errors.New("release has no checksums.txt asset")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	resp, err := httpGet(ctx, asset.DownloadURL)
-	if err != nil {
-		return nil, fmt.Errorf("downloading checksums.txt: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("checksums.txt download returned %s", resp.Status)
-	}
-	// Bounded: fetched before verification is possible (see limits.go).
-	b, err := readLimited(resp.Body, maxMetadataBytes, "checksums.txt")
-	if err != nil {
-		return nil, err
-	}
-	return ParseChecksums(string(b)), nil
+	return VerifiedChecksums(ctx, release)
 }
 
 // ParseChecksums turns "<hex>  <filename>" lines into a filename→hash map.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ReleaseSigningPublicKey is the Ed25519 public key (base64, 32 bytes) that
@@ -76,6 +77,48 @@ func VerifyChecksumsSignature(ctx context.Context, release *Release) error {
 		return ErrBadSignature
 	}
 	return nil
+}
+
+// VerifiedChecksums downloads checksums.txt ONCE, verifies the Ed25519
+// signature over exactly those bytes when a key is pinned, and parses the
+// filename→SHA-256 map from the same verified buffer. The hash that gates an
+// install must come from the authenticated bytes: verifying one download and
+// parsing a second let a host that changes the file between requests get an
+// unsigned archive installed (audit F-12). With no pinned key it is
+// integrity-only, as before.
+func VerifiedChecksums(ctx context.Context, release *Release) (map[string]string, error) {
+	sums := findAsset(release, "checksums.txt")
+	if sums == nil {
+		return nil, errors.New("release has no checksums.txt asset")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	sumsBytes, err := fetchBytes(ctx, sums.DownloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("update: downloading checksums.txt: %w", err)
+	}
+	if signingEnabled() {
+		pub, err := decodeSigningKey(ReleaseSigningPublicKey)
+		if err != nil {
+			return nil, err
+		}
+		sig := findAsset(release, "checksums.txt.sig")
+		if sig == nil {
+			return nil, ErrNoSignature
+		}
+		sigBytes, err := fetchBytes(ctx, sig.DownloadURL)
+		if err != nil {
+			return nil, fmt.Errorf("update: downloading checksums.txt.sig: %w", err)
+		}
+		rawSig, err := decodeSignature(sigBytes)
+		if err != nil {
+			return nil, err
+		}
+		if !ed25519.Verify(pub, sumsBytes, rawSig) {
+			return nil, ErrBadSignature
+		}
+	}
+	return ParseChecksums(string(sumsBytes)), nil
 }
 
 // decodeSigningKey parses the pinned base64 Ed25519 public key.
