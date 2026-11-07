@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -215,5 +216,41 @@ func TestBedrockSignV4_MatchesAWSSDK(t *testing.T) {
 		"Signature=61a51f669f5ee956d13ed8eb6de82ed460c39b4aabe04ffb5ff922e61f4c94a4"
 	if h["Authorization"] != want {
 		t.Errorf("Authorization =\n%s\nwant\n%s", h["Authorization"], want)
+	}
+}
+
+// Audit F-13: a /v1 caller's model string must not reshape the
+// operator-credentialed provider URL (path traversal to another deployment,
+// query/fragment injection). Before the fix the Azure fixture received
+// /openai/deployments/x/../../../openai/deployments/other/... with api-key set.
+func TestCompleteForModel_RejectsURLShapingModelNames(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":1}}`)
+	}))
+	defer srv.Close()
+	g, _ := NewAIGateway(AIGatewayConfig{
+		Providers: []AIProvider{{Name: ProviderAzureOpenAI, APIKey: "az-key", Endpoint: srv.URL, Models: []string{"my-deployment"}}},
+		Client:    srv.Client(),
+	})
+	for _, m := range []string{
+		"x/../../../openai/deployments/other/images/generations",
+		"..", "dep?api-version=evil", "dep#frag", "dep%2F..", "a b",
+	} {
+		if _, _, err := g.CompleteForModel(context.Background(), m, "hi", "sys"); !errors.Is(err, ErrInvalidModel) {
+			t.Errorf("CompleteForModel(%q) err = %v, want ErrInvalidModel", m, err)
+		}
+		if _, _, err := g.CompleteStreamForModel(context.Background(), m, "hi", "sys", nil); !errors.Is(err, ErrInvalidModel) {
+			t.Errorf("CompleteStreamForModel(%q) err = %v, want ErrInvalidModel", m, err)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("provider was called %d times for rejected model names", hits)
+	}
+	for _, ok := range []string{"gpt-4o", "claude-3-5-sonnet-20241022", "gemini-1.5-flash", "llama3.1:8b", "my_deployment"} {
+		if !validModelName(ok) {
+			t.Errorf("validModelName(%q) = false, want true", ok)
+		}
 	}
 }

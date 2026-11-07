@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -398,7 +400,7 @@ func (g *AIGateway) callGemini(ctx context.Context, p AIProvider, prompt, system
 	if model == "" {
 		model = "gemini-1.5-flash"
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, model)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", base, neturl.PathEscape(model))
 
 	var out struct {
 		Candidates []struct {
@@ -777,9 +779,37 @@ func (g *AIGateway) ModelIDs() []string {
 // providers: the caller asked for a specific model, so a failure surfaces
 // rather than silently answering with a different one. Returns the text and
 // the provider-reported token count.
+// ErrInvalidModel is returned for a caller-supplied model name that could
+// reshape the provider request URL.
+var ErrInvalidModel = errors.New("messaging: invalid model name")
+
+// validModelName reports whether a caller-supplied model is a single plain
+// identifier. The /v1 API passes any key holder's model string into the
+// Azure deployment and Gemini model URL paths; '/', '..', '?', '#' or '%'
+// would let it retarget the operator-credentialed request to another
+// deployment or endpoint (audit F-13). Real model IDs fit this set
+// (gpt-4o, claude-3-5-sonnet-20241022, gemini-1.5-flash, llama3.1:8b,
+// accounts/fireworks/... are configured, not passed through).
+func validModelName(m string) bool {
+	if m == "" || len(m) > 128 || m == "." || m == ".." {
+		return false
+	}
+	for _, c := range m {
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '.' || c == '_' || c == ':' || c == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (g *AIGateway) CompleteForModel(ctx context.Context, model, prompt, systemPrompt string) (string, int, error) {
 	if g.budgetExceeded() {
 		return "", 0, ErrBudgetExceeded
+	}
+	if model != "" && !validModelName(model) {
+		return "", 0, fmt.Errorf("%w: %q", ErrInvalidModel, model)
 	}
 	p, ok := g.providerForModel(model)
 	if !ok {

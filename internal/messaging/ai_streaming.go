@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 )
@@ -42,6 +43,9 @@ const maxStreamDuration = 10 * time.Minute
 func (g *AIGateway) CompleteStreamForModel(ctx context.Context, model, prompt, systemPrompt string, onDelta func(string)) (string, int, error) {
 	if g.budgetExceeded() {
 		return "", 0, ErrBudgetExceeded
+	}
+	if model != "" && !validModelName(model) {
+		return "", 0, fmt.Errorf("%w: %q", ErrInvalidModel, model)
 	}
 	p, ok := g.providerForModel(model)
 	if !ok {
@@ -395,7 +399,7 @@ func openaiStreamTarget(p AIProvider, model string) (url string, headers map[str
 			return "", nil, "", false, fmt.Errorf("azure-openai: deployment name required")
 		}
 		u := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=2024-02-01",
-			strings.TrimRight(p.Endpoint, "/"), model)
+			strings.TrimRight(p.Endpoint, "/"), neturl.PathEscape(model))
 		return u, map[string]string{"api-key": p.APIKey}, "azure-openai", false, nil
 	}
 	return "", nil, "", false, fmt.Errorf("messaging: %q is not an OpenAI-compatible provider", p.Name)
@@ -454,7 +458,7 @@ func (g *AIGateway) streamGemini(ctx context.Context, p AIProvider, prompt, syst
 	if model == "" {
 		model = "gemini-1.5-flash"
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", base, model)
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", base, neturl.PathEscape(model))
 	payload := map[string]any{
 		"contents": []map[string]any{
 			{"parts": []map[string]any{{"text": prompt}}},

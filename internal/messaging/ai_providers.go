@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -91,7 +92,7 @@ func (g *AIGateway) callAzureOpenAI(ctx context.Context, p AIProvider, prompt, s
 		return "", 0, fmt.Errorf("azure-openai: deployment name required")
 	}
 	url := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=2024-02-01",
-		strings.TrimRight(p.Endpoint, "/"), deployment)
+		strings.TrimRight(p.Endpoint, "/"), neturl.PathEscape(deployment))
 
 	var out struct {
 		Choices []struct {

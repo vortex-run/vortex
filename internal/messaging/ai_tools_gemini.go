@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"strings"
 )
 
@@ -131,7 +132,7 @@ func (g *AIGateway) toolsGemini(ctx context.Context, p AIProvider, model, system
 			TotalTokenCount int `json:"totalTokenCount"`
 		} `json:"usageMetadata"`
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", strings.TrimRight(base, "/"), model)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", strings.TrimRight(base, "/"), neturl.PathEscape(model))
 	if _, err := g.doJSON(ctx, url, geminiHeaders(p), payload, &out); err != nil {
 		return ToolChatResult{}, fmt.Errorf("gemini: %w", err)
 	}
