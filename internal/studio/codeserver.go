@@ -11,6 +11,8 @@ package studio
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,7 +24,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,9 +68,18 @@ type CodeServer struct {
 	addr      string // 127.0.0.1:<port>, when socket is empty
 	socket    string // Unix socket path
 	socketDir string // removed on Stop
+	// password is code-server's per-launch random password, used only in TCP
+	// mode (Windows). A loopback port, unlike a 0700 socket directory, is
+	// reachable by every local account and process, so --auth none there
+	// handed any of them an editor and terminal as this user (audit NV-02).
+	password string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
+
+	// session holds the cookies from Gubern's own login to code-server; the
+	// proxy attaches them so Studio users never see code-server's prompt.
+	session atomic.Pointer[[]*http.Cookie]
 }
 
 // resolveBinary returns the code-server binary path, probing common locations
@@ -127,6 +140,11 @@ func (c *CodeServer) Start(ctx context.Context) error {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, c.cfg.BinaryPath, c.args()...)
+	if c.password != "" {
+		// code-server reads its password from $PASSWORD; it never appears on
+		// the command line, where other local users could read it.
+		cmd.Env = append(os.Environ(), "PASSWORD="+c.password)
+	}
 	cmd.Stdout = logWriter{c.log, "code-server"}
 	cmd.Stderr = logWriter{c.log, "code-server"}
 	if err := cmd.Start(); err != nil {
@@ -138,6 +156,14 @@ func (c *CodeServer) Start(ctx context.Context) error {
 	if err := c.waitReady(10 * time.Second); err != nil {
 		_ = c.stopLocked()
 		return fmt.Errorf("studio: code-server did not become ready: %w", err)
+	}
+	if c.password != "" {
+		cookies, err := c.login(ctx)
+		if err != nil {
+			_ = c.stopLocked()
+			return fmt.Errorf("studio: logging in to code-server: %w", err)
+		}
+		c.session.Store(&cookies)
 	}
 	c.log.Info("code-server started", "listen", c.listenDesc(), "workspace", c.cfg.WorkspaceDir)
 	return nil
@@ -155,6 +181,11 @@ func (c *CodeServer) chooseListener() error {
 		c.socket = filepath.Join(dir, "code-server.sock")
 		return nil
 	}
+	pw := make([]byte, 32)
+	if _, err := rand.Read(pw); err != nil {
+		return fmt.Errorf("studio: generating code-server password: %w", err)
+	}
+	c.password = hex.EncodeToString(pw)
 	port := c.cfg.Port
 	if port == 0 {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -176,7 +207,11 @@ func (c *CodeServer) args() []string {
 	} else {
 		args = []string{"--bind-addr", c.addr}
 	}
-	args = append(args, "--auth", "none")
+	if c.password != "" {
+		args = append(args, "--auth", "password")
+	} else {
+		args = append(args, "--auth", "none") // private 0700 socket dir
+	}
 	if c.cfg.DataDir != "" {
 		args = append(args, "--user-data-dir", c.cfg.DataDir)
 	}
@@ -237,8 +272,61 @@ func (c *CodeServer) stopLocked() error {
 		_ = proc.Kill()
 	}
 	c.cmd = nil
+	c.session.Store(nil)
 	c.removeSocketDir()
 	return nil
+}
+
+// login signs in to code-server with the per-launch password and returns the
+// session cookies it sets. It does not follow the post-login redirect.
+func (c *CodeServer) login(ctx context.Context) ([]*http.Cookie, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return c.dial(ctx)
+		}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	form := url.Values{"password": {c.password}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://code-server/login", strings.NewReader(form))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	cookies := resp.Cookies()
+	if resp.StatusCode >= 400 || len(cookies) == 0 {
+		return nil, fmt.Errorf("login returned %s with %d cookie(s)", resp.Status, len(cookies))
+	}
+	return cookies, nil
+}
+
+// withSession replaces any client cookies that share a name with Gubern's
+// code-server session cookies (so a client cannot pick the session) and adds
+// Gubern's own.
+func withSession(h http.Header, session []*http.Cookie) {
+	ours := map[string]bool{}
+	for _, ck := range session {
+		ours[ck.Name] = true
+	}
+	r := &http.Request{Header: http.Header{"Cookie": h.Values("Cookie")}}
+	var parts []string
+	for _, ck := range r.Cookies() {
+		if !ours[ck.Name] {
+			parts = append(parts, ck.Name+"="+ck.Value)
+		}
+	}
+	for _, ck := range session {
+		parts = append(parts, ck.Name+"="+ck.Value)
+	}
+	h.Del("Cookie")
+	if len(parts) > 0 {
+		h.Set("Cookie", strings.Join(parts, "; "))
+	}
 }
 
 // IsRunning reports whether the subprocess is currently running.
@@ -264,6 +352,9 @@ func (c *CodeServer) ProxyHandler() http.Handler {
 		// extensions').
 		pr.Out.Header.Del("Authorization")
 		pr.Out.Header.Del("X-API-Key")
+		if s := c.session.Load(); s != nil {
+			withSession(pr.Out.Header, *s)
+		}
 	}}
 	// No Proxy field: HTTP_PROXY must not apply to a local backend.
 	proxy.Transport = &http.Transport{

@@ -177,7 +177,9 @@ func TestCodeServer_WindowsPicksFreePort(t *testing.T) {
 	if !strings.HasPrefix(cs.addr, "127.0.0.1:") || cs.addr == "127.0.0.1:8080" {
 		t.Errorf("addr = %q, want a free 127.0.0.1 port", cs.addr)
 	}
-	if args := strings.Join(cs.args(), " "); !strings.HasPrefix(args, "--bind-addr "+cs.addr+" --auth none") {
+	// A loopback port is reachable by every local account: password auth,
+	// never --auth none (audit NV-02).
+	if args := strings.Join(cs.args(), " "); !strings.HasPrefix(args, "--bind-addr "+cs.addr+" --auth password") || len(cs.password) != 64 {
 		t.Errorf("args = %q", args)
 	}
 }
