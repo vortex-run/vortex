@@ -221,6 +221,7 @@ func (m *Manager) buildHTTP(rc config.Route, useTLS bool) (*route, error) {
 		TCPPool:     m.cfg.TCPPool,
 		Sticky:      proxygateway.NewStickySession(),
 		WSBackends:  routeToHTTPBackends(rc.Backends),
+		PreUpgrade:  handler.AllowUpgrade,
 	})
 	if err != nil {
 		return nil, err

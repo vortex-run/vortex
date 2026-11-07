@@ -23,6 +23,11 @@ type GatewayConfig struct {
 	// WSBackends are the upstreams for WebSocket routing. When empty, WebSocket
 	// upgrades fall through to HTTPHandler (which returns its WS stub).
 	WSBackends []proxyhttp.BackendAddr
+	// PreUpgrade, when set, runs before a WebSocket upgrade is dialed and
+	// returns false (after writing the response) to refuse it. buildHTTP
+	// passes the route handler's plugin pre-request check so plugin denies
+	// cover upgrades as well as plain HTTP (audit F-09).
+	PreUpgrade func(http.ResponseWriter, *http.Request) bool
 }
 
 // GatewayStats counts requests dispatched by protocol.
@@ -40,6 +45,7 @@ type Gateway struct {
 	pool        *tcp.Pool
 	sticky      *StickySession
 	wsBalancer  proxyhttp.Balancer
+	preUpgrade  func(http.ResponseWriter, *http.Request) bool
 
 	wsConns  atomic.Int64
 	grpcReqs atomic.Int64
@@ -56,6 +62,7 @@ func NewGateway(cfg GatewayConfig) (*Gateway, error) {
 		grpcProxy:   cfg.GRPCProxy,
 		pool:        cfg.TCPPool,
 		sticky:      cfg.Sticky,
+		preUpgrade:  cfg.PreUpgrade,
 	}
 	if len(cfg.WSBackends) > 0 {
 		rr, err := proxyhttp.NewRoundRobinBalancer(cfg.WSBackends)
@@ -84,6 +91,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // serveWebSocket routes a WebSocket upgrade to a backend, honouring stickiness
 // so a client IP keeps using the same backend across reconnects.
 func (g *Gateway) serveWebSocket(w http.ResponseWriter, req *http.Request) {
+	if g.preUpgrade != nil && !g.preUpgrade(w, req) {
+		return
+	}
 	ip := clientIP(req.RemoteAddr)
 
 	backend := ""
