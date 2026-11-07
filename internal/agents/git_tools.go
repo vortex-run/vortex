@@ -21,7 +21,11 @@ const gitTimeout = 30 * time.Second
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", args...)
+	// core.fsmonitor names a program git runs on status/diff/add. A repo
+	// config written by the model must not turn the approval-free read tools
+	// into command execution (audit F-05 defense in depth).
+	full := append([]string{"-c", "core.fsmonitor=false"}, args...)
+	cmd := exec.CommandContext(cctx, "git", full...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -116,7 +120,9 @@ func (GitDiffTool) Description() string { return "Show git diff" }
 
 // Execute runs `git diff [file]`.
 func (t GitDiffTool) Execute(ctx context.Context, params map[string]any) (any, error) {
-	args := []string{"diff"}
+	// No external diff drivers or textconv filters: both run programs named
+	// in repo config / .gitattributes.
+	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
 	if file, _ := params["file"].(string); file != "" {
 		args = append(args, "--", file)
 	}

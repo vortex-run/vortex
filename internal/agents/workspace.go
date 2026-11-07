@@ -166,13 +166,43 @@ func autoModeSensitive(trustedRoot, resolved string) bool {
 	if !ok {
 		return true
 	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return sensitiveParts(strings.Split(filepath.ToSlash(rel), "/"))
+}
+
+// sensitiveParts reports whether a path, split into components, names a hook
+// directory anywhere or ends in gubern.cue / vortex.cue.
+func sensitiveParts(parts []string) bool {
 	for i, part := range parts {
 		// Windows ignores trailing dots and spaces, and ".git::$INDEX_ALLOCATION"
 		// names the .git directory itself.
 		part, _, _ = strings.Cut(part, ":")
 		part = strings.ToLower(strings.TrimRight(part, ". "))
 		if autoModeSensitiveDirs[part] || (i == len(parts)-1 && (part == "gubern.cue" || part == "vortex.cue")) {
+			return true
+		}
+	}
+	return false
+}
+
+// needsApproval is the single approval decision for mutating local tools.
+// toolRequires is the tool's own RequireApproval; Auto Mode may waive it for
+// routine in-scope paths. Independently, GateSensitive (set for the approval-
+// free team specialists) keeps a prompt on paths that run as code on a later
+// action — .git (config, hooks), hook dirs, gubern.cue — so a specialist
+// cannot plant core.fsmonitor or a hook that git then executes with no shell
+// approval (audit F-05).
+func (cfg LocalFSConfig) needsApproval(toolRequires bool, abs string) bool {
+	if toolRequires && !cfg.waivesApproval(abs) {
+		return true
+	}
+	return cfg.GateSensitive && pathIsSensitive(abs)
+}
+
+// pathIsSensitive checks every component of abs, both as written and with
+// existing symlinks resolved, so a link into .git counts as .git.
+func pathIsSensitive(abs string) bool {
+	for _, p := range []string{abs, resolveExistingPrefix(abs)} {
+		if sensitiveParts(strings.Split(filepath.ToSlash(filepath.Clean(p)), "/")) {
 			return true
 		}
 	}
