@@ -29,9 +29,20 @@ func localhostOnly(r *http.Request) bool {
 // loopback host and not be a cross-site browser request. The CLI (no Origin
 // or Sec-Fetch-* headers, Host 127.0.0.1) and the dashboard opened at
 // localhost (same-origin) still qualify; anything else needs a key.
+//
+// A request relayed by a reverse proxy on this machine also arrives from
+// loopback, with whatever Host the remote client chose. Gubern's own edge
+// always adds forwarding headers, which a relaying client cannot strip (it
+// can only add them, which only lowers its trust), so their presence means
+// the caller is not on the box (audit F-06).
 func loopbackTrusted(r *http.Request) bool {
 	if !localhostOnly(r) || !loopbackHost(r.Host) {
 		return false
+	}
+	for _, h := range relayHeaders {
+		if _, ok := r.Header[h]; ok {
+			return false
+		}
 	}
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "", "same-origin", "none":
@@ -45,6 +56,12 @@ func loopbackTrusted(r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// relayHeaders mark a request forwarded by a proxy (canonical header keys).
+var relayHeaders = []string{
+	"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+	"Forwarded", "X-Real-Ip", "X-Vortex-Client-Ip",
 }
 
 // loopbackHost reports whether a Host header value (host or host:port) names
