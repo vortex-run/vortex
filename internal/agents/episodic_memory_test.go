@@ -186,7 +186,7 @@ func TestCoordinatorRecallsMemoriesIntoPrompt(t *testing.T) {
 	c.SetEpisodicStore(store)
 	if err := store.Store(Episode{
 		Content: "User prefers Python over JavaScript", Importance: 0.9,
-		Tags: []string{"python"},
+		Tags: []string{"python"}, SessionID: "s1",
 	}); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
@@ -202,5 +202,34 @@ func TestCoordinatorRecallsMemoriesIntoPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Error("recalled memory not included in system prompt")
+	}
+}
+
+// Audit F-04: a fact mined from one principal's session must never be
+// recalled into another principal's prompt.
+func TestCoordinatorRecallIsScopedToSession(t *testing.T) {
+	gw := &skillCapturingGateway{}
+	c := newTestCoordinator(t, gw)
+	store := newTestEpisodicStore(t)
+	c.SetEpisodicStore(store)
+	if err := store.Store(Episode{
+		Content: "staging mirror password is DUMMY-TOK-777", Importance: 0.9,
+		SessionID: "telegram:4242",
+	}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if _, err := c.HandleMessage(context.Background(), "what is the staging mirror password", "whatsapp:+15559999"); err != nil {
+		t.Fatalf("HandleMessage: %v", err)
+	}
+	for _, p := range gw.prompts() {
+		if strings.Contains(p, "DUMMY-TOK-777") {
+			t.Fatalf("another session's episode leaked into the prompt: %s", p)
+		}
+	}
+	if got, _ := store.RecallSession("", "staging", 5); len(got) != 0 {
+		t.Errorf("empty session must recall nothing, got %d", len(got))
+	}
+	if got, _ := store.RecallSession("telegram:4242", "staging", 5); len(got) != 1 {
+		t.Errorf("own session recall = %d, want 1", len(got))
 	}
 }
